@@ -1,37 +1,42 @@
-linux-*
-bash-*
-grep-*
-nano-*
-ncurses-*
-sed-*
-gawk-*
-grub*
-
+# --- Build Output & ISO ---
 GeminiOS.iso
-init
-project_export.txt
-snake
-packages/
-.env
-testdisk.qcow2
+rootfs/
+isodir/
 
+# --- Compiled Binaries & Objects ---
+# The main init process
+init
+# C++ Object files
+src/*.o
+# Specific package binaries that might be built locally
+*.gpkg
+
+# --- External Dependencies (Downloaded by build.sh) ---
+# Do not commit the massive kernel/gnu source trees
+linux-*/
+bash-*/
+grep-*/
+nano-*/
+ncurses-*/
+sed-*/
+gawk-*/
+grub*/
+grub_cache/
+
+# --- Archives ---
 *.tar.gz
 *.tar.xz
 *.zip
 
+# --- Virtual Machine Disks ---
 *.qcow2
 *.img
 *.vdi
 *.vmdk
 
+# --- OS & IDE Metadata ---
 .DS_Store
 Thumbs.db
 
+# --- Context Exports ---
 project_export.txt
-rootfs/
-isodir/
-rootfs/*
-isodir/*
-
-packages/user/*.gpkg
-*.gpkg
