@@ -417,14 +417,21 @@ int main(int argc, char* argv[]) {
 
     // Groups
     std::vector<Group> new_groups;
-    Group g_root = {"root", "x", 0, {"root"}};
-    Group g_user = {cfg.username, "x", 1000, {cfg.username}};
+    
+    Group g_root;
+    g_root.name = "root"; g_root.password = "x"; g_root.gid = 0; g_root.members = {"root"};
+
+    Group g_sudo;
+    g_sudo.name = "sudo"; g_sudo.password = "x"; g_sudo.gid = 27; g_sudo.members = {"root", cfg.username};
+
+    Group g_user;
+    g_user.name = cfg.username; g_user.password = "x"; g_user.gid = 1000; g_user.members = {cfg.username};
+
     new_groups.push_back(g_root);
+    new_groups.push_back(g_sudo);
     new_groups.push_back(g_user);
 
-    // We need to write these to /mnt/target/etc/passwd
-    // We can't use UserMgmt directly easily because it writes to /etc/.
-    // We will manually write the files.
+    // Write /etc/passwd
     
     std::ofstream passwd("/mnt/target/etc/passwd");
     for(auto& usr : new_users) {
@@ -442,12 +449,19 @@ int main(int argc, char* argv[]) {
 
     std::ofstream group("/mnt/target/etc/group");
     for(auto& grp : new_groups) {
-        group << grp.name << ":x:" << grp.gid << ":\n";
+        group << grp.name << ":x:" << grp.gid << ":";
+        for(size_t i = 0; i < grp.members.size(); ++i) {
+            group << grp.members[i] << (i == grp.members.size() - 1 ? "" : ",");
+        }
+        group << "\n";
     }
     group.close();
 
     // Create Home Dir
     mkdir(("/mnt/target/home/" + cfg.username).c_str(), 0700);
+    if (chown(("/mnt/target/home/" + cfg.username).c_str(), 1000, 1000) != 0) {
+        perror("chown home");
+    }
 
     // 6. Bootloader
     std::cout << "[5/5] Setting up Bootloader...\n";

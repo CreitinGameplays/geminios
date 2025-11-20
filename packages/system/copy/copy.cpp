@@ -78,7 +78,10 @@ bool copy_file(const std::string& src, const std::string& dst, const CopyOptions
         // Preserve Ownership
         fchown(fd_out, src_st.st_uid, src_st.st_gid);
         
-        // Preserve Timestamps
+        // Preserve Mode (including SUID/SGID) and Timestamps
+        // open() only handles basic permissions masked by umask, so we enforce it here
+        fchmod(fd_out, src_st.st_mode & 07777);
+
         struct timespec times[2];
         times[0] = src_st.st_atim; // Access
         times[1] = src_st.st_mtim; // Modification
