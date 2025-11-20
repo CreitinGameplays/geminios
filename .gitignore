@@ -30,6 +30,8 @@ Thumbs.db
 project_export.txt
 rootfs/
 isodir/
+rootfs/*
+isodir/*
 
 packages/user/*.gpkg
 *.gpkg
