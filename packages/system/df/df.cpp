@@ -22,7 +22,17 @@ std::string format_size(unsigned long long bytes) {
 
 int main(int argc, char* argv[]) {
     bool human = false;
-    if (argc > 1 && std::string(argv[1]) == "-h") human = true;
+    bool all = false;
+    bool inodes = false;
+    bool type = false;
+
+    for (int i=1; i<argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-h") human = true;
+        else if (arg == "-a") all = true;
+        else if (arg == "-i") inodes = true;
+        else if (arg == "-T") type = true;
+    }
 
     std::ifstream mounts("/proc/mounts");
     if (!mounts) {
@@ -31,6 +41,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << std::left << std::setw(20) << "Filesystem"
+              << (type ? std::setw(10) : 0) << (type ? "Type" : "")
               << std::setw(10) << "Size"
               << std::setw(10) << "Used"
               << std::setw(10) << "Avail"
@@ -40,8 +51,10 @@ int main(int argc, char* argv[]) {
     std::string line;
     while (std::getline(mounts, line)) {
         std::stringstream ss(line);
-        std::string device, mountpoint, type, opts;
-        ss >> device >> mountpoint >> type >> opts;
+        std::string device, mountpoint, type_str, opts;
+        ss >> device >> mountpoint >> type_str >> opts;
+
+        if (!all && (type_str == "proc" || type_str == "sysfs" || type_str == "devtmpfs")) continue;
 
         struct statvfs stats;
         if (statvfs(mountpoint.c_str(), &stats) == 0) {
@@ -56,6 +69,8 @@ int main(int argc, char* argv[]) {
             }
 
             std::cout << std::left << std::setw(20) << device;
+            if (type) std::cout << std::setw(10) << type_str;
+
             if (human) {
                 std::cout << std::setw(10) << format_size(total)
                           << std::setw(10) << format_size(used)

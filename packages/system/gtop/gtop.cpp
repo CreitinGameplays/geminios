@@ -25,6 +25,7 @@
 #define CLR_HEADER "\033[30;47m" // Black text on White bg
 
 volatile bool g_running = true;
+std::map<int, std::string> g_user_map;
 
 void handle_sig(int) {
     g_running = false;
@@ -38,12 +39,42 @@ struct ProcSnapshot {
     char state;
     unsigned long long total_time; // utime + stime
     long rss;                      // in pages
+    int uid;
 };
 
 struct SystemSnapshot {
     unsigned long long total_cpu_time;
     std::map<int, ProcSnapshot> processes;
 };
+
+// Load /etc/passwd
+void load_user_map() {
+    std::ifstream f("/etc/passwd");
+    std::string line;
+    while(std::getline(f, line)) {
+        std::stringstream ss(line);
+        std::string segment;
+        std::vector<std::string> parts;
+        while(std::getline(ss, segment, ':')) parts.push_back(segment);
+        if(parts.size() >= 3) {
+            try {
+                g_user_map[std::stoi(parts[2])] = parts[0];
+            } catch(...) {}
+        }
+    }
+}
+
+int get_proc_uid(int pid) {
+    std::ifstream f("/proc/" + std::to_string(pid) + "/status");
+    std::string line;
+    while(std::getline(f, line)) {
+        if(line.find("Uid:") == 0) {
+            std::stringstream ss(line.substr(4));
+            int u; ss >> u; return u;
+        }
+    }
+    return 0;
+}
 
 // Helpers to read /proc
 unsigned long long get_system_cpu_time() {
@@ -88,6 +119,7 @@ std::map<int, ProcSnapshot> get_processes() {
         ProcSnapshot p;
         p.pid = pid;
         p.name = content.substr(content.find('(') + 1, last_paren - content.find('(') - 1);
+        p.uid = get_proc_uid(pid);
 
         std::istringstream iss(content.substr(last_paren + 2));
 
@@ -118,6 +150,7 @@ struct ProcDisplay {
     int pid;
     std::string name;
     char state;
+    std::string user;
     double cpu_usage;
     double mem_usage_mb;
 };
@@ -131,6 +164,7 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, handle_sig);
     long page_size = sysconf(_SC_PAGESIZE);
     int num_procs = get_nprocs();
+    load_user_map();
 
     std::cout << "\033[?25l"; // Hide cursor
 
@@ -158,6 +192,7 @@ int main(int argc, char* argv[]) {
             pd.pid = pid;
             pd.name = curr_proc.name;
             pd.state = curr_proc.state;
+            pd.user = g_user_map.count(curr_proc.uid) ? g_user_map[curr_proc.uid] : std::to_string(curr_proc.uid);
             pd.mem_usage_mb = (curr_proc.rss * page_size) / (1024.0 * 1024.0);
 
             if (prev.processes.count(pid)) {
@@ -200,7 +235,7 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < std::min((int)display_list.size(), row_limit); ++i) {
             const auto& p = display_list[i];
             std::cout << std::left << std::setw(6) << p.pid
-                      << std::setw(10) << "root" // Placeholder
+                      << std::setw(10) << p.user
                       << std::setw(4) << p.state;
 
             if (p.cpu_usage > 50.0)

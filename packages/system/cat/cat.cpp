@@ -10,13 +10,25 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: cat <file>" << std::endl; 
         return 1; 
     }
-    std::string arg = argv[1];
-    if (arg == "--help") { std::cout << "Usage: cat <file>\nConcatenate file to standard output.\n"; return 0; }
-    if (arg == "--version") { std::cout << "cat (" << OS_NAME << ") " << OS_VERSION << std::endl; return 0; }
+    
+    bool number = false;
+    std::string file_path;
+    
+    for(int i=1; i<argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--help") { std::cout << "Usage: cat [-n] <file>\n"; return 0; }
+        else if (arg == "-n") number = true;
+        else file_path = arg;
+    }
 
-    // Default SIGINT handler terminates, which is what we want.
-    std::ifstream file(argv[1], std::ios::binary);
-    if (!file) { std::cerr << "cat: " << argv[1] << ": No such file" << std::endl; return 1; }
-    std::cout << file.rdbuf() << std::endl;
+    std::ifstream file(file_path);
+    if (!file) { std::cerr << "cat: " << file_path << ": No such file" << std::endl; return 1; }
+    
+    std::string line;
+    int lineno = 1;
+    while(std::getline(file, line)) {
+        if(number) std::cout << lineno++ << "\t";
+        std::cout << line << std::endl;
+    }
     return 0;
 }

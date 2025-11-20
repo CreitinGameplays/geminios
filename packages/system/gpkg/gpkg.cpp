@@ -36,6 +36,7 @@ void print_help(const std::string& cmd = "") {
                   << "  list            List downloaded packages\n"
                   << "  download <pkg>  Download without installing\n"
                   << "  search <query>  Search online repository (supports regex)\n"
+                  << "  update          Update package index\n"
                   << "  clean           Remove downloaded .gpkg files\n"
                   << "  help [cmd]      Show help for command\n";
     } else if (cmd == "install") {
@@ -63,7 +64,7 @@ int main(int argc, char* argv[]) {
     std::string action = args[1];
 
     // Enforce Root for system modifications
-    if (action == "install" || action == "remove" || action == "clean" || action == "download") {
+    if (action == "install" || action == "remove" || action == "clean" || action == "download" || action == "update") {
         if (geteuid() != 0) {
             std::cerr << "[ERR] Permission denied. You must run '" << action << "' as root (use sudo)." << std::endl;
             return 1;
@@ -219,6 +220,17 @@ int main(int argc, char* argv[]) {
             if (!found) std::cout << "No matching packages found." << std::endl;
         } else {
             std::cerr << "[ERR] Failed to retrieve package index from server." << std::endl;
+        }
+    }
+    else if (action == "update") {
+        std::cout << "[GPKG] Updating package index..." << std::endl;
+        std::string url = CDN_BASE + INDEX_FILE;
+        std::string dest = REPO_PATH + INDEX_FILE;
+        
+        if (DownloadFile(url, dest)) {
+            std::cout << "[SUCCESS] Package index updated." << std::endl;
+        } else {
+            std::cerr << "[ERR] Failed to update package index." << std::endl;
         }
     }
     else {

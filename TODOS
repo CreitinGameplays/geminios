@@ -29,26 +29,26 @@ And so on... Let's start:
         1 - `<path>`: Directory to list
         1 - `-a`: Show hidden files
         0 - `-A`: do not list implied . and ..
-        0 - `-l`: Long listing format (permissions, size, time)
-        0 - `-h`: Human-readable sizes
-        0 - `-R`: Recursively list subdirectories
-        0 - `-r`: Reverse order
-        0 - `-t`: Sort by time
-        0 - `-S`: Sort by size
+        1 - `-l`: Long listing format (permissions, size, time)
+        1 - `-h`: Human-readable sizes
+        1 - `-R`: Recursively list subdirectories
+        1 - `-r`: Reverse order
+        1 - `-t`: Sort by time
+        1 - `-S`: Sort by size
         0 - `-d`: List directories themselves, not their contents
-        0 - `-F`: Append indicator (one of */=>@|) to entries
+        1 - `-F`: Append indicator (one of */=>@|) to entries
         0 - `-i`: Print the index number of each file
         0 - `-la`: Combined -l and -a
         0 - `-lh`: Combined -l and -h
     1 - `df`: Disk space usage
-        0 - `-h`: Human-readable sizes
-        0 - `-a`: Include all file systems
-        0 - `-i`: List inode information
-        0 - `-T`: Print file system type
-    0 - `ping`: 
-        0 - `<destination>`: The network host to ping
-        0 - `-c <count>`: Stop after sending a specific number of packets
-        0 - `-i <interval>`: Wait interval seconds between sending each packet
+        1 - `-h`: Human-readable sizes
+        1 - `-a`: Include all file systems
+        1 - `-i`: List inode information
+        1 - `-T`: Print file system type
+    1 - `ping`: 
+        1 - `<destination>`: The network host to ping
+        0 - `-c <count>`: Stop after sending a specific number of packets (Partial impl)
+        0 - `-i <interval>`: Wait interval seconds between sending each packet (Partial impl)
     1 - `cd`: Change the shell working directory
         1 - `<path>`: Directory to change to
 
@@ -63,9 +63,9 @@ And so on... Let's start:
 
     1 - `mkdir`: Make directories
         1 - `<path>`: Directory to create
-        0 - `-p`: Create parent directories as needed
-        0 - `-m <mode>`: Set file mode (as in chmod)
-        0 - `-v`: Verbose, print a message for each created directory
+        1 - `-p`: Create parent directories as needed
+        1 - `-m <mode>`: Set file mode (as in chmod)
+        1 - `-v`: Verbose, print a message for each created directory
 
     1 - `touch`: Change file timestamps (or create empty file)
         1 - `<file>`: File to touch
@@ -103,10 +103,10 @@ And so on... Let's start:
         1 - `remove <pkg>`: Remove an installed package
         1 - `list`: List installed/downloaded packages
         1 - `download <pkg>`: Download without installing
-        0 - `search <query>`: Search available packages in remote repo
-        0 - `update`: Resynchronize the package index files from their sources
-        0 - `clean`: Remove downloaded .gpkg files
-        0 - `help`: Show gpkg usage help
+        1 - `search <query>`: Search available packages in remote repo
+        1 - `update`: Resynchronize the package index files from their sources
+        1 - `clean`: Remove downloaded .gpkg files
+        1 - `help`: Show gpkg usage help
 
     1 - `greq`: Gemini Request (curl-like network tool) (support http, https...)
         1 - `<url>`: URL to fetch (HTTPS)
@@ -131,21 +131,21 @@ And so on... Let's start:
         1 - `--version or -v`: Display version information
         1 - Important: `--proxy` or lowercase `-x`: Add custom proxy support: http or https proxy (http(s)://host:port or with user password: http(s)://user:password@host:port)
     1 - `sudo`: Execute a command as another user (default root)
-    0 - `ps`: Report a snapshot of the current processes
-        0 - `aux`: List all processes for all users in a detailed format
-        0 - `-e`: Select all processes
+    1 - `ps`: Report a snapshot of the current processes
+        1 - `aux`: List all processes for all users in a detailed format (Partial)
+        1 - `-e`: Select all processes (Partial)
         0 - `-f`: Full-format listing
-    0 - `kill`: Send a signal to a process
-        0 - `<pid>`: Process ID to send signal to
-        0 - `-l`: List signal names
-        0 - `-9`: Forcefully kill a process (SIGKILL)
-    0 - `echo`: Display a line of text
-        0 - `-n`: Do not output the trailing newline
+    1 - `kill`: Send a signal to a process
+        1 - `<pid>`: Process ID to send signal to
+        1 - `-l`: List signal names
+        1 - `-9`: Forcefully kill a process (SIGKILL)
+    1 - `echo`: Display a line of text
+        1 - `-n`: Do not output the trailing newline
 
-    0 - `adduser`: Add a new user to the system
-    0 - `usermod`: Modify a user's information
-    0 - `userdel`: Delete a user from the system
-    0 - `passwd`: Change a user's password
+    1 - `adduser`: Add a new user to the system
+    1 - `usermod`: Modify a user's information
+    1 - `userdel`: Delete a user from the system
+    1 - `passwd`: Change a user's password
 
 1 - make `greq` support HTTP and when the command doesn't specify "http(s)://..." and also support raw IPs, add error handling as well as showing it in terminal.
 0 - add more useful information to gemfetch.
@@ -171,3 +171,8 @@ Add here.
 0 - improve TAB to autocomplete commands if the typing indicator is in another place of the command.
 1 - Make commandline support HOME and END keyboard keys to move the typing indicator.
 1 - add a `gtop` command (sys package) that shows all processes name, PID ID number, CPU usage, RAM usage in real time (updates every 1s) and more useful features, it will be like task manager. Make the interface pretty coloured.
+0 - Add a keyboard layout update command:
+  - when user runs it, make it list all keyboard layouts starting with 1
+  - make user scroll more layouts with arrow up and down keys
+  - make user be able to type the number of the keyboard layout they want to choose
+  - make the default keyboard layout setting file in /etc/default/keyboard

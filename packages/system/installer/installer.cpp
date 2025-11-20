@@ -457,6 +457,13 @@ int main(int argc, char* argv[]) {
     }
     group.close();
 
+    // Create /etc/sudoers
+    std::ofstream sudoers("/mnt/target/etc/sudoers");
+    sudoers << "root ALL=(ALL:ALL) ALL\n";
+    sudoers << "%sudo ALL=(ALL:ALL) ALL\n";
+    sudoers.close();
+    chmod("/mnt/target/etc/sudoers", 0440);
+
     // Create Home Dir
     mkdir(("/mnt/target/home/" + cfg.username).c_str(), 0700);
     if (chown(("/mnt/target/home/" + cfg.username).c_str(), 1000, 1000) != 0) {

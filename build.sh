@@ -55,7 +55,7 @@ compile_sys_pkg() {
 }
 
 # Compile simple commands
-for pkg in ls pwd cat mkdir touch uname free reboot poweroff clear help gtop rm df mount dd fdisk mkfs lsblk copy move chmod; do
+for pkg in ls pwd cat mkdir touch uname free reboot poweroff clear help gtop rm df mount dd fdisk mkfs lsblk copy move chmod echo kill ps ping head tail wc whoami env date; do
     compile_sys_pkg $pkg
 done
 

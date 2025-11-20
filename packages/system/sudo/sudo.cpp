@@ -1,6 +1,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <fstream>
+#include <sstream>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -33,6 +35,34 @@ std::string get_pass(const std::string& prompt) {
 
 void print_usage() {
     std::cout << "Usage: sudo [-u user] <command> [args...]\n";
+}
+
+bool check_sudoers(const std::string& user, const std::vector<std::string>& user_groups) {
+    std::ifstream f("/etc/sudoers");
+    if (!f) return false;
+
+    std::string line;
+    while(std::getline(f, line)) {
+        // Strip comments
+        size_t comment = line.find('#');
+        if(comment != std::string::npos) line = line.substr(0, comment);
+        
+        if (line.empty()) continue;
+
+        std::stringstream ss(line);
+        std::string subject;
+        ss >> subject;
+
+        if (subject.empty()) continue;
+
+        if (subject[0] == '%') {
+            std::string grp = subject.substr(1);
+            for(const auto& g : user_groups) if(g == grp) return true;
+        } else {
+            if (subject == user) return true;
+        }
+    }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
@@ -106,20 +136,23 @@ int main(int argc, char* argv[]) {
     }
 
     // 5. Check Permissions (Member of 'sudo' or 'wheel' or 'root' group)
-    bool authorized = false;
+    // Identify all groups user is a member of
+    std::vector<std::string> user_groups;
+    // Check primary group
+    for(const auto& g : groups) {
+        if(g.gid == current_user->gid) user_groups.push_back(g.name);
+    }
+    // Check supplementary
     for (const auto& g : groups) {
-        if (g.name == "sudo" || g.name == "wheel" || g.name == "root") {
-            for (const auto& member : g.members) {
-                if (member == current_user->username) {
-                    authorized = true;
-                    break;
-                }
+        for (const auto& member : g.members) {
+            if (member == current_user->username) {
+                user_groups.push_back(g.name);
+                break;
             }
         }
-        if (authorized) break;
     }
 
-    if (!authorized) {
+    if (!check_sudoers(current_user->username, user_groups)) {
         std::cerr << current_user->username << " is not in the sudoers file. This incident will be reported.\n";
         return 1;
     }
