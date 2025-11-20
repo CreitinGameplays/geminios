@@ -1,0 +1,80 @@
+# GeminiOS Documentation
+
+**GeminiOS** is a minimal, educational Linux-based Operating System built from scratch (made by Google Gemini 3 because i want to see how capable is it). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot).
+
+It consists of:
+1.  **The Bootloader:** GRUB2.
+2.  **The Kernel:** Vanilla Linux Kernel (built from source).
+3.  **The Userspace:** A custom `init` process written in C++ (PID 1).
+
+## Project Structure
+
+Maintain this directory structure to ensure the build scripts work correctly:
+
+```text
+geminios/
+├── linux-6.6.14/          # The Linux Kernel Source code
+├── src/
+│   └── init.cpp           # Your C++ Userspace (The "Shell")
+|   └── ...                # Other files and directories
+├── isodir/                # Staging area for GRUB and Kernel
+├── rootfs/                # Temporary folder for building the filesystem
+└── build.sh               # The automation script
+```
+
+## Prerequisites
+
+You need a Linux host (Ubuntu/Debian recommended) with the following tools:
+
+```bash
+sudo apt update
+sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc
+```
+
+---
+
+## Development Workflow
+
+- You must build the kernel first!
+
+```sh
+cd ~/geminios
+# Download kernel (adjust version if link rots)
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.14.tar.xz
+tar -xf linux-6.6.14.tar.xz
+cd linux-6.6.14
+
+# Clean environment
+make mrproper
+
+# Generate a default x86_64 configuration
+make x86_64_defconfig
+
+# Compile (this takes time!)
+# -j$(nproc) uses all CPU cores
+make -j$(nproc) bzImage
+```
+
+- Step A: The Userspace Code (`src/...` and `packages/...)
+This is where you will spend most of your time.
+
+- Step B: The Build Script (`build.sh`)
+Use this script to compile your C++ code, package the filesystem, and generate the ISO.
+
+Make it executable:
+```bash
+chmod +x build.sh
+```
+
+Build!
+```bash
+./build.sh
+```
+---
+
+# Save source into a txt file:
+python save_src.py --root . --extra-excludes linux-* bash-* nano-* grep-* ncurses-* sed-* gawk-* grub* project_export.txt
+
+Note for Gemini: HEY TRY TO MAKE THIS SOURCE CODE FILES AND DIRECTORIES ORGANIZED PLS THANKS
+ALSO ADD A LOT OF DEBUG IN CODES BECAUSE IT GONNA BE VERY USEFUL
+#####

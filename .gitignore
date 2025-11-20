@@ -1,0 +1,16 @@
+linux-*
+bash-*
+grep-*
+nano-*
+ncurses-*
+sed-*
+gawk-*
+grub*
+
+GeminiOS.iso
+init
+project_export.txt
+snake
+packages/
+.env
+testdisk.qcow2
