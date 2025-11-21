@@ -94,6 +94,14 @@ echo "Compiling greq..."
 g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/greq packages/system/greq/greq.cpp src/network.cpp src/signals.o -lssl -lcrypto -lz -lzstd -ldl -lpthread
 strip rootfs/bin/apps/system/greq
 
+echo "Compiling tar (with gzip support)..."
+g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/tar packages/system/tar/tar.cpp src/signals.o -lz -lpthread
+strip rootfs/bin/apps/system/tar
+
+echo "Compiling gzip..."
+g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/gzip packages/system/gzip/gzip.cpp src/signals.o -lz -lpthread
+strip rootfs/bin/apps/system/gzip
+
 echo "Compiling User Tools (passwd, adduser...)"
 for tool in passwd adduser userdel usermod su sudo chown; do
     echo "  - $tool"

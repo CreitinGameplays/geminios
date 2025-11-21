@@ -66,6 +66,8 @@ Make it executable:
 chmod +x build.sh
 ```
 
+mkfs only supports ext2 for now.
+
 Build!
 ```bash
 ./build.sh

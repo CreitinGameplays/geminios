@@ -53,8 +53,8 @@ And so on... Let's start:
         1 - `<path>`: Directory to change to
 
     1 - `pwd`: Print name of current/working directory
-    1 - `tar`:
-    1 - `gzip`:
+    1 - `tar`: tar support
+    1 - `gzip`: gzip support
 
     1 - `cat`: Concatenate files and print on the standard output
         1 - `<file>`: File to read
