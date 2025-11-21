@@ -2,6 +2,7 @@
 #include <vector>
 #include <algorithm>
 #include <unistd.h>
+#include <cstdlib>
 #include "../../../src/user_mgmt.h"
 #include "../../../src/sys_info.h"
 

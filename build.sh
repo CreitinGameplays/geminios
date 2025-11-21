@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e # Exit immediately if a command fails
+set -o pipefail # Exit if any command in a pipe fails
 
 # Configuration
 ENABLE_DEBUG=true # Set to true to enable detailed debug logs
@@ -8,11 +9,32 @@ KERNEL_BZIMAGE="$KERNEL_VERSION/arch/x86/boot/bzImage"
 
 echo "--- 0. Preparing Rootfs ---"
 # Clean old artifacts and create directory hierarchy FIRST
-rm -rf rootfs
+# Gemini: DO NOT DELETE ROOTFS! It contains static source files (like /usr/lib/grub).
+# We only clean compiled binaries to ensure they are updated.
+rm -rf rootfs/bin
 rm -f isodir/boot/initramfs.cpio.gz
 mkdir -p isodir/boot
 mkdir -p isodir/boot/grub
-mkdir -p rootfs/{bin,boot,proc,sys,dev,etc,tmp,mnt,var/repo,bin/apps,bin/apps/system}
+mkdir -p rootfs/bin
+mkdir -p rootfs/boot
+mkdir -p rootfs/proc
+mkdir -p rootfs/sys
+mkdir -p rootfs/dev
+mkdir -p rootfs/etc
+mkdir -p rootfs/tmp
+mkdir -p rootfs/mnt
+mkdir -p rootfs/var/repo
+mkdir -p rootfs/bin/apps
+mkdir -p rootfs/bin/apps/system
+mkdir -p rootfs/usr/bin
+mkdir -p rootfs/usr/lib
+mkdir -p rootfs/usr/share
+mkdir -p rootfs/usr/local
+mkdir -p rootfs/var/log
+mkdir -p rootfs/var/tmp
+mkdir -p rootfs/run
+mkdir -p rootfs/sbin
+mkdir -p rootfs/lib
 
 echo "--- 1. Compiling Userspace ---"
 # -static is CRITICAL. We have no shared libraries (.so) in the OS.
@@ -55,14 +77,18 @@ compile_sys_pkg() {
 }
 
 # Compile simple commands
-for pkg in ls pwd cat mkdir touch uname free reboot poweroff clear help gtop rm df mount dd fdisk mkfs lsblk copy move chmod echo kill ps ping head tail wc whoami env date; do
-    compile_sys_pkg $pkg
+for pkg in ls pwd cat mkdir touch uname free reboot poweroff clear help gtop rm df mount dd fdisk mkfs lsblk copy move chmod echo kill ps head tail wc whoami env date keymap loadkmap uptime; do
+	compile_sys_pkg $pkg
 done
 
 # Compile Complex Packages (requiring network)
 echo "Compiling gpkg..."
 g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/gpkg packages/system/gpkg/gpkg.cpp src/network.cpp src/signals.o -lssl -lcrypto -lz -lzstd -ldl -lpthread
 strip rootfs/bin/apps/system/gpkg
+
+echo "Compiling ping..."
+g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/ping packages/system/ping/ping.cpp src/network.cpp src/signals.o -lssl -lcrypto -lz -lzstd -ldl -lpthread
+strip rootfs/bin/apps/system/ping
 
 echo "Compiling greq..."
 g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/greq packages/system/greq/greq.cpp src/network.cpp src/signals.o -lssl -lcrypto -lz -lzstd -ldl -lpthread
@@ -240,12 +266,41 @@ else
     cp /usr/share/terminfo/x/xterm rootfs/usr/share/terminfo/x/ 2>/dev/null || true
 fi
 
+echo "--- 1.3.5 preparing Keymaps (Binary Format) ---"
+KBD_VER="2.6.4"
+if [ ! -d "kbd-$KBD_VER" ]; then
+    echo "Downloading KBD (for keymap data)..."
+    if [ ! -f "kbd-$KBD_VER.tar.xz" ]; then
+        wget https://cdn.kernel.org/pub/linux/utils/kbd/kbd-$KBD_VER.tar.xz
+    fi
+    tar -xf kbd-$KBD_VER.tar.xz
+    rm kbd-$KBD_VER.tar.xz
+fi
+
+echo "Converting Keymaps to .bmap..."
+mkdir -p rootfs/usr/share/keymaps
+
+# We use the HOST's loadkeys to convert text maps to binary maps
+# This avoids running a complex loadkeys on the target.
+# We iterate over common layouts and convert them.
+
+find kbd-$KBD_VER/data/keymaps -name "*.map" -o -name "*.map.gz" | while read mapfile; do
+    NAME=$(basename "$mapfile" .gz)
+    NAME=$(basename "$NAME" .map)
+    
+    # Convert to binary using host loadkeys (-b flag)
+    # We accept failures (some maps might have missing includes)
+    loadkeys -b "$mapfile" > rootfs/usr/share/keymaps/$NAME.bmap 2>/dev/null || true
+done
+
+echo "Keymap conversion done."
+
 echo "--- 1.4 Compiling GRUB (Bootloader Tools) ---"
 GRUB_VER="2.12"
 # We need grub-install and the i386-pc modules
 if [ ! -f "grub_cache/usr/local/sbin/grub-install" ]; then
     echo "Downloading and Compiling GRUB..."
-    if [ ! -d "grub-$GRUB_VER" ]; then
+    if [ ! -d "grub-$GRUB_VER" ] && [ ! -d "grub_cache" ]; then
         if [ ! -f "grub-$GRUB_VER.tar.gz" ]; then
             wget https://ftp.gnu.org/gnu/grub/grub-$GRUB_VER.tar.gz
         fi
@@ -256,7 +311,7 @@ if [ ! -f "grub_cache/usr/local/sbin/grub-install" ]; then
     cd grub-$GRUB_VER
     
     # Clean previous builds if any to ensure correct config
-    if [ -f "Makefile" ]; then make distclean; fi
+    # if [ -f "Makefile" ]; then make distclean; fi
 
     # Configure for i386-pc (BIOS) platform but tools run on host arch (x86_64)
     # We link tools statically.
@@ -273,19 +328,33 @@ if [ ! -f "grub_cache/usr/local/sbin/grub-install" ]; then
     cd ..
 fi
 # Copy binaries from cache
-cp grub_cache/usr/local/sbin/grub-install rootfs/bin/
-cp grub_cache/usr/local/sbin/grub-bios-setup rootfs/bin/
-cp grub_cache/usr/local/bin/grub-mkimage rootfs/bin/
-cp grub_cache/usr/local/sbin/grub-probe rootfs/bin/
-cp grub_cache/usr/local/bin/grub-editenv rootfs/bin/
+cp -v grub_cache/usr/local/sbin/grub-install rootfs/bin/
+cp -v grub_cache/usr/local/sbin/grub-bios-setup rootfs/bin/
+cp -v grub_cache/usr/local/bin/grub-mkimage rootfs/bin/
+cp -v grub_cache/usr/local/sbin/grub-probe rootfs/bin/
+cp -v grub_cache/usr/local/bin/grub-editenv rootfs/bin/
     
 # Copy Modules (The most important part for installation)
 mkdir -p rootfs/usr/lib/grub/i386-pc
-cp -r grub_cache/usr/local/lib/grub/i386-pc/* rootfs/usr/lib/grub/i386-pc/
+# Only copy if cache exists, and use -n (no clobber) or just overwrite.
+# Since we kept rootfs, we might already have them, but cache is authority for binaries.
+if [ -d "grub_cache" ]; then
+    echo "Copying GRUB modules from cache..."
+    # Copy content recursively, verbose, preservation
+    cp -rv grub_cache/usr/local/lib/grub/i386-pc/* rootfs/usr/lib/grub/i386-pc/
+    
+    # Verify
+    if [ ! -f "rootfs/usr/lib/grub/i386-pc/modinfo.sh" ]; then
+        echo "ERROR: GRUB modules failed to copy!"
+        exit 1
+    fi
+fi
     
 # Copy extra needed files
 mkdir -p rootfs/usr/local/share/grub
-cp grub_cache/usr/local/share/grub/* rootfs/usr/local/share/grub/ 2>/dev/null || true
+if [ -d "grub_cache" ]; then
+    cp grub_cache/usr/local/share/grub/* rootfs/usr/local/share/grub/ 2>/dev/null || true
+fi
 
 echo "--- 1.5 Preparing Kernel for Live System ---"
 if [ ! -f "$KERNEL_BZIMAGE" ]; then
@@ -296,21 +365,110 @@ fi
 # Copy kernel to rootfs so the installer can find it to copy to the target disk
 cp "$KERNEL_BZIMAGE" rootfs/boot/kernel
 
+# Verify it actually got there and has permissions
+if [ ! -f "rootfs/boot/kernel" ]; then
+    echo "CRITICAL ERROR: Kernel failed to copy to rootfs/boot/kernel"
+    exit 1
+fi
+chmod 755 rootfs/boot
+chmod 644 rootfs/boot/kernel
+
+echo "--- 1.6 Generating System Configuration ---"
+mkdir -p rootfs/etc
+mkdir -p rootfs/etc/default
+mkdir -p rootfs/home
+
+# 1. /etc/passwd
+cat > rootfs/etc/passwd <<EOF
+root:x:0:0:System Administrator:/root:/bin/init
+gemini:x:1000:1000:Gemini User:/home/gemini:/bin/init
+EOF
+
+# 2. /etc/group
+cat > rootfs/etc/group <<EOF
+root:x:0:
+sudo:x:27:root,gemini
+users:x:100:
+gemini:x:1000:
+EOF
+
+# 3. /etc/shadow (Hashes for 'root' and 'gemini' with salt GEMINI_SALT)
+cat > rootfs/etc/shadow <<EOF
+root:\$5\$GEMINI_SALT\$4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2:19000:0:99999:7:::
+gemini:\$5\$GEMINI_SALT\$c458304347c65015337b28249db7387344627338750f00376c9676760230d67e:19000:0:99999:7:::
+EOF
+chmod 600 rootfs/etc/shadow
+
+# 4. /etc/os-release
+echo "NAME=\"GeminiOS\"" > rootfs/etc/os-release
+echo "ID=geminios" >> rootfs/etc/os-release
+echo "VERSION=\"0.2\"" >> rootfs/etc/os-release
+
 echo "--- 2. Packaging Initramfs ---"
 
 # Install packages into the offline repository
-# Create the magic header and prepend it to the binary
-# We use a subshell to ensure the file is written atomically and correctly
 echo "Creating snake.gpkg..."
 ( printf "GPKG"; cat rootfs/bin/apps/snake ) > rootfs/var/repo/snake.gpkg
 
+# --- Verification Function ---
+verify_rootfs_integrity() {
+    echo "Verifying rootfs integrity..."
+    local MISSING=0
+    local CRITICAL_FILES=(
+        "rootfs/bin/init"
+       "rootfs/bin/bash"
+        "rootfs/bin/sh"
+        "rootfs/bin/nano"
+        "rootfs/bin/apps/system/loadkmap"
+        "rootfs/bin/grub-install"
+        "rootfs/boot/kernel"
+        "rootfs/usr/lib/grub/i386-pc/modinfo.sh"
+        "rootfs/usr/lib/grub/i386-pc/normal.mod"
+        "rootfs/usr/lib/grub/i386-pc/linux.mod"
+        "rootfs/usr/share/terminfo/l/linux"
+        "rootfs/usr/share/terminfo/x/xterm"
+        "rootfs/etc/passwd"
+        "rootfs/etc/group"
+        "rootfs/var/repo/snake.gpkg"
+    )
+
+    for file in "${CRITICAL_FILES[@]}"; do
+        if [ ! -e "$file" ]; then
+            echo "CRITICAL ERROR: Missing file -> $file"
+            MISSING=1
+        fi
+    done
+
+    if [ "$MISSING" -eq 1 ]; then
+        echo "Build Aborted: Rootfs is incomplete."
+        exit 1
+    fi
+    echo "Rootfs integrity check PASSED."
+}
+
+# Run verification
+verify_rootfs_integrity
+
+# Ensure permissions are correct for packing
+chmod -R 755 rootfs/usr
+
+echo "Packing rootfs..."
+
 # Pack the filesystem into a CPIO archive
+# We separate directories and files to ensure directories are created first.
+# This improves reliability of extraction and ensures structure exists before file placement.
 cd rootfs
-find . | cpio -o -H newc --owner root:root | gzip > ../isodir/boot/initramfs.cpio.gz
+find . -type d | LC_ALL=C sort > ../filelist.txt
+find . -not -type d | LC_ALL=C sort >> ../filelist.txt
+# Use maximum compression (-9) to reduce RAM usage on boot
+cat ../filelist.txt | cpio -o -H newc --owner 0:0 | gzip -9 > ../isodir/boot/initramfs.cpio.gz
 cd ..
+rm filelist.txt
 
 echo "--- 3. Preparing Kernel & Bootloader ---"
 # Check if kernel exists
+ls -lh isodir/boot/initramfs.cpio.gz
+
 if [ ! -f "$KERNEL_BZIMAGE" ]; then
     echo "ERROR: Kernel image not found at $KERNEL_BZIMAGE"
     echo "Please build the kernel first: cd $KERNEL_VERSION && make -j\$(nproc) bzImage"
@@ -335,9 +493,8 @@ echo "--- 4. Building ISO ---"
 grub-mkrescue -o GeminiOS.iso isodir
 
 echo "--- Done! ---"
-echo "Run: qemu-system-x86_64 -cdrom GeminiOS.iso -m 512M -serial stdio"
-echo "Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 512M -serial stdio -hda yourdisk.qcow2"
-echo "Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 512M -serial stdio -hda yourdisk.qcow2 -boot d"
-
+echo "Run: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -smp 2"
+echo "Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -hda disk.qcow2 -smp 2"
+echo "Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -hda disk.qcow2 -boot d -smp 2"
 # Remove the o files
 rm src/*.o

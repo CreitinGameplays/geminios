@@ -40,9 +40,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << std::left << std::setw(20) << "Filesystem"
-              << (type ? std::setw(10) : 0) << (type ? "Type" : "")
-              << std::setw(10) << "Size"
+    std::cout << std::left << std::setw(20) << "Filesystem";
+    if (type) std::cout << std::setw(10) << "Type";
+    std::cout << std::setw(10) << "Size"
               << std::setw(10) << "Used"
               << std::setw(10) << "Avail"
               << std::setw(6) << "Use%"

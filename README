@@ -72,7 +72,7 @@ Build!
 ```
 
 # Save source into a txt file:
-python save_src.py --root . --extra-excludes linux-* bash-* nano-* grep-* ncurses-* sed-* gawk-* grub* project_export.txt
+python save_src.py --root . --extra-excludes linux* bash* nano* grep* ncurses* sed* gawk* grub* kbd* rootfs* project_export.txt
 
 Note for Gemini: HEY TRY TO MAKE THIS SOURCE CODE FILES AND DIRECTORIES ORGANIZED PLS THANKS
 ALSO ADD A LOT OF DEBUG IN CODES BECAUSE IT GONNA BE VERY USEFUL

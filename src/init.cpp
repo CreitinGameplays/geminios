@@ -37,6 +37,26 @@ void mount_fs(const char* source, const char* target, const char* fs_type) {
     }
 }
 
+// Ensure FHS (Filesystem Hierarchy Standard) directories exist at runtime
+void ensure_fhs() {
+    const char* dirs[] = {
+        "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", 
+        "/mnt", "/opt", "/proc", "/root", "/run", "/sbin", "/srv", 
+        "/sys", "/tmp", "/usr", "/usr/bin", "/usr/lib", "/usr/local", 
+        "/usr/share", "/var", "/var/log", "/var/tmp", "/var/repo"
+    };
+    
+    for (const char* d : dirs) {
+        mkdir(d, 0755);
+    }
+    
+    // Fix permissions for /tmp
+    chmod("/tmp", 01777); // Sticky bit
+    chmod("/var/tmp", 01777);
+    // Ensure /root is private
+    chmod("/root", 0700);
+}
+
 // Global Command History
 std::vector<std::string> HISTORY;
 
@@ -793,6 +813,7 @@ void run_shell(int tty_num) {
             setenv("USER", u.username.c_str(), 1);
             setenv("HOME", u.home.c_str(), 1);
             setenv("SHELL", u.shell.c_str(), 1);
+            setenv("PATH", "/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin", 1);
             setenv("TERM", "linux", 1); // Tell apps we are on a linux console
             
             if (chdir(u.home.c_str()) != 0) {
@@ -810,6 +831,37 @@ void run_shell(int tty_num) {
             // Wait for session to end
             int status;
             while (waitpid(session_pid, &status, 0) < 0 && errno == EINTR);
+        }
+    }
+}
+
+void load_keymap() {
+    std::ifstream f("/etc/default/keyboard");
+    if (!f) return;
+    
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.find("XKBLAYOUT=") == 0) {
+            size_t first = line.find('"');
+            size_t last = line.rfind('"');
+            if (first != std::string::npos && last > first) {
+                std::string layout = line.substr(first + 1, last - first - 1);
+                std::cout << "[INIT] Loading keymap: " << layout << std::endl;
+                
+                // Find the file (Assuming it exists in standard path based on keymap.cpp logic, 
+                // but init might need to search or assume a path.
+                // For robustness, we assume keymap.cpp saved the short code, but loadkmap needs full path or we search.
+                // Let's try standard path construction:
+                std::string path = "/usr/share/keymaps/" + layout + ".bmap";
+                // Check if exists, if not try search (omitted for brevity, assuming flat structure or careful user)
+                // Actually, build.sh flattened the structure? No, it kept structure? 
+                // The build.sh find command outputted to rootfs/usr/share/keymaps/$NAME.bmap (FLAT structure)
+                // So we can just do:
+
+                std::string cmd = "/bin/apps/system/loadkmap /usr/share/keymaps/" + layout + ".bmap";
+                int ret = system(cmd.c_str());
+                if (ret != 0) std::cerr << "[ERR] Failed to load keymap." << std::endl;
+            }
         }
     }
 }
@@ -843,6 +895,9 @@ int main(int argc, char* argv[]) {
     mount_fs("none", "/sys", "sysfs");
     mount_fs("devtmpfs", "/dev", "devtmpfs");
     
+    // 2.0.1 Ensure Directory Structure
+    ensure_fhs();
+
     // Create standard symlinks for shell scripts
     symlink("/proc/self/fd", "/dev/fd");
     symlink("/proc/self/fd/0", "/dev/stdin");
@@ -851,6 +906,10 @@ int main(int argc, char* argv[]) {
 
     // 2.1 Generate System Info File (The core source of truth for userspace)
     UserMgmt::initialize_defaults(); // Create /etc/passwd with 'gemini' if missing
+    
+    // 2.2 Load Keyboard Layout
+    // load_keymap(); // Disabled: TTY uses default US layout.
+
     generate_os_release();
     // 3. Spawn Terminals (tty1 to tty6)
     // Init Process becomes a Supervisor

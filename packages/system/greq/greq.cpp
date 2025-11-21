@@ -6,6 +6,7 @@
 #include <string>
 #include <csignal>
 #include <cstring>
+#include <cstdlib>
 #include "sys_info.h"
 
 void sig_handler(int) { g_stop_sig = 1; }

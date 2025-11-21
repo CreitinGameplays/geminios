@@ -21,6 +21,7 @@ ncurses-*/
 sed-*/
 gawk-*/
 grub*/
+kbd*
 grub_cache/
 
 # --- Archives ---

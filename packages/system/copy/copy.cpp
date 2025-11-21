@@ -24,6 +24,39 @@ struct CopyOptions {
 
 bool copy_path(const std::string& src, const std::string& dst, const CopyOptions& opts);
 
+// Forward declaration
+bool ask_overwrite(const std::string& path);
+
+// Copy Symlink
+bool copy_symlink(const std::string& src, const std::string& dst, const CopyOptions& opts, const struct stat& src_st) {
+    char link_target[4096];
+    ssize_t len = readlink(src.c_str(), link_target, sizeof(link_target)-1);
+    if (len < 0) {
+        perror(("copy: readlink " + src).c_str());
+        return false;
+    }
+    link_target[len] = '\0';
+
+    // Remove destination if it exists
+    if (access(dst.c_str(), F_OK) == 0) {
+        if (opts.interactive && !ask_overwrite(dst)) return false;
+        unlink(dst.c_str()); // Force remove to create link
+    }
+
+    if (symlink(link_target, dst.c_str()) != 0) {
+        perror(("copy: symlink " + dst).c_str());
+        return false;
+    }
+
+    if (opts.preserve) {
+        // lchown changes ownership of the link itself
+        lchown(dst.c_str(), src_st.st_uid, src_st.st_gid);
+    }
+    
+    if (opts.verbose) std::cout << "'" << src << "' -> '" << dst << "' (link)" << std::endl;
+    return true;
+}
+
 // Helper to get filename from path
 std::string get_basename(const std::string& path) {
     size_t pos = path.find_last_of('/');
@@ -154,6 +187,8 @@ bool copy_path(const std::string& src, const std::string& dst, const CopyOptions
 
     if (S_ISDIR(src_st.st_mode)) {
         return copy_dir(src, dst, opts, src_st);
+    } else if (S_ISLNK(src_st.st_mode)) {
+        return copy_symlink(src, dst, opts, src_st);
     } else {
         return copy_file(src, dst, opts, src_st);
     }

@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <cstdio>
 #include <cerrno>
+#include <cstdlib>
 #include "../../../src/sys_info.h"
 
 struct MoveOptions {

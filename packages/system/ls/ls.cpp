@@ -10,6 +10,7 @@
 #include <grp.h>
 #include <ctime>
 #include <algorithm>
+#include <unistd.h>
 bool needs_quoting(const std::string& name) {
     for (char c : name) {
         // Check for spaces and common shell metacharacters
@@ -78,6 +79,8 @@ bool g_long_fmt = false;
 bool g_human = false;
 bool g_indicators = false;
 bool g_reverse = false;
+bool g_inode = false;
+bool g_directory = false;
 enum SortMode { NAME, TIME, SIZE };
 SortMode g_sort = NAME;
 
@@ -94,6 +97,8 @@ int main(int argc, char* argv[]) {
                       << "  -a, -all   Show hidden files\n"
                       << "  -l         Long listing\n"
                       << "  -h         Human readable sizes\n"
+                      << "  -d         List directories themselves, not contents\n"
+                      << "  -i         Print inode number\n"
                       << "  -F         Classify\n"
                       << "  -R         Recursive\n"
                       << "  -r         Reverse order\n"
@@ -114,6 +119,8 @@ int main(int argc, char* argv[]) {
                 else if (c == 'F') g_indicators = true;
                 else if (c == 'R') g_recursive = true;
                 else if (c == 'r') g_reverse = true;
+                else if (c == 'd') g_directory = true;
+                else if (c == 'i') g_inode = true;
                 else if (c == 't') g_sort = TIME;
                 else if (c == 'S') g_sort = SIZE;
             }
@@ -132,6 +139,39 @@ int main(int argc, char* argv[]) {
 }
 
 void list_dir(const std::string& path) {
+    if (g_directory) {
+        FileInfo fi;
+        fi.name = path;
+        fi.full_path = path;
+        if (lstat(path.c_str(), &fi.st) != 0) {
+            perror(("ls: " + path).c_str());
+            return;
+        }
+        fi.valid = true;
+
+        // Print just this entry
+        if (g_long_fmt) {
+            struct passwd* pw = getpwuid(fi.st.st_uid);
+            struct group* gr = getgrgid(fi.st.st_gid);
+            std::string u = pw ? pw->pw_name : std::to_string(fi.st.st_uid);
+            std::string g = gr ? gr->gr_name : std::to_string(fi.st.st_gid);
+            char timebuf[64];
+            strftime(timebuf, sizeof(timebuf), "%b %d %H:%M", localtime(&fi.st.st_mtime));
+            std::string size_str = g_human ? format_size(fi.st.st_size) : std::to_string(fi.st.st_size);
+            
+            if (g_inode) std::cout << std::setw(8) << fi.st.st_ino << " ";
+            std::cout << get_perms(fi.st.st_mode) << " " 
+                      << std::left << std::setw(4) << fi.st.st_nlink << " "
+                      << std::setw(8) << u << " " << std::setw(8) << g << " "
+                      << std::right << std::setw(8) << size_str << " "
+                      << timebuf << " " << format_name(fi.name) << std::endl;
+        } else {
+            if (g_inode) std::cout << fi.st.st_ino << " ";
+            std::cout << format_name(fi.name) << std::endl;
+        }
+        return;
+    }
+
     DIR* dir = opendir(path.c_str());
     if (!dir) { perror(("ls: " + path).c_str()); return; }
     
@@ -179,6 +219,7 @@ void list_dir(const std::string& path) {
                 else if (S_ISLNK(f.st.st_mode)) suffix = "@";
             }
 
+            if (g_inode) std::cout << std::setw(8) << f.st.st_ino << " ";
             std::cout << get_perms(f.st.st_mode) << " " 
                       << std::left << std::setw(4) << f.st.st_nlink << " "
                       << std::setw(8) << u << " " << std::setw(8) << g << " "
@@ -203,6 +244,7 @@ void list_dir(const std::string& path) {
                 else if (f.st.st_mode & S_IXUSR) suffix = "*";
                 else if (S_ISLNK(f.st.st_mode)) suffix = "@";
             }
+            if (g_inode) std::cout << f.st.st_ino << " ";
             std::cout << format_name(f.name) << suffix << "  ";
         }
         std::cout << std::endl;

@@ -12,9 +12,10 @@
 #include <csignal>
 #include <cmath>
 #include "../../../src/network.h"
+#include "../../../src/signals.h"
 
 volatile bool g_running = true;
-void sig_handler(int) { g_running = false; }
+void sig_handler(int) { g_running = false; g_stop_sig = 1; }
 
 struct icmp_packet {
     struct icmphdr hdr;
@@ -33,15 +34,6 @@ unsigned short checksum(void *b, int len) {
     return result;
 }
 
-// Simple resolver using gethostbyname (blocking)
-std::string resolve(const std::string& host) {
-    struct hostent *he = gethostbyname(host.c_str());
-    if (he == NULL) return "";
-    struct in_addr **addr_list = (struct in_addr **)he->h_addr_list;
-    if (addr_list[0] != NULL) return inet_ntoa(*addr_list[0]);
-    return "";
-}
-
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: ping <destination>\n";
@@ -49,7 +41,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::string dest = argv[1];
-    std::string ip_str = resolve(dest);
+    std::string ip_str = ResolveDNS(dest);
     
     // If resolve failed, try treating it as IP
     if (ip_str.empty()) ip_str = dest;

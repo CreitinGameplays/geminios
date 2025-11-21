@@ -27,6 +27,9 @@ struct HttpOptions {
 // Generic HTTP Request
 bool HttpRequest(const std::string& url, std::ostream& out, const HttpOptions& opts);
 
+// Resolve Hostname to IP
+std::string ResolveDNS(const std::string& host);
+
 // Downloads a file from an HTTPS URL to a local path
 bool DownloadFile(std::string url, const std::string& dest_path);
 

@@ -26,20 +26,20 @@ Note for Gemini: Here, make a pretty long list of current and commands to add in
 Make them all support multiple combinated arguments, like `rm -rf`, and multiple args, like `rm -r -f`
 And so on... Let's start:
     1 - `ls`: List directory contents
-        1 - `<path>`: Directory to list
-        1 - `-a`: Show hidden files
-        0 - `-A`: do not list implied . and ..
-        1 - `-l`: Long listing format (permissions, size, time)
-        1 - `-h`: Human-readable sizes
-        1 - `-R`: Recursively list subdirectories
-        1 - `-r`: Reverse order
-        1 - `-t`: Sort by time
-        1 - `-S`: Sort by size
-        0 - `-d`: List directories themselves, not their contents
-        1 - `-F`: Append indicator (one of */=>@|) to entries
-        0 - `-i`: Print the index number of each file
-        0 - `-la`: Combined -l and -a
-        0 - `-lh`: Combined -l and -h
+         1 - `<path>`: Directory to list
+         1 - `-a`: Show hidden files
+         0 - `-A`: do not list implied . and ..
+         1 - `-l`: Long listing format (permissions, size, time)
+         1 - `-h`: Human-readable sizes
+         1 - `-R`: Recursively list subdirectories
+         1 - `-r`: Reverse order
+         1 - `-t`: Sort by time
+         1 - `-S`: Sort by size
+         1 - `-d`: List directories themselves, not their contents
+         1 - `-F`: Append indicator (one of */=>@|) to entries
+         1 - `-i`: Print the index number of each file
+         0 - `-la`: Combined -l and -a
+         0 - `-lh`: Combined -l and -h
     1 - `df`: Disk space usage
         1 - `-h`: Human-readable sizes
         1 - `-a`: Include all file systems
@@ -53,10 +53,12 @@ And so on... Let's start:
         1 - `<path>`: Directory to change to
 
     1 - `pwd`: Print name of current/working directory
+    1 - `tar`:
+    1 - `gzip`:
 
     1 - `cat`: Concatenate files and print on the standard output
         1 - `<file>`: File to read
-        0 - `-n`: Number all output lines
+        1 - `-n`: Number all output lines
         0 - `-b`: Number non-empty output lines
         0 - `-E`: Display $ at end of each line
         0 - `-s`: Suppress repeated empty output lines
@@ -91,7 +93,7 @@ And so on... Let's start:
         1 - `-v`: Explain what is being done
 
     1 - `uname`: Print system information
-        0 - `-a`: Print all information
+        1 - `-a`: Print all information
 
     1 - `free`: Display amount of free and used memory in the system
     1 - `reboot`: Reboot the system
@@ -134,7 +136,7 @@ And so on... Let's start:
     1 - `ps`: Report a snapshot of the current processes
         1 - `aux`: List all processes for all users in a detailed format (Partial)
         1 - `-e`: Select all processes (Partial)
-        0 - `-f`: Full-format listing
+        1 - `-f`: Full-format listing
     1 - `kill`: Send a signal to a process
         1 - `<pid>`: Process ID to send signal to
         1 - `-l`: List signal names
@@ -171,7 +173,7 @@ Add here.
 0 - improve TAB to autocomplete commands if the typing indicator is in another place of the command.
 1 - Make commandline support HOME and END keyboard keys to move the typing indicator.
 1 - add a `gtop` command (sys package) that shows all processes name, PID ID number, CPU usage, RAM usage in real time (updates every 1s) and more useful features, it will be like task manager. Make the interface pretty coloured.
-0 - Add a keyboard layout update command:
+1 - Add a keyboard layout update command:
   - when user runs it, make it list all keyboard layouts starting with 1
   - make user scroll more layouts with arrow up and down keys
   - make user be able to type the number of the keyboard layout they want to choose

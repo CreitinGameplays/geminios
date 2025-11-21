@@ -143,6 +143,22 @@ bool wait_for_device(const std::string& path) {
     return false;
 }
 
+void debug_ls(const std::string& path) {
+    DIR* dir = opendir(path.c_str());
+    if (!dir) {
+        std::cerr << "DEBUG: Cannot open " << path << "\n";
+        return;
+    }
+    std::cerr << "DEBUG: Listing " << path << ":\n";
+    struct dirent* entry;
+    int count = 0;
+    while ((entry = readdir(dir)) != NULL) {
+        std::cerr << "  " << entry->d_name << "\n";
+        if (++count > 20) { std::cerr << "  ...\n"; break; }
+    }
+    closedir(dir);
+}
+
 // --- Steps ---
 
 std::string select_disk() {
@@ -374,9 +390,14 @@ int main(int argc, char* argv[]) {
     RunCommand("/bin/apps/system/copy", {"-p", "/bin/init", "/mnt/target/bin/"});
     
     // Copy Bash and Sh
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/bash", "/mnt/target/bin/"});
+    if (!RunCommand("/bin/apps/system/copy", {"-p", "/bin/bash", "/mnt/target/bin/"})) {
+        LOG("Warning: bash copy failed");
+    }
     RunCommand("/bin/apps/system/copy", {"-p", "/bin/sh", "/mnt/target/bin/"});
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/nano", "/mnt/target/bin/"});
+    if (!RunCommand("/bin/apps/system/copy", {"-p", "/bin/nano", "/mnt/target/bin/"})) {
+         LOG("Warning: nano copy failed");
+         debug_ls("/bin");
+    }
     RunCommand("/bin/apps/system/copy", {"-p", "/bin/grep", "/mnt/target/bin/"});
     RunCommand("/bin/apps/system/copy", {"-p", "/bin/sed", "/mnt/target/bin/"});
     RunCommand("/bin/apps/system/copy", {"-p", "/bin/gawk", "/mnt/target/bin/"});
@@ -385,11 +406,20 @@ int main(int argc, char* argv[]) {
     // For /etc and /boot, we want to copy contents. 
     // copy -r /etc /mnt/target/ -> creates /mnt/target/etc filled with content.
     RunCommand("/bin/apps/system/copy", {"-r", "-p", "/etc", "/mnt/target/"});
-    RunCommand("/bin/apps/system/copy", {"-r", "-p", "/boot", "/mnt/target/"});
+    
+    if (!RunCommand("/bin/apps/system/copy", {"-r", "-p", "/boot", "/mnt/target/"})) {
+        std::cerr << C_RED << "Critical Error: Failed to copy /boot (kernel)" << C_RESET << "\n";
+        debug_ls("/");
+        debug_ls("/boot");
+        return 1;
+    }
     
     // Copy Terminfo (Required for Nano)
     // We need to create /usr/share structure on target
+    // Note: We create parent /usr, then copy 'lib' into it.
+    mkdir_p("/mnt/target/usr");
     mkdir_p("/mnt/target/usr/share");
+    RunCommand("/bin/apps/system/copy", {"-r", "-p", "/usr/lib", "/mnt/target/usr/"});
     RunCommand("/bin/apps/system/copy", {"-r", "-p", "/usr/share/terminfo", "/mnt/target/usr/share/"});
     // 5. Configure
     std::cout << "[4/5] Configuring User...\n";
@@ -477,6 +507,11 @@ int main(int argc, char* argv[]) {
     std::ofstream grub("/mnt/target/boot/grub/grub.cfg");
     if (grub) {
         grub << "set timeout=5\nset default=0\n";
+        grub << "insmod part_msdos\n"; // Support MBR partitions
+        grub << "insmod ext2\n";       // Support Ext2 filesystem
+        // Assuming single drive install to partition 1. 
+        // Ideally we use 'search' but we lack uuid tools in this minimal env.
+        grub << "set root=(hd0,msdos1)\n";
         grub << "menuentry \"GeminiOS (HD)\" {\n";
         grub << "  linux /boot/kernel root=" << part_dev << " rw quiet\n";
         grub << "}\n";
