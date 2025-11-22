@@ -66,7 +66,7 @@ Build!
 ./build.sh
 ```
 
-# Save source into a txt file:
+- Save source into a txt file if you want to send it to AI Studio:
 ```python
 python save_src.py --root . --exclude packages/system/desktop/stb_image.h --extra-excludes linux* bash* nano* grep* ncurses* sed* gawk* grub* kbd* rootfs* lvgl* lv_drivers* project_export.txt 
 ```

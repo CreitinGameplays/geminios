@@ -2,12 +2,12 @@ TODO rules: If it starts with 1, it has already been successfully improved/imple
 ALWAYS update this TODO list! Also always add a help command for all commands and make them default if user run it without arguments.
 When implementing something, use the way you think would be better.
 
-0 - add a GUI desktop using LVGL (Light and Versatile Graphics Library); this gonna be done after we add and improve the most important command lines.
+1 - add a GUI desktop using LVGL (Light and Versatile Graphics Library); this gonna be done after we add and improve the most important command lines.
 How are we going to make it?
 Taskbar:
-- Start menu (left)
-- A file explorer icon pinned (left)
-- Clock (right)
+1 - Start menu (left)
+0 - A file explorer icon pinned (left)
+1 - Clock (right)
 
 ---
 1 - Important: add very robust support to quotation marks ("") and single quotes ('') for ALL filesystem commands like cd, mkdir, rm and many others. Mainly to be able to manage and browser directories with whitespaces.

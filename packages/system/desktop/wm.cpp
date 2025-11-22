@@ -2,12 +2,15 @@
 #include <map>
 #include <string>
 #include <iostream>
+#include <signal.h>
+#include <unistd.h> // For getpid()
 
 // Structure to save window state for Restore functionality
 struct WindowState {
     bool maximized;
     lv_coord_t orig_x, orig_y, orig_w, orig_h;
     lv_coord_t drag_off_x, drag_off_y;
+    pid_t pid;
 };
 
 // Track state of windows
@@ -19,6 +22,17 @@ static void win_close_event_cb(lv_event_t * e) {
     lv_obj_t * btn = lv_event_get_target(e);
     lv_obj_t * win = (lv_obj_t*)lv_event_get_user_data(e);
     
+    // Kill the process if it's a client window
+    if (win_cache.find(win) != win_cache.end()) {
+        pid_t pid = win_cache[win].pid;
+        if (pid > 0 && pid != getpid()) {
+            std::cout << "[WM] Killing process " << pid << std::endl;
+            kill(pid, SIGKILL);
+        } else if (pid == getpid()) {
+            std::cerr << "[WM] Prevented suicide! Window PID matches Desktop PID." << std::endl;
+        }
+    }
+
     // Clean up cache
     win_cache.erase(win);
     lv_obj_del(win);
@@ -36,7 +50,7 @@ static void win_maximize_event_cb(lv_event_t * e) {
     
     if (win_cache.find(win) == win_cache.end()) {
         // Should not happen, but init if missing
-        win_cache[win] = {false, 0, 0, 0, 0, 0, 0};
+        win_cache[win] = {false, 0, 0, 0, 0, 0, 0, 0};
     }
 
     WindowState &state = win_cache[win];
@@ -87,9 +101,17 @@ static void win_header_event_cb(lv_event_t * e) {
         // Visual feedback: make transparent
         lv_obj_set_style_bg_opa(win, LV_OPA_80, 0);
         
+        // Fix Teleportation: Convert to absolute positioning
+        // Current position might be relative to center (default)
+        lv_coord_t current_x = lv_obj_get_x(win);
+        lv_coord_t current_y = lv_obj_get_y(win);
+        
+        // Reset alignment to TOP_LEFT so set_pos works with absolute coordinates
+        lv_obj_align(win, LV_ALIGN_TOP_LEFT, current_x, current_y);
+
         // Calculate and store offset: Offset = MousePos - WindowPos
-        state.drag_off_x = point.x - lv_obj_get_x(win);
-        state.drag_off_y = point.y - lv_obj_get_y(win);
+        state.drag_off_x = point.x - current_x;
+        state.drag_off_y = point.y - current_y;
     }
     else if (code == LV_EVENT_PRESSING) {
         // Absolute position calculation
@@ -101,6 +123,10 @@ static void win_header_event_cb(lv_event_t * e) {
         lv_coord_t scr_h = lv_disp_get_ver_res(NULL);
         lv_coord_t win_w = lv_obj_get_width(win);
         
+        // Clamp X (keep header visible)
+        if (x < 0) x = 0;
+        if (x + win_w > scr_w) x = scr_w - win_w;
+
         // Clamp Y (keep header visible)// Prevent moving top header completely off-screen
         if (y < 0) y = 0;
         if (y > scr_h - 30) y = scr_h - 30;
@@ -141,6 +167,7 @@ lv_obj_t* create_window(const char* title, lv_coord_t w, lv_coord_t h) {
     state.orig_y = (lv_disp_get_ver_res(NULL) - h) / 2;
     state.drag_off_x = 0;
     state.drag_off_y = 0;
+    state.pid = 0; // Initialize to 0 to avoid killing random processes
     win_cache[win] = state;
 
     // Style the Window
@@ -177,7 +204,7 @@ lv_obj_t* create_window(const char* title, lv_coord_t w, lv_coord_t h) {
     return content; // Return content area for adding widgets
 }
 
-lv_obj_t* create_client_window(const char* title, lv_coord_t w, lv_coord_t h, lv_obj_t** out_img) {
+lv_obj_t* create_client_window(const char* title, lv_coord_t w, lv_coord_t h, lv_obj_t** out_img, pid_t pid) {
     // Create base window
     lv_obj_t* content = create_window(title, w, h);
     lv_obj_t* win = lv_obj_get_parent(content);
@@ -189,5 +216,14 @@ lv_obj_t* create_client_window(const char* title, lv_coord_t w, lv_coord_t h, lv
     
     if (out_img) *out_img = img;
     
+    // Update the PID in the cache
+    if (win_cache.find(win) != win_cache.end()) {
+        win_cache[win].pid = pid;
+    }
+
     return win; // Return the window object itself
+}
+
+bool wm_is_window_valid(lv_obj_t* win) {
+    return win_cache.find(win) != win_cache.end();
 }

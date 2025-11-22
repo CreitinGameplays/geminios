@@ -214,7 +214,6 @@ void debug_dev() {
 // --- Compositor Server ---
 
 void handle_client(int client_fd) {
-    // TODO: this function needs more robustness, specially where are located the block of comments below
     std::cout << "[Compositor] Client connected (FD: " << client_fd << ")" << std::endl;
 
     lv_obj_t* win = nullptr;
@@ -229,6 +228,10 @@ void handle_client(int client_fd) {
 
         if (hdr.type == MSG_HELLO) {
             HelloPayload hello;
+            if (hdr.len != sizeof(HelloPayload)) {
+                 std::cerr << "[Compositor] Invalid Hello payload size" << std::endl;
+                 break;
+            }
             read(client_fd, &hello, sizeof(hello));
             std::cout << "[Compositor] Hello from: " << hello.title << " (" << hello.width << "x" << hello.height << ")" << std::endl;
 
@@ -238,6 +241,10 @@ void handle_client(int client_fd) {
             // ARGB8888 = 4 bytes
             size_t buf_size = hello.width * hello.height * 4;
             img_buffer = (uint8_t*)malloc(buf_size);
+            if (!img_buffer) {
+                std::cerr << "[Compositor] Failed to allocate buffer" << std::endl;
+                break;
+            }
             memset(img_buffer, 0xFF, buf_size); // White background
 
             // Create LVGL Image Descriptor
@@ -250,35 +257,46 @@ void handle_client(int client_fd) {
             img_dsc->header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA; 
             img_dsc->data = img_buffer;
 
+            // Get Client PID
+            struct ucred ucred;
+            socklen_t len = sizeof(struct ucred);
+            pid_t client_pid = 0;
+            if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &ucred, &len) == 0) {
+                client_pid = ucred.pid;
+                std::cout << "[Compositor] Client PID: " << client_pid << std::endl;
+            }
+
             // Create Window
-            win = create_client_window(hello.title, hello.width + 10, hello.height + 50, &img_obj);
+            win = create_client_window(hello.title, hello.width + 10, hello.height + 50, &img_obj, client_pid);
             if (img_obj) {
                 lv_img_set_src(img_obj, img_dsc);
                 
                 // Add event callback to forward input to client
-                // We assume the client wants raw coordinates relative to the window
                 lv_obj_add_flag(img_obj, LV_OBJ_FLAG_CLICKABLE);
-                // Note: Implementing robust input forwarding requires tracking state
-                // For simplicity, we rely on polling or just basic events if needed
             }
 
         } else if (hdr.type == MSG_FRAME) {
             FramePayload frame;
+            if (hdr.len < sizeof(FramePayload)) {
+                std::cerr << "[Compositor] Invalid Frame payload size" << std::endl;
+                break;
+            }
             read(client_fd, &frame, sizeof(frame));
             
-            // Read pixel data
-            // Calculate expected size
             uint32_t data_len = hdr.len - sizeof(FramePayload);
             
-            // To avoid blocking main loop too long, we read into temp buffer or direct if locked?
-            // We are in a thread, so we can block on read.
-            
-            // Protect the buffer update
-            // Optimisation: Don't lock while reading from socket, read to temp buffer then copy?
-            // Or if we trust read to be fast. Let's lock for safety of the pointer.
-            
-            // Wait, if we block on read inside lock, UI freezes.
-            // We must read into a local buffer first.
+            // Validate frame dimensions
+            if (!img_dsc || frame.x + frame.w > img_dsc->header.w || frame.y + frame.h > img_dsc->header.h) {
+                 std::cerr << "[Compositor] Invalid frame dimensions or window not created" << std::endl;
+                 break;
+            }
+
+            // Validate data length
+            if (data_len != frame.w * frame.h * 4) {
+                 std::cerr << "[Compositor] Data length mismatch" << std::endl;
+                 break;
+            }
+
             std::vector<uint8_t> chunk(data_len);
             size_t total_read = 0;
             while (total_read < data_len) {
@@ -289,19 +307,14 @@ void handle_client(int client_fd) {
 
             if (total_read == data_len && img_buffer) {
                 std::lock_guard<std::mutex> lock(lvgl_mutex);
-                // Copy chunk to specific location in img_buffer
-                // For simplicity, assume full refresh or simple line copy
-                // The flush_cb from client usually sends a rect.
-                // We need to map rect to our buffer.
                 
                 uint32_t bpp = 4; // ARGB
                 uint32_t stride = img_dsc->header.w * bpp;
                 
-                // Copy row by row
-                // frame.x/y/w/h
                 const uint8_t* src = chunk.data();
                 for (int y = 0; y < frame.h; ++y) {
                     int dst_offset = ((frame.y + y) * stride) + (frame.x * bpp);
+                    // Double check bounds just in case
                     if (dst_offset + (frame.w * bpp) <= img_dsc->data_size) {
                         memcpy(img_buffer + dst_offset, src + (y * frame.w * bpp), frame.w * bpp);
                     }
@@ -315,7 +328,7 @@ void handle_client(int client_fd) {
     std::cout << "[Compositor] Client disconnected." << std::endl;
     {
         std::lock_guard<std::mutex> lock(lvgl_mutex);
-        if (win) lv_obj_del(win);
+        if (win && wm_is_window_valid(win)) lv_obj_del(win);
         if (img_dsc) delete img_dsc;
         if (img_buffer) free(img_buffer);
     }
@@ -463,6 +476,7 @@ int main(void) {
     // Background (Wallpaper)
     lv_obj_t * bg = lv_img_create(lv_scr_act());
     lv_obj_set_size(bg, LV_PCT(100), LV_PCT(100));
+    lv_obj_clear_flag(lv_scr_act(), LV_OBJ_FLAG_SCROLLABLE); // Prevent desktop from scrolling
     
     // Load wallpaper without resizing (0,0) so it fills or centers naturally
     lv_img_dsc_t* wallpaper = load_image("/usr/share/wallpapers/default.png", 0, 0);
