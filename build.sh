@@ -113,6 +113,68 @@ echo "Compiling Installer..."
 g++ $CXXFLAGS -I src -o rootfs/bin/apps/system/installer packages/system/installer/installer.cpp src/user_mgmt.o -lssl -lcrypto -lz -lzstd -ldl -lpthread
 strip rootfs/bin/apps/system/installer
 
+echo "Compiling Desktop Environment (LVGL)..."
+# 1. Download LVGL and Drivers if missing
+LVGL_VER="release/v8.3"
+if [ ! -d "lvgl" ]; then
+    echo "Cloning LVGL ($LVGL_VER)..."
+    git clone --depth 1 --branch $LVGL_VER https://github.com/lvgl/lvgl.git
+fi
+if [ ! -d "lv_drivers" ]; then
+    echo "Cloning LVGL Drivers ($LVGL_VER)..."
+    git clone --depth 1 --branch $LVGL_VER https://github.com/lvgl/lv_drivers.git
+fi
+
+# 2. Prepare Flags for LVGL (Include paths + Simple Include Mode)
+LVGL_FLAGS="-I. -I./lvgl -I./lv_drivers -I./packages/system/desktop -DLV_CONF_INCLUDE_SIMPLE -DLV_LVGL_H_INCLUDE_SIMPLE -DSTB_IMAGE_IMPLEMENTATION"
+
+# 3. Compile LVGL Library (Object files)
+mkdir -p lvgl_build
+
+# Force clean old library to ensure new flags/config are applied
+rm -f lvgl_build/liblvgl.a
+
+# Find and compile all C files in lvgl and lv_drivers
+# We use a marker file to avoid recompiling 500+ files every time
+if [ ! -f "lvgl_build/liblvgl.a" ]; then
+    echo "Building LVGL Static Library (this may take a while)..."
+    # Compile LVGL core
+    find lvgl/src -name "*.c" -exec gcc -c -O2 $LVGL_FLAGS {} -o {}.o \;
+    # Compile Drivers
+    find lv_drivers -name "*.c" -exec gcc -c -O2 $LVGL_FLAGS {} -o {}.o \;
+    
+    # Gather all objects
+    find lvgl -name "*.o" > lvgl_objs.txt
+    find lv_drivers -name "*.o" >> lvgl_objs.txt
+    
+    # Create Archive
+    ar rcs lvgl_build/liblvgl.a @lvgl_objs.txt
+    rm lvgl_objs.txt
+fi
+
+# 3.5 Download stb_image (Image Decoder)
+if [ ! -f "packages/system/desktop/stb_image.h" ]; then
+    echo "Downloading stb_image.h..."
+    wget -O packages/system/desktop/stb_image.h https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
+fi
+
+# 3.6 Install Assets
+mkdir -p rootfs/usr/share/wallpapers
+mkdir -p rootfs/usr/share/icons
+
+# Copy Wallpaper (Assuming it is in wallpaper/default.png as per your context)
+if [ -f "wallpaper/default.png" ]; then
+    cp wallpaper/default.png rootfs/usr/share/wallpapers/default.png
+fi
+# Copy Icons (You need to create these)
+if [ -d "icons" ]; then
+    cp icons/*.png rootfs/usr/share/icons/ 2>/dev/null || true
+fi
+
+# 4. Compile Desktop App
+g++ -static -O2 $LVGL_FLAGS -o rootfs/bin/apps/system/desktop packages/system/desktop/desktop.cpp packages/system/desktop/wm.cpp lvgl_build/liblvgl.a -lpthread -lm
+strip rootfs/bin/apps/system/desktop
+
 echo "Setting permissions..."
 chmod u+s rootfs/bin/apps/system/su rootfs/bin/apps/system/sudo
 mkdir -p rootfs/bin/apps
@@ -501,8 +563,8 @@ echo "--- 4. Building ISO ---"
 grub-mkrescue -o GeminiOS.iso isodir
 
 echo "--- Done! ---"
-echo "Run: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -smp 2"
-echo "Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -hda disk.qcow2 -smp 2"
-echo "Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -hda disk.qcow2 -boot d -smp 2"
+echo "Run: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -smp 2 -vga std"
+echo "Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -hda disk.qcow2 -smp 2 -vga std"
+echo "Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std"
 # Remove the o files
 rm src/*.o

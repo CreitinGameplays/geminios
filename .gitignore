@@ -22,6 +22,8 @@ sed-*/
 gawk-*/
 grub*/
 kbd*
+lvgl*
+lv_drivers*
 grub_cache/
 
 # --- Archives ---

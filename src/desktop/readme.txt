@@ -1,1 +1,0 @@
-Desktop environment code will go in this directory.

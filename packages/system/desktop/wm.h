@@ -1,0 +1,10 @@
+#ifndef WM_H
+#define WM_H
+
+#include "lvgl/lvgl.h"
+
+// Creates a standard system window with Title Bar, Controls, and Dragging support
+// Returns the content area object where widgets can be added
+lv_obj_t* create_window(const char* title, lv_coord_t w, lv_coord_t h);
+
+#endif

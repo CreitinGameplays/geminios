@@ -1,28 +1,7 @@
 # GeminiOS Documentation
 
-**GeminiOS** is a minimal, open-source, educational Linux-based Operating System built from scratch (fully made by Google Gemini 3). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot). This project follows the Linux From Scratch (LFS) philosophy.
+GeminiOS is a minimal, open-source, educational Linux-based Operating System built from scratch (fully made by Google Gemini 3). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot). This project follows the Linux From Scratch (LFS) philosophy.
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
-
-It consists of:
-1.  **The Bootloader:** GRUB2.
-2.  **The Kernel:** Vanilla Linux Kernel (built from source).
-3.  **The Userspace:** A custom `init` process written in C++ (PID 1).
-
-## Project Structure
-
-Maintain this directory structure to ensure the build scripts work correctly:
-
-```text
-geminios/
-├── linux-6.6.14/          # The Linux Kernel Source code
-├── packages/              # Custom packages for the system
-├── src/
-│   └── init.cpp           # Your C++ Userspace (The "Shell")
-|   └── ...                # Other files and directories
-├── isodir/                # Staging area for GRUB and Kernel
-├── rootfs/                # Temporary folder for building the filesystem
-└── build.sh               # The automation script
-```
 
 ## Prerequisites
 
@@ -35,7 +14,7 @@ sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev
 
 ## Development Workflow
 
-- You must build the kernel first!
+- You MUST build the kernel first!
 
 ```sh
 cd ~/geminios
@@ -43,6 +22,21 @@ cd ~/geminios
 wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.14.tar.xz
 tar -xf linux-6.6.14.tar.xz
 cd linux-6.6.14
+
+# 1. Enable Framebuffer and QEMU Drivers (Built-in, not modules)
+./scripts/config --enable CONFIG_FB
+./scripts/config --enable CONFIG_FB_VESA
+./scripts/config --enable CONFIG_DRM
+./scripts/config --enable CONFIG_DRM_BOCHS
+./scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
+# Enable legacy /dev/fb0 support for DRM drivers (Required for Desktop)
+./scripts/config --enable CONFIG_DRM_FBDEV_EMULATION
+
+# 2. Enable Input Event Interface (for Mouse/Keyboard)
+./scripts/config --enable CONFIG_INPUT_EVDEV
+
+# 3. AUTOMATICALLY resolve all dependencies and new questions
+make olddefconfig
 
 # Clean environment
 make mrproper
@@ -66,7 +60,7 @@ Make it executable:
 chmod +x build.sh
 ```
 
-mkfs only supports ext2 for now.
+Note: mkfs only supports ext2 for now.
 
 Build!
 ```bash
@@ -74,7 +68,7 @@ Build!
 ```
 
 # Save source into a txt file:
-python save_src.py --root . --extra-excludes linux* bash* nano* grep* ncurses* sed* gawk* grub* kbd* rootfs* project_export.txt
+python save_src.py --root . --exclude packages/system/desktop/stb_image.h --extra-excludes linux* bash* nano* grep* ncurses* sed* gawk* grub* kbd* rootfs* lvgl* lv_drivers* project_export.txt 
 
 Note for Gemini: HEY TRY TO MAKE THIS SOURCE CODE FILES AND DIRECTORIES ORGANIZED PLS THANKS
 ALSO ADD A LOT OF DEBUG IN CODES BECAUSE IT GONNA BE VERY USEFUL

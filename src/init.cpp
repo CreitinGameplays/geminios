@@ -708,11 +708,11 @@ User attempt_login() {
 }
 
 // Map to track TTY Supervisor PIDs
-// PID -> TTY Number (1-6)
-std::map<pid_t, int> g_tty_pids;
+// PID -> TTY Device Path
+std::map<pid_t, std::string> g_tty_pids;
 
 // Forward declaration
-void run_shell(int tty_num);
+void run_shell(const std::string& tty_dev);
 
 // Helper to detect Live ISO mode (no root= in cmdline)
 bool is_live_mode() {
@@ -724,16 +724,13 @@ bool is_live_mode() {
     }
     return true;
 }
- 
 
-void run_shell(int tty_num) {
-    // Construct device path, e.g., /dev/tty1
-    std::string tty_dev = "/dev/tty" + std::to_string(tty_num);
-    
+void run_shell(const std::string& tty_dev) {
     // 1. Open the TTY Device
     int fd = open(tty_dev.c_str(), O_RDWR);
     if (fd < 0) {
         perror(("Failed to open " + tty_dev).c_str());
+        sleep(5); // Prevent rapid respawn loops if device is missing
         exit(1);
     }
 
@@ -867,6 +864,11 @@ void load_keymap() {
 }
 
 int main(int argc, char* argv[]) {
+    // Disable output buffering to ensure logs are visible immediately
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    
+    if (getpid() == 1) std::cout << "[INIT] Starting GeminiOS Init..." << std::endl;
     // Check if we are being run as a shell (not PID 1)
     if (getpid() != 1) {
         // Initialize terminal for interactive use
@@ -911,15 +913,18 @@ int main(int argc, char* argv[]) {
     // load_keymap(); // Disabled: TTY uses default US layout.
 
     generate_os_release();
-    // 3. Spawn Terminals (tty1 to tty6)
+    // 3. Spawn Terminals
     // Init Process becomes a Supervisor
-    for (int i = 1; i <= 6; ++i) {
+    // We include ttyS0 for serial console access (QEMU stdio)
+    std::vector<std::string> terminals = {"/dev/tty1", "/dev/tty2", "/dev/tty3", "/dev/ttyS0"};
+    
+    for (const auto& tty : terminals) {
         pid_t pid = fork(); 
         if (pid == 0) { 
-            run_shell(i); 
+            run_shell(tty); 
             exit(0); 
         } 
-        if (pid > 0) g_tty_pids[pid] = i;
+        if (pid > 0) g_tty_pids[pid] = tty;
     }
 
     // 4. Supervisor Loop (Reap Zombies)
@@ -931,19 +936,19 @@ int main(int argc, char* argv[]) {
             // Check if it was a TTY supervisor
             auto it = g_tty_pids.find(pid);
             if (it != g_tty_pids.end()) {
-                int tty_num = it->second;
+                std::string tty = it->second;
                 g_tty_pids.erase(it);
                 
-                std::cerr << "[INIT] TTY " << tty_num << " (PID " << pid << ") exited unexpectedly. Respawning..." << std::endl;
+                std::cerr << "[INIT] TTY " << tty << " (PID " << pid << ") exited unexpectedly. Respawning..." << std::endl;
                 
                 // Respawn
                 pid_t new_pid = fork();
                 if (new_pid == 0) {
-                    run_shell(tty_num);
+                    run_shell(tty);
                     exit(0);
                 }
                 if (new_pid > 0) {
-                    g_tty_pids[new_pid] = tty_num;
+                    g_tty_pids[new_pid] = tty;
                 }
             } else {
                  // Just a regular zombie reap (orphaned grandchildren, etc)
