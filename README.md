@@ -61,8 +61,6 @@ Make it executable:
 chmod +x build.sh
 ```
 
-Note: mkfs only supports ext2 for now.
-
 Build!
 ```bash
 ./build.sh
@@ -72,6 +70,8 @@ Build!
 ```python
 python save_src.py --root . --exclude packages/system/desktop/stb_image.h --extra-excludes linux* bash* nano* grep* ncurses* sed* gawk* grub* kbd* rootfs* lvgl* lv_drivers* project_export.txt 
 ```
+
+Note: mkfs only supports ext2 for now.
 
 Note for Gemini: HEY TRY TO MAKE THIS SOURCE CODE FILES AND DIRECTORIES ORGANIZED PLS THANKS
 ALSO ADD A LOT OF DEBUG IN CODES BECAUSE IT GONNA BE VERY USEFUL
