@@ -175,6 +175,10 @@ fi
 g++ -static -O2 $LVGL_FLAGS -o rootfs/bin/apps/system/desktop packages/system/desktop/desktop.cpp packages/system/desktop/wm.cpp lvgl_build/liblvgl.a -lpthread -lm
 strip rootfs/bin/apps/system/desktop
 
+echo "Compiling Test GUI..."
+g++ -static -O2 $LVGL_FLAGS -o rootfs/bin/apps/system/test_gui packages/system/test_gui/test_gui.cpp lvgl_build/liblvgl.a -lpthread -lm
+strip rootfs/bin/apps/system/test_gui
+
 echo "Setting permissions..."
 chmod u+s rootfs/bin/apps/system/su rootfs/bin/apps/system/sudo
 mkdir -p rootfs/bin/apps
@@ -451,28 +455,25 @@ mkdir -p rootfs/home
 # 1. /etc/passwd
 cat > rootfs/etc/passwd <<EOF
 root:x:0:0:System Administrator:/root:/bin/init
-gemini:x:1000:1000:Gemini User:/home/gemini:/bin/init
 EOF
 
 # 2. /etc/group
 cat > rootfs/etc/group <<EOF
 root:x:0:
-sudo:x:27:root,gemini
+sudo:x:27:root
 users:x:100:
-gemini:x:1000:
 EOF
 
-# 3. /etc/shadow (Hashes for 'root' and 'gemini' with salt GEMINI_SALT)
+# 3. /etc/shadow (Hashes for 'root' with salt GEMINI_SALT)
 cat > rootfs/etc/shadow <<EOF
 root:\$5\$GEMINI_SALT\$4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2:19000:0:99999:7:::
-gemini:\$5\$GEMINI_SALT\$c458304347c65015337b28249db7387344627338750f00376c9676760230d67e:19000:0:99999:7:::
 EOF
 chmod 600 rootfs/etc/shadow
 
 # 4. /etc/os-release
 echo "NAME=\"GeminiOS\"" > rootfs/etc/os-release
 echo "ID=geminios" >> rootfs/etc/os-release
-echo "VERSION=\"0.2\"" >> rootfs/etc/os-release
+echo "VERSION=\"0.0.1\"" >> rootfs/etc/os-release
 
 echo "--- 2. Packaging Initramfs ---"
 

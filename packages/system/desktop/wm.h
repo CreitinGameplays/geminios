@@ -7,4 +7,5 @@
 // Returns the content area object where widgets can be added
 lv_obj_t* create_window(const char* title, lv_coord_t w, lv_coord_t h);
 
+lv_obj_t* create_client_window(const char* title, lv_coord_t w, lv_coord_t h, lv_obj_t** out_img);
 #endif

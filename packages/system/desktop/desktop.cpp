@@ -14,17 +14,26 @@
 #include <linux/input.h>
 #include <sys/ioctl.h>
 #include "stb_image.h"
+#include <sys/wait.h> // For waitpid if needed (though we run detached)
+#include <signal.h>
 
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <mutex>
+#include <thread>
+#include <atomic>
 // LVGL Includes
 #include "lvgl/lvgl.h"
 #include "lv_drivers/display/fbdev.h"
 #include "wm.h"
+#include "com_proto.h"
 
 // Global Clock Label
 lv_obj_t * label_clock;
 int mouse_fd = -1;
 uint32_t screen_width = 0;
 uint32_t screen_height = 0;
+std::mutex lvgl_mutex; // Protect LVGL API calls
 
 // --- Image Loader Helper ---
 // Loads a PNG/JPG from disk and converts it to an LVGL image descriptor
@@ -106,6 +115,7 @@ void cleanup_tty() {
 // Custom Mouse Driver
 static int g_mouse_x = 0;
 static int g_mouse_y = 0;
+static lv_indev_state_t g_mouse_btn_state = LV_INDEV_STATE_RELEASED;
 
 void custom_mouse_read(lv_indev_drv_t * drv, lv_indev_data_t * data) {
     if (mouse_fd < 0) return;
@@ -117,7 +127,7 @@ void custom_mouse_read(lv_indev_drv_t * drv, lv_indev_data_t * data) {
             else if (in.code == REL_Y) g_mouse_y += in.value;
         } else if (in.type == EV_KEY) {
             if (in.code == BTN_LEFT) {
-                data->state = (in.value) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+                g_mouse_btn_state = (in.value) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
             }
         }
     }
@@ -130,6 +140,7 @@ void custom_mouse_read(lv_indev_drv_t * drv, lv_indev_data_t * data) {
 
     data->point.x = g_mouse_x;
     data->point.y = g_mouse_y;
+    data->state = g_mouse_btn_state;
 }
 
 // Detect Mouse Device
@@ -165,13 +176,16 @@ void update_clock(lv_timer_t * timer) {
 static void start_btn_event_handler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_CLICKED) {
-        // Launch a Demo Window
-        lv_obj_t * content = create_window("Gemini File Explorer", 400, 300);
+        std::cout << "[Desktop] Launching Test GUI (Client)..." << std::endl;
         
-        // Add some dummy content
-        lv_obj_t * label = lv_label_create(content);
-        lv_label_set_text(label, "Welcome to GeminiOS!\n\nThis is a movable window.\nTry the buttons on top.");
-        lv_obj_center(label);
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/bin/apps/system/test_gui", "test_gui", NULL);
+            perror("execl failed");
+            exit(1);
+        }
+        // Detach to prevent zombies if we don't wait
+        // signal(SIGCHLD, SIG_IGN) handled elsewhere or just let init reap eventually
     }
 }
 
@@ -194,6 +208,153 @@ void debug_dev() {
                 std::cout << "  " << dir->d_name << std::endl;
         }
         closedir(d);
+    }
+}
+
+// --- Compositor Server ---
+
+void handle_client(int client_fd) {
+    // TODO: this function needs more robustness, specially where are located the block of comments below
+    std::cout << "[Compositor] Client connected (FD: " << client_fd << ")" << std::endl;
+
+    lv_obj_t* win = nullptr;
+    lv_obj_t* img_obj = nullptr;
+    lv_img_dsc_t* img_dsc = nullptr;
+    uint8_t* img_buffer = nullptr;
+
+    while (true) {
+        MsgHeader hdr;
+        ssize_t n = read(client_fd, &hdr, sizeof(hdr));
+        if (n <= 0) break;
+
+        if (hdr.type == MSG_HELLO) {
+            HelloPayload hello;
+            read(client_fd, &hello, sizeof(hello));
+            std::cout << "[Compositor] Hello from: " << hello.title << " (" << hello.width << "x" << hello.height << ")" << std::endl;
+
+            std::lock_guard<std::mutex> lock(lvgl_mutex);
+            
+            // Allocate buffer for the window content
+            // ARGB8888 = 4 bytes
+            size_t buf_size = hello.width * hello.height * 4;
+            img_buffer = (uint8_t*)malloc(buf_size);
+            memset(img_buffer, 0xFF, buf_size); // White background
+
+            // Create LVGL Image Descriptor
+            img_dsc = new lv_img_dsc_t;
+            memset(img_dsc, 0, sizeof(lv_img_dsc_t));
+            img_dsc->header.always_zero = 0;
+            img_dsc->header.w = hello.width;
+            img_dsc->header.h = hello.height;
+            img_dsc->data_size = buf_size;
+            img_dsc->header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA; 
+            img_dsc->data = img_buffer;
+
+            // Create Window
+            win = create_client_window(hello.title, hello.width + 10, hello.height + 50, &img_obj);
+            if (img_obj) {
+                lv_img_set_src(img_obj, img_dsc);
+                
+                // Add event callback to forward input to client
+                // We assume the client wants raw coordinates relative to the window
+                lv_obj_add_flag(img_obj, LV_OBJ_FLAG_CLICKABLE);
+                // Note: Implementing robust input forwarding requires tracking state
+                // For simplicity, we rely on polling or just basic events if needed
+            }
+
+        } else if (hdr.type == MSG_FRAME) {
+            FramePayload frame;
+            read(client_fd, &frame, sizeof(frame));
+            
+            // Read pixel data
+            // Calculate expected size
+            uint32_t data_len = hdr.len - sizeof(FramePayload);
+            
+            // To avoid blocking main loop too long, we read into temp buffer or direct if locked?
+            // We are in a thread, so we can block on read.
+            
+            // Protect the buffer update
+            // Optimisation: Don't lock while reading from socket, read to temp buffer then copy?
+            // Or if we trust read to be fast. Let's lock for safety of the pointer.
+            
+            // Wait, if we block on read inside lock, UI freezes.
+            // We must read into a local buffer first.
+            std::vector<uint8_t> chunk(data_len);
+            size_t total_read = 0;
+            while (total_read < data_len) {
+                ssize_t r = read(client_fd, chunk.data() + total_read, data_len - total_read);
+                if (r <= 0) break;
+                total_read += r;
+            }
+
+            if (total_read == data_len && img_buffer) {
+                std::lock_guard<std::mutex> lock(lvgl_mutex);
+                // Copy chunk to specific location in img_buffer
+                // For simplicity, assume full refresh or simple line copy
+                // The flush_cb from client usually sends a rect.
+                // We need to map rect to our buffer.
+                
+                uint32_t bpp = 4; // ARGB
+                uint32_t stride = img_dsc->header.w * bpp;
+                
+                // Copy row by row
+                // frame.x/y/w/h
+                const uint8_t* src = chunk.data();
+                for (int y = 0; y < frame.h; ++y) {
+                    int dst_offset = ((frame.y + y) * stride) + (frame.x * bpp);
+                    if (dst_offset + (frame.w * bpp) <= img_dsc->data_size) {
+                        memcpy(img_buffer + dst_offset, src + (y * frame.w * bpp), frame.w * bpp);
+                    }
+                }
+                
+                if (img_obj) lv_obj_invalidate(img_obj);
+            }
+        }
+    }
+
+    std::cout << "[Compositor] Client disconnected." << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(lvgl_mutex);
+        if (win) lv_obj_del(win);
+        if (img_dsc) delete img_dsc;
+        if (img_buffer) free(img_buffer);
+    }
+    close(client_fd);
+}
+
+void compositor_thread() {
+    int server_fd;
+    struct sockaddr_un address;
+
+    if ((server_fd = socket(AF_UNIX, SOCK_STREAM, 0)) == 0) {
+        perror("socket failed");
+        return;
+    }
+
+    address.sun_family = AF_UNIX;
+    strncpy(address.sun_path, WM_SOCKET_PATH, sizeof(address.sun_path)-1);
+    unlink(WM_SOCKET_PATH);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        return;
+    }
+
+    if (listen(server_fd, 5) < 0) {
+        perror("listen");
+        return;
+    }
+
+    std::cout << "[Compositor] Listening on " << WM_SOCKET_PATH << std::endl;
+
+    while (true) {
+        struct sockaddr_un client_addr;
+        socklen_t len = sizeof(client_addr);
+        int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &len);
+        if (client_fd >= 0) {
+            std::thread t(handle_client, client_fd);
+            t.detach();
+        }
     }
 }
 
@@ -263,6 +424,10 @@ int main(void) {
     lv_disp_drv_register(&disp_drv);
 
     // 4. Register Input Driver (Mouse)
+    // We protect input read with mutex? No, LVGL calls read_cb from the timer handler
+    // which we will wrap in the main loop.
+    // But wait, custom_mouse_read is called by LVGL.    
+
     if (mouse_fd >= 0) {
         static lv_indev_drv_t indev_drv;
         lv_indev_drv_init(&indev_drv);
@@ -365,10 +530,17 @@ int main(void) {
     // Clock Timer
     lv_timer_create(update_clock, 1000, NULL);
 
-    // 6. Main Loop
+    // 6. Start Compositor Server
+    std::thread comp_thread(compositor_thread);
+    comp_thread.detach();
+
+    // 7. Main Loop
     while(1) {
-        lv_timer_handler();
-        usleep(5000);
+        {
+            std::lock_guard<std::mutex> lock(lvgl_mutex);
+            lv_timer_handler();
+        }
+        usleep(5000); // 5ms
     }
 
     return 0;
