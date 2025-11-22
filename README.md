@@ -1,6 +1,7 @@
 # GeminiOS Documentation
 
 GeminiOS is a minimal, open-source, educational Linux-based Operating System built from scratch (fully made by Google Gemini 3). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot). This project follows the Linux From Scratch (LFS) philosophy.
+
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
 ## Prerequisites
@@ -49,7 +50,7 @@ make x86_64_defconfig
 make -j$(nproc) bzImage
 ```
 
-- Step A: The Userspace Code (`src/...` and `packages/...)
+- Step A: The Userspace Code (`src/...` and `packages/...`)
 This is where you will spend most of your time.
 
 - Step B: The Build Script (`build.sh`)
@@ -68,7 +69,9 @@ Build!
 ```
 
 # Save source into a txt file:
+```python
 python save_src.py --root . --exclude packages/system/desktop/stb_image.h --extra-excludes linux* bash* nano* grep* ncurses* sed* gawk* grub* kbd* rootfs* lvgl* lv_drivers* project_export.txt 
+```
 
 Note for Gemini: HEY TRY TO MAKE THIS SOURCE CODE FILES AND DIRECTORIES ORGANIZED PLS THANKS
 ALSO ADD A LOT OF DEBUG IN CODES BECAUSE IT GONNA BE VERY USEFUL
