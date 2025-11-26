@@ -62,6 +62,12 @@ int main(int argc, char* argv[]) {
     }
 
     std::string action = args[1];
+    bool verbose = false;
+    
+    // Scan for verbose flag
+    for (const auto& arg : args) {
+        if (arg == "-v" || arg == "--verbose") verbose = true;
+    }
 
     // Enforce Root for system modifications
     if (action == "install" || action == "remove" || action == "clean" || action == "download" || action == "update") {
@@ -102,7 +108,7 @@ int main(int argc, char* argv[]) {
         if (access(src_path.c_str(), F_OK) != 0) {
             std::cout << "[GPKG] '" << pkg_name << "' not found locally. Attempting to download..." << std::endl;
             std::string url = CDN_BASE + pkg_name + EXTENSION;
-            if (!DownloadFile(url, src_path)) {
+            if (!DownloadFile(url, src_path, verbose)) {
                 std::cerr << "[ERR] Package download failed. Installation aborted." << std::endl;
                 return 1;
             }
@@ -166,7 +172,7 @@ int main(int argc, char* argv[]) {
 
         std::cout << "[GPKG] Downloading " << pkg_name << " from " << url << "..." << std::endl;
         
-        if (DownloadFile(url, dest)) {
+        if (DownloadFile(url, dest, verbose)) {
             std::cout << "[SUCCESS] Downloaded to " << dest << ". Run 'gpkg install " << pkg_name << "' to install." << std::endl;
         } else {
             std::cout << "[ERR] Download failed." << std::endl;
@@ -202,7 +208,7 @@ int main(int argc, char* argv[]) {
         
         std::stringstream ss;
         HttpOptions opts;
-        opts.verbose = false; // Keep it clean
+        opts.verbose = verbose;
         
         if (HttpRequest(CDN_BASE + INDEX_FILE, ss, opts)) {
             std::string line;
@@ -227,7 +233,7 @@ int main(int argc, char* argv[]) {
         std::string url = CDN_BASE + INDEX_FILE;
         std::string dest = REPO_PATH + INDEX_FILE;
         
-        if (DownloadFile(url, dest)) {
+        if (DownloadFile(url, dest, verbose)) {
             std::cout << "[SUCCESS] Package index updated." << std::endl;
         } else {
             std::cerr << "[ERR] Failed to update package index." << std::endl;

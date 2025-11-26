@@ -3,7 +3,7 @@ set -e # Exit immediately if a command fails
 set -o pipefail # Exit if any command in a pipe fails
 
 # Configuration
-ENABLE_DEBUG=true # Set to true to enable detailed debug logs
+ENABLE_DEBUG=false # Set to true to enable detailed debug logs
 KERNEL_VERSION="linux-6.6.14" # Change this if you update kernel version
 KERNEL_BZIMAGE="$KERNEL_VERSION/arch/x86/boot/bzImage"
 

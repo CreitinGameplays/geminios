@@ -7,13 +7,22 @@
 #include "../../../src/sys_info.h"
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        std::cerr << "Usage: chown <user[:group]> <file>\n";
+    bool verbose = false;
+    std::vector<std::string> args;
+    
+    for(int i=1; i<argc; ++i) {
+        std::string arg = argv[i];
+        if(arg == "-v" || arg == "--verbose") verbose = true;
+        else args.push_back(arg);
+    }
+
+    if (args.size() < 2) {
+        std::cerr << "Usage: chown [-v] <user[:group]> <file>\n";
         return 1;
     }
 
-    std::string owner_str = argv[1];
-    std::string path = argv[2];
+    std::string owner_str = args[0];
+    std::string path = args[1];
     
     std::string user_name, group_name;
     size_t colon = owner_str.find(':');
@@ -75,6 +84,8 @@ int main(int argc, char* argv[]) {
     if (chown(path.c_str(), uid, gid) != 0) {
         perror(("chown: " + path).c_str());
         return 1;
+    } else {
+        if (verbose) std::cout << "changed ownership of '" << path << "' to " << owner_str << "\n";
     }
 
     return 0;

@@ -126,11 +126,10 @@ int main(int argc, char* argv[]) {
                     case 'i': g_interactive = true; break;
                     case 'v': g_verbose = true; break;
                     case 'd': g_dir = true; break;
-                    default: 
-                        std::cerr << "rm: invalid option -- '" << arg[j] << "'" << std::endl;
-                        return 1;
                 }
             }
+        } else if (arg == "--verbose") {
+            g_verbose = true;
         } else {
             targets.push_back(arg);
         }

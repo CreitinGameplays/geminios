@@ -27,6 +27,19 @@
 #include "lv_drivers/display/fbdev.h"
 #include "wm.h"
 #include "com_proto.h"
+#include <fstream>
+#include <algorithm>
+#include <sys/stat.h>
+
+// App Info Structure
+struct AppInfo {
+    std::string name;
+    std::string path;
+};
+
+std::vector<AppInfo> installed_apps;
+lv_obj_t * start_menu_container = nullptr;
+
 
 // Global Clock Label
 lv_obj_t * label_clock;
@@ -176,16 +189,155 @@ void update_clock(lv_timer_t * timer) {
 static void start_btn_event_handler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_CLICKED) {
-        std::cout << "[Desktop] Launching Test GUI (Client)..." << std::endl;
-        
-        pid_t pid = fork();
-        if (pid == 0) {
-            execl("/bin/apps/system/test_gui", "test_gui", NULL);
-            perror("execl failed");
-            exit(1);
+        if (start_menu_container) {
+            if (lv_obj_has_flag(start_menu_container, LV_OBJ_FLAG_HIDDEN)) {
+                lv_obj_clear_flag(start_menu_container, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(start_menu_container);
+            } else {
+                lv_obj_add_flag(start_menu_container, LV_OBJ_FLAG_HIDDEN);
+            }
         }
-        // Detach to prevent zombies if we don't wait
-        // signal(SIGCHLD, SIG_IGN) handled elsewhere or just let init reap eventually
+    }
+}
+
+// --- Application Discovery ---
+
+bool is_gui_app(const std::string& path) {
+    // Whitelist specific TTY apps that we want to show in menu
+    if (path.find("snake") != std::string::npos) return true;
+    if (path.find("gemfetch") != std::string::npos) return true;
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+
+    // Read file content (limit to first 2MB to avoid huge reads on huge binaries, if any)
+    // Most system apps are small static binaries.
+    std::string content;
+    content.resize(2 * 1024 * 1024); 
+    file.read(&content[0], content.size());
+    size_t read_count = file.gcount();
+    content.resize(read_count);
+    
+    // Search for the socket path string which indicates it links to our WM protocol
+    // This is a heuristic but effective for this environment
+    return content.find(WM_SOCKET_PATH) != std::string::npos;
+}
+
+void scan_apps() {
+    installed_apps.clear();
+    std::cout << "[Desktop] Scanning for applications..." << std::endl;
+
+    // 1. User Apps (/bin/apps) - Include All Executables
+    // We assume anything the user puts here is meant to be seen.
+    std::string user_path = "/bin/apps";
+    DIR *dir = opendir(user_path.c_str());
+    if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_name[0] == '.') continue;
+            
+            std::string full_path = user_path + "/" + entry->d_name;
+            struct stat st;
+            
+            // Check if it is a regular file and executable
+            if (stat(full_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+                if (access(full_path.c_str(), X_OK) == 0) {
+                    std::cout << "[Desktop] Adding User App: " << entry->d_name << std::endl;
+                    installed_apps.push_back({entry->d_name, full_path});
+                }
+            }
+        }
+        closedir(dir);
+    }
+
+    // 2. System Apps (/bin/apps/system) - Filter for GUI or Whitelist
+    // We don't want to list 'ls', 'cp', 'mv' etc. in the Start Menu.
+    std::string sys_path = "/bin/apps/system";
+    dir = opendir(sys_path.c_str());
+    if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_name[0] == '.') continue;
+            if (std::string(entry->d_name) == "desktop") continue; // Don't list self
+
+            std::string full_path = sys_path + "/" + entry->d_name;
+            struct stat st;
+            if (stat(full_path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+                if (access(full_path.c_str(), X_OK) == 0) {
+                    if (is_gui_app(full_path)) {
+                        std::cout << "[Desktop] Found System GUI App: " << entry->d_name << std::endl;
+                        installed_apps.push_back({entry->d_name, full_path});
+                    }
+                }
+            }
+        }
+        closedir(dir);
+    }
+    
+    // Sort alphabetically
+    std::sort(installed_apps.begin(), installed_apps.end(), 
+        [](const AppInfo& a, const AppInfo& b) { return a.name < b.name; });
+}
+
+static void app_btn_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        AppInfo* app = (AppInfo*)lv_event_get_user_data(e);
+        if (app) {
+            std::cout << "[Desktop] Launching " << app->name << "..." << std::endl;
+            
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child process
+                // Restore default signal handlers
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+                
+                execl(app->path.c_str(), app->name.c_str(), NULL);
+                perror("execl failed");
+                exit(1);
+            }
+            
+            // Close start menu after launch
+            if (start_menu_container) {
+                lv_obj_add_flag(start_menu_container, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+}
+
+void create_start_menu() {
+    if (start_menu_container) return;
+
+    // Create Container
+    start_menu_container = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(start_menu_container, 200, 300);
+    lv_obj_align(start_menu_container, LV_ALIGN_BOTTOM_LEFT, 5, -50); // Above Start Button
+    lv_obj_set_style_bg_color(start_menu_container, lv_color_hex(0x303030), 0);
+    lv_obj_set_style_border_color(start_menu_container, lv_color_hex(0x505050), 0);
+    lv_obj_set_style_radius(start_menu_container, 5, 0);
+    
+    // Initially Hidden
+    lv_obj_add_flag(start_menu_container, LV_OBJ_FLAG_HIDDEN);
+
+    // Title
+    lv_obj_t * title = lv_label_create(start_menu_container);
+    lv_label_set_text(title, "Applications");
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
+
+    // List of Apps
+    lv_obj_t * list = lv_list_create(start_menu_container);
+    lv_obj_set_size(list, LV_PCT(100), LV_PCT(85));
+    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(list, lv_color_hex(0x404040), 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+
+    for (auto& app : installed_apps) {
+        lv_obj_t * btn = lv_list_add_btn(list, LV_SYMBOL_FILE, app.name.c_str());
+        lv_obj_add_event_cb(btn, app_btn_event_handler, LV_EVENT_CLICKED, &app);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x404040), 0);
+        lv_obj_set_style_text_color(btn, lv_color_hex(0xFFFFFF), 0);
     }
 }
 
@@ -372,7 +524,23 @@ void compositor_thread() {
 }
 
 int main(void) {
-    // 0. Sanity Checks
+    // 0. Single Instance Check
+    int lock_fd = open("/tmp/desktop.lock", O_CREAT | O_EXCL, 0644);
+    if (lock_fd < 0) {
+        std::cerr << "[Desktop] Another instance is already running. Exiting." << std::endl;
+        return 1;
+    }
+    // We don't need to keep the fd open, just the file existence is enough for this simple check.
+    // But keeping it open and locking it would be more robust. 
+    // For now, just existence check as requested.
+    close(lock_fd);
+    
+    // Ensure lock file is removed on exit
+    atexit([]{
+        unlink("/tmp/desktop.lock");
+    });
+
+    // 0.1 Sanity Checks
     if (access("/dev/fb0", F_OK) != 0) {
         std::cerr << "\n[ERROR] /dev/fb0 not found!" << std::endl;
         std::cerr << "Possible causes:" << std::endl;
@@ -543,6 +711,10 @@ int main(void) {
 
     // Clock Timer
     lv_timer_create(update_clock, 1000, NULL);
+
+    // Scan Apps & Create Menu
+    scan_apps();
+    create_start_menu();
 
     // 6. Start Compositor Server
     std::thread comp_thread(compositor_thread);

@@ -86,7 +86,7 @@ int main(int argc, char* argv[]) {
              return 0;
         }
         else if (arg == "-i") opts.interactive = true;
-        else if (arg == "-v") opts.verbose = true;
+        else if (arg == "-v" || arg == "--verbose") opts.verbose = true;
         else if (arg[0] == '-') {
             for (size_t j = 1; j < arg.length(); ++j) {
                 if (arg[j] == 'i') opts.interactive = true;

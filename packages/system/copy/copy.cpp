@@ -216,7 +216,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "-r" || arg == "-R") opts.recursive = true;
         else if (arg == "-i") opts.interactive = true;
         else if (arg == "-p") opts.preserve = true;
-        else if (arg == "-v") opts.verbose = true;
+        else if (arg == "-v" || arg == "--verbose") opts.verbose = true;
         else if (arg[0] == '-') {
             // Handle combined args like -rv
             for (size_t j = 1; j < arg.length(); ++j) {

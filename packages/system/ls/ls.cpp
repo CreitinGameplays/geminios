@@ -81,6 +81,7 @@ bool g_indicators = false;
 bool g_reverse = false;
 bool g_inode = false;
 bool g_directory = false;
+bool g_verbose = false;
 enum SortMode { NAME, TIME, SIZE };
 SortMode g_sort = NAME;
 
@@ -103,8 +104,13 @@ int main(int argc, char* argv[]) {
                       << "  -R         Recursive\n"
                       << "  -r         Reverse order\n"
                       << "  -t         Sort by time\n"
-                      << "  -S         Sort by size\n";
+                      << "  -S         Sort by size\n"
+                      << "  -v, --verbose Verbose output\n";
             return 0;
+        }
+        if (arg == "--verbose") {
+            g_verbose = true;
+            continue;
         }
         if (arg == "--version") {
             std::cout << "ls (" << OS_NAME << ") " << OS_VERSION << std::endl;
@@ -123,6 +129,7 @@ int main(int argc, char* argv[]) {
                 else if (c == 'i') g_inode = true;
                 else if (c == 't') g_sort = TIME;
                 else if (c == 'S') g_sort = SIZE;
+                else if (c == 'v') g_verbose = true;
             }
         }
         else paths.push_back(arg);
@@ -139,6 +146,7 @@ int main(int argc, char* argv[]) {
 }
 
 void list_dir(const std::string& path) {
+    if (g_verbose) std::cout << "Listing directory: " << path << std::endl;
     if (g_directory) {
         FileInfo fi;
         fi.name = path;

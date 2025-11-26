@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
         if (arg == "--help") { std::cout << "Usage: mkdir [-p] [-v] [-m mode] <dir>...\n"; return 0; }
         else if (arg == "--version") { std::cout << "mkdir (" << OS_NAME << ") " << OS_VERSION << "\n"; return 0; }
         else if (arg == "-p") parents = true;
-        else if (arg == "-v") verbose = true;
+        else if (arg == "-v" || arg == "--verbose") verbose = true;
         else if (arg == "-m" && i+1 < argc) {
             mode = std::strtol(argv[++i], nullptr, 8);
         }

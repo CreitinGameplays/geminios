@@ -444,6 +444,8 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--exclude" && i + 1 < argc) {
             excludes.push_back(argv[++i]);
+        } else if (arg == "--verbose") {
+            g_verbose = true;
         } else if (arg == "-C" && i + 1 < argc) {
             change_dir = argv[++i];
         } else if (arg[0] == '-') {
