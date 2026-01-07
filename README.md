@@ -73,6 +73,11 @@ Build! (this gonna take a very while the first time, just sit, wait and pray you
 python save_src.py --root . --exclude packages/system/desktop/stb_image.h --extra-excludes external_dependencies* glibc* grub* rootfs*
 ```
 
+Test the virtio GPU:
+```
+qemu-system-x86_64 -m 2G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -enable-kvm
+```
+
 Note: mkfs only supports ext2 for now.
 
 Manual fixes done in source code of external dependencies:

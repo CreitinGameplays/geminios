@@ -484,6 +484,49 @@ if [ ! -f "rootfs/usr/lib64/libssl.so.3" ] || [ ! -f "rootfs/usr/lib64/pkgconfig
     popd
 fi
 
+# 2.5. ZSTD (Compression library, required by Mesa)
+ZSTD_VER="1.5.5"
+if [ ! -f "rootfs/usr/lib64/libzstd.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/libzstd.pc" ]; then
+    echo "Downloading and Building Zstd $ZSTD_VER..."
+    download_and_extract "https://github.com/facebook/zstd/releases/download/v$ZSTD_VER/zstd-$ZSTD_VER.tar.gz" "zstd-$ZSTD_VER.tar.gz" "zstd-$ZSTD_VER"
+    
+    pushd "$DEP_DIR/zstd-$ZSTD_VER"
+    make -j$JOBS PREFIX=/usr LIBDIR=/usr/lib64
+    make install DESTDIR=$(pwd)/../../rootfs PREFIX=/usr LIBDIR=/usr/lib64
+    popd
+fi
+
+# 2.6. LIBELF (Required by Mesa)
+# We use elfutils to provide libelf.
+ELFUTILS_VER="0.191"
+if [ ! -f "rootfs/usr/lib64/libelf.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/libelf.pc" ]; then
+    echo "Downloading and Building elfutils $ELFUTILS_VER..."
+    download_and_extract "https://sourceware.org/elfutils/ftp/$ELFUTILS_VER/elfutils-$ELFUTILS_VER.tar.bz2" "elfutils-$ELFUTILS_VER.tar.bz2" "elfutils-$ELFUTILS_VER"
+    
+    pushd "$DEP_DIR/elfutils-$ELFUTILS_VER"
+    # Elfutils is picky. We only want libelf for now.
+    ./configure --prefix=/usr --libdir=/usr/lib64 \
+                --disable-debuginfod --disable-libdebuginfod \
+                --disable-nls --disable-werror \
+                --host=x86_64-linux-gnu
+    
+    # Build only libelf and dependencies
+    make -C lib -j$JOBS
+    make -C libelf -j$JOBS
+    
+    # Install libelf
+    make -C libelf install DESTDIR=$(pwd)/../../rootfs
+    
+    # Manually install the pkg-config file if the above didn't catch it
+    mkdir -p ../../rootfs/usr/lib64/pkgconfig
+    if [ -f "config/libelf.pc" ]; then
+        cp config/libelf.pc ../../rootfs/usr/lib64/pkgconfig/
+    elif [ -f "libelf/libelf.pc" ]; then
+        cp libelf/libelf.pc ../../rootfs/usr/lib64/pkgconfig/
+    fi
+    popd
+fi
+
 # 3. LIBXML2 (XML Parser)
 LIBXML2_VER="2.12.4"
 if [ ! -f "rootfs/usr/lib64/libxml2.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/libxml-2.0.pc" ]; then
@@ -566,6 +609,12 @@ if [ ! -f "rootfs/usr/bin/dbus-daemon" ]; then
     
     make -j$JOBS
     make install DESTDIR=$(pwd)/../../rootfs
+
+    # FIX: Remove empty Libs.private from .pc file, which can confuse some pkg-config versions
+    if [ -f "../../rootfs/usr/lib64/pkgconfig/dbus-1.pc" ]; then
+        sed -i '/^Libs.private: *$/d' "../../rootfs/usr/lib64/pkgconfig/dbus-1.pc"
+    fi
+
     popd
 fi
 
@@ -642,7 +691,7 @@ if [ ! -f "rootfs/usr/bin/g-ir-scanner" ]; then
     export LD_LIBRARY_PATH="$(pwd)/../../rootfs/usr/lib64:$LD_LIBRARY_PATH"
     export PATH="$(pwd)/../../rootfs/usr/bin:$PATH"
     
-    meson setup build --prefix=/usr --libdir=lib64 \
+    env -u LD_LIBRARY_PATH meson setup build --prefix=/usr --libdir=lib64 \
         -Dpython="$(pwd)/../../rootfs/usr/bin/python3" \
         -Ddoctool=disabled \
         -Dwerror=false
@@ -771,6 +820,38 @@ if [ ! -f "rootfs/usr/lib64/libxcb.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/x
     unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
 fi
 
+# 7.4. XCB-UTIL (Base utility library for XCB)
+XCB_UTIL_VER="0.4.1"
+if [ ! -f "rootfs/usr/lib64/libxcb-util.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xcb-util.pc" ]; then
+    echo "Building xcb-util $XCB_UTIL_VER..."
+    download_and_extract "https://xcb.freedesktop.org/dist/xcb-util-$XCB_UTIL_VER.tar.gz" "xcb-util-$XCB_UTIL_VER.tar.gz" "xcb-util-$XCB_UTIL_VER"
+    
+    pushd "$DEP_DIR/xcb-util-$XCB_UTIL_VER"
+    export PKG_CONFIG_LIBDIR="$(pwd)/../../rootfs/usr/lib64/pkgconfig:$(pwd)/../../rootfs/usr/share/pkgconfig"
+    export PKG_CONFIG_SYSROOT_DIR="$(pwd)/../../rootfs"
+    ./configure --prefix=/usr --libdir=/usr/lib64 --disable-static --host=x86_64-linux-gnu
+    make -j$JOBS
+    make install DESTDIR=$(pwd)/../../rootfs
+    popd
+    unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+fi
+
+# 7.5. XCB-UTIL-KEYSYMS (Required by Mesa)
+XCB_UTIL_KEYSYMS_VER="0.4.1"
+if [ ! -f "rootfs/usr/lib64/libxcb-keysyms.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xcb-keysyms.pc" ]; then
+    echo "Building xcb-util-keysyms $XCB_UTIL_KEYSYMS_VER..."
+    download_and_extract "https://xcb.freedesktop.org/dist/xcb-util-keysyms-$XCB_UTIL_KEYSYMS_VER.tar.gz" "xcb-util-keysyms-$XCB_UTIL_KEYSYMS_VER.tar.gz" "xcb-util-keysyms-$XCB_UTIL_KEYSYMS_VER"
+    
+    pushd "$DEP_DIR/xcb-util-keysyms-$XCB_UTIL_KEYSYMS_VER"
+    export PKG_CONFIG_LIBDIR="$(pwd)/../../rootfs/usr/lib64/pkgconfig:$(pwd)/../../rootfs/usr/share/pkgconfig"
+    export PKG_CONFIG_SYSROOT_DIR="$(pwd)/../../rootfs"
+    ./configure --prefix=/usr --libdir=/usr/lib64 --disable-static --host=x86_64-linux-gnu
+    make -j$JOBS
+    make install DESTDIR=$(pwd)/../../rootfs
+    popd
+    unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+fi
+
 # 8. LIBX11 (The primary X11 library)
 LIBX11_VER="1.8.7"
 if [ ! -f "rootfs/usr/lib64/libX11.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/x11.pc" ]; then
@@ -806,6 +887,22 @@ if [ ! -f "rootfs/usr/lib64/libXext.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/
     # Fix .la files
     # Remove .la files (they cause issues with absolute paths in sysroot)
     find ../../rootfs -name "*.la" -delete
+    popd
+    unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+fi
+
+# 9.5. LIBXXF86VM (X11 Free86 Video Mode extension library, required by Mesa)
+LIBXXF86VM_VER="1.1.5"
+if [ ! -f "rootfs/usr/lib64/libXxf86vm.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xxf86vm.pc" ]; then
+    echo "Building libXxf86vm $LIBXXF86VM_VER..."
+    download_and_extract "https://www.x.org/archive/individual/lib/libXxf86vm-$LIBXXF86VM_VER.tar.gz" "libXxf86vm-$LIBXXF86VM_VER.tar.gz" "libXxf86vm-$LIBXXF86VM_VER"
+    
+    pushd "$DEP_DIR/libXxf86vm-$LIBXXF86VM_VER"
+    export PKG_CONFIG_LIBDIR="$(pwd)/../../rootfs/usr/lib64/pkgconfig:$(pwd)/../../rootfs/usr/share/pkgconfig"
+    export PKG_CONFIG_SYSROOT_DIR="$(pwd)/../../rootfs"
+    ./configure --prefix=/usr --libdir=/usr/lib64 --disable-static --host=x86_64-linux-gnu
+    make -j$JOBS
+    make install DESTDIR=$(pwd)/../../rootfs
     popd
     unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
 fi
@@ -1015,7 +1112,7 @@ fi
 
 # 2. LIBJPEG-TURBO (JPEG support)
 LIBJPEG_TURBO_VER="3.0.1"
-if [ ! -f "rootfs/usr/lib64/libjpeg.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libjpeg.so" ] || [ ! -f "rootfs/usr/include/jpeglib.h" ]; then
     echo "Building libjpeg-turbo $LIBJPEG_TURBO_VER..."
     download_and_extract "https://downloads.sourceforge.net/libjpeg-turbo/libjpeg-turbo-$LIBJPEG_TURBO_VER.tar.gz" "libjpeg-turbo-$LIBJPEG_TURBO_VER.tar.gz" "libjpeg-turbo-$LIBJPEG_TURBO_VER"
     
@@ -1029,7 +1126,7 @@ fi
 
 # 3. LIBTIFF (TIFF support)
 LIBTIFF_VER="4.6.0"
-if [ ! -f "rootfs/usr/lib64/libtiff.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libtiff.so" ] || [ ! -f "rootfs/usr/include/tiff.h" ]; then
     echo "Building libtiff $LIBTIFF_VER..."
     download_and_extract "https://download.osgeo.org/libtiff/tiff-$LIBTIFF_VER.tar.gz" "tiff-$LIBTIFF_VER.tar.gz" "tiff-$LIBTIFF_VER"
     
@@ -1324,6 +1421,76 @@ if [ ! -f "rootfs/usr/lib64/libudev.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/
     popd
 fi
 
+# 32.5. LIBDRM (Direct Rendering Manager userspace library)
+LIBDRM_VER="2.4.120"
+if [ ! -f "rootfs/usr/lib64/libdrm.so" ]; then
+    echo "Building libdrm $LIBDRM_VER..."
+    download_and_extract "https://dri.freedesktop.org/libdrm/libdrm-$LIBDRM_VER.tar.xz" "libdrm-$LIBDRM_VER.tar.xz" "libdrm-$LIBDRM_VER"
+    
+    pushd "$DEP_DIR/libdrm-$LIBDRM_VER"
+    OLD_PYTHONHOME=$PYTHONHOME
+    unset PYTHONHOME
+    
+    export PKG_CONFIG_LIBDIR="$(pwd)/../../rootfs/usr/lib64/pkgconfig:$(pwd)/../../rootfs/usr/share/pkgconfig"
+    export PKG_CONFIG_SYSROOT_DIR="$(pwd)/../../rootfs"
+    
+    meson setup build --prefix=/usr --libdir=lib64 \
+        -Dudev=true \
+        -Dintel=disabled \
+        -Dradeon=disabled \
+        -Damdgpu=disabled \
+        -Dnouveau=disabled \
+        -Dvmwgfx=enabled \
+        -Dtests=false \
+        -Dwerror=false
+        
+    ninja -C build
+    DESTDIR=$(pwd)/../../rootfs ninja -C build install
+    
+    export PYTHONHOME=$OLD_PYTHONHOME
+    unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+    popd
+fi
+
+# 32.6. MESA (OpenGL Implementation)
+MESA_VER="24.0.0"
+if [ ! -f "rootfs/usr/lib64/libGL.so" ]; then
+    echo "Building Mesa $MESA_VER..."
+    download_and_extract "https://archive.mesa3d.org/mesa-$MESA_VER.tar.xz" "mesa-$MESA_VER.tar.xz" "mesa-$MESA_VER"
+    
+    pushd "$DEP_DIR/mesa-$MESA_VER"
+    OLD_PYTHONHOME=$PYTHONHOME
+    unset PYTHONHOME
+    
+    export PKG_CONFIG_LIBDIR="$(pwd)/../../rootfs/usr/lib64/pkgconfig:$(pwd)/../../rootfs/usr/share/pkgconfig"
+    export PKG_CONFIG_SYSROOT_DIR="$(pwd)/../../rootfs"
+    
+    # We use swrast (software rasterizer) as the primary driver for compatibility.
+    # We disable LLVM for now to keep the build simple (uses softpipe).
+    # compile with virtio
+    meson setup build --prefix=/usr --libdir=lib64 \
+        -Dplatforms=x11 \
+        -Dgallium-drivers=swrast,virtio \
+        -Dvulkan-drivers= \
+        -Dopengl=true \
+        -Dglx=dri \
+        -Degl=enabled \
+        -Dgles1=enabled \
+        -Dgles2=enabled \
+        -Dllvm=disabled \
+        -Dshared-glapi=enabled \
+        -Dgbm=enabled \
+        -Dbuildtype=release \
+        -Dwerror=false
+        
+    ninja -C build
+    DESTDIR=$(pwd)/../../rootfs ninja -C build install
+    
+    export PYTHONHOME=$OLD_PYTHONHOME
+    unset PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+    popd
+fi
+
 # 33. XORG-SERVER (The X Window System Server)
 XORG_SERVER_VER="1.20.14"
 if [ ! -f "rootfs/usr/bin/Xorg" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xorg-server.pc" ]; then
@@ -1334,7 +1501,7 @@ if [ ! -f "rootfs/usr/bin/Xorg" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xorg-ser
     export PKG_CONFIG_LIBDIR="$(pwd)/../../rootfs/usr/lib64/pkgconfig:$(pwd)/../../rootfs/usr/share/pkgconfig"
     export PKG_CONFIG_SYSROOT_DIR="$(pwd)/../../rootfs"
     
-    # Configure Xorg with minimal dependencies for our custom OS
+    # Configure Xorg with OpenGL support enabled
     ./configure --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
         --disable-static \
         --enable-xorg \
@@ -1346,14 +1513,14 @@ if [ ! -f "rootfs/usr/bin/Xorg" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xorg-ser
         --disable-config-udev-kms \
         --disable-config-hal \
         --disable-systemd-logind \
-        --disable-glx \
-        --disable-dri \
-        --disable-dri2 \
-        --disable-dri3 \
+        --enable-glx \
+        --enable-dri \
+        --enable-dri2 \
+        --enable-dri3 \
         --enable-fbdev \
-        --disable-libdrm \
+        --enable-libdrm \
         --disable-unit-tests \
-        --disable-glamor \
+        --enable-glamor \
         --disable-selective-werror \
         --with-xkb-bin-directory=/usr/bin \
         --with-xkb-path=/usr/share/X11/xkb \
@@ -1391,7 +1558,7 @@ fi
 
 # 34. LIBEVDEV (Wrapper library for evdev devices)
 LIBEVDEV_VER="1.13.1"
-if [ ! -f "rootfs/usr/lib64/libevdev.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libevdev.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/libevdev.pc" ]; then
     echo "Building libevdev $LIBEVDEV_VER..."
     download_and_extract "https://www.freedesktop.org/software/libevdev/libevdev-$LIBEVDEV_VER.tar.xz" "libevdev-$LIBEVDEV_VER.tar.xz" "libevdev-$LIBEVDEV_VER"
     
@@ -1406,7 +1573,7 @@ fi
 
 # 35. MTDEV (Multitouch Protocol Translation Library)
 MTDEV_VER="1.1.6"
-if [ ! -f "rootfs/usr/lib64/libmtdev.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libmtdev.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/mtdev.pc" ]; then
     echo "Building mtdev $MTDEV_VER..."
     download_and_extract "http://bitmath.org/code/mtdev/mtdev-$MTDEV_VER.tar.bz2" "mtdev-$MTDEV_VER.tar.bz2" "mtdev-$MTDEV_VER"
     
@@ -1576,7 +1743,7 @@ fi
 
 # 3. FRIBIDI (Bidirectional algorithm)
 FRIBIDI_VER="1.0.13"
-if [ ! -f "rootfs/usr/lib64/libfribidi.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libfribidi.so" ] || [ ! -f "rootfs/usr/include/fribidi/fribidi.h" ]; then
     echo "Building fribidi $FRIBIDI_VER..."
     download_and_extract "https://github.com/fribidi/fribidi/releases/download/v$FRIBIDI_VER/fribidi-$FRIBIDI_VER.tar.xz" "fribidi-$FRIBIDI_VER.tar.xz" "fribidi-$FRIBIDI_VER"
     pushd "$DEP_DIR/fribidi-$FRIBIDI_VER"
@@ -1618,7 +1785,7 @@ fi
 
 # 2. GDK-PIXBUF
 GDK_PIXBUF_VER="2.42.10"
-if [ ! -f "rootfs/usr/lib64/libgdk_pixbuf-2.0.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libgdk_pixbuf-2.0.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/gdk-pixbuf-2.0.pc" ]; then
     echo "Building gdk-pixbuf $GDK_PIXBUF_VER..."
     download_and_extract "https://download.gnome.org/sources/gdk-pixbuf/2.42/gdk-pixbuf-$GDK_PIXBUF_VER.tar.xz" "gdk-pixbuf-$GDK_PIXBUF_VER.tar.xz" "gdk-pixbuf-$GDK_PIXBUF_VER"
     pushd "$DEP_DIR/gdk-pixbuf-$GDK_PIXBUF_VER"
@@ -1630,7 +1797,7 @@ fi
 
 # 3. AT-SPI2-CORE
 AT_SPI2_CORE_VER="2.38.0"
-if [ ! -f "rootfs/usr/lib64/libatspi.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libatspi.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/atspi-2.pc" ]; then
     echo "Building at-spi2-core $AT_SPI2_CORE_VER..."
     download_and_extract "https://download.gnome.org/sources/at-spi2-core/2.38/at-spi2-core-$AT_SPI2_CORE_VER.tar.xz" "at-spi2-core-$AT_SPI2_CORE_VER.tar.xz" "at-spi2-core-$AT_SPI2_CORE_VER"
     pushd "$DEP_DIR/at-spi2-core-$AT_SPI2_CORE_VER"
@@ -1645,7 +1812,7 @@ if [ ! -f "rootfs/usr/lib64/libatspi.so" ]; then
     export LD_LIBRARY_PATH="$(pwd)/../../rootfs/usr/lib64:$LD_LIBRARY_PATH"
     export PATH="$(pwd)/../../rootfs/usr/bin:$PATH"
 
-    meson setup build --prefix=/usr --libdir=lib64 -Dintrospection=no -Dx11=yes -Dwerror=false
+    env -u LD_LIBRARY_PATH meson setup build --prefix=/usr --libdir=lib64 -Dintrospection=no -Dx11=yes -Dwerror=false
     ninja -C build
     DESTDIR=$(pwd)/../../rootfs ninja -C build install
     
@@ -1658,7 +1825,7 @@ fi
 
 # 4. AT-SPI2-ATK
 AT_SPI2_ATK_VER="2.38.0"
-if [ ! -f "rootfs/usr/lib64/libatk-bridge-2.0.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libatk-bridge-2.0.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/atk-bridge-2.0.pc" ]; then
     echo "Building at-spi2-atk $AT_SPI2_ATK_VER..."
     download_and_extract "https://download.gnome.org/sources/at-spi2-atk/2.38/at-spi2-atk-$AT_SPI2_ATK_VER.tar.xz" "at-spi2-atk-$AT_SPI2_ATK_VER.tar.xz" "at-spi2-atk-$AT_SPI2_ATK_VER"
     pushd "$DEP_DIR/at-spi2-atk-$AT_SPI2_ATK_VER"
@@ -1673,7 +1840,7 @@ if [ ! -f "rootfs/usr/lib64/libatk-bridge-2.0.so" ]; then
     export LD_LIBRARY_PATH="$(pwd)/../../rootfs/usr/lib64:$LD_LIBRARY_PATH"
     export PATH="$(pwd)/../../rootfs/usr/bin:$PATH"
 
-    meson setup build --prefix=/usr --libdir=lib64 -Dtests=false -Dwerror=false
+    env -u LD_LIBRARY_PATH meson setup build --prefix=/usr --libdir=lib64 -Dtests=false -Dwerror=false
     ninja -C build
     DESTDIR=$(pwd)/../../rootfs ninja -C build install
     
@@ -1686,7 +1853,7 @@ fi
 
 # 5. ATK
 ATK_VER="2.38.0"
-if [ ! -f "rootfs/usr/lib64/libatk-1.0.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libatk-1.0.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/atk.pc" ]; then
     echo "Building atk $ATK_VER..."
     download_and_extract "https://download.gnome.org/sources/atk/2.38/atk-$ATK_VER.tar.xz" "atk-$ATK_VER.tar.xz" "atk-$ATK_VER"
     pushd "$DEP_DIR/atk-$ATK_VER"
@@ -1700,9 +1867,9 @@ echo "--- PHASE 9: Final Pre-Requisites ---"
 
 # 1. LIBEPOXY
 LIBEPOXY_VER="1.5.10"
-if [ ! -f "rootfs/usr/lib64/libepoxy.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libepoxy.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/epoxy.pc" ]; then
     echo "Building libepoxy $LIBEPOXY_VER..."
-    download_and_extract "https://github.com/anholt/libepoxy/releases/download/$LIBEPOXY_VER/libepoxy-$LIBEPOXY_VER.tar.xz" "libepoxy-$LIBEPOXY_VER.tar.xz" "libepoxy-$LIBEPOXY_VER"
+    download_and_extract "https://download.gnome.org/sources/libepoxy/1.5/libepoxy-$LIBEPOXY_VER.tar.xz" "libepoxy-$LIBEPOXY_VER.tar.xz" "libepoxy-$LIBEPOXY_VER"
     pushd "$DEP_DIR/libepoxy-$LIBEPOXY_VER"
     mkdir -p build && cd build
     meson setup --prefix=/usr --libdir=lib64 -Dtests=false ..
@@ -1713,7 +1880,7 @@ fi
 
 # 2. LIBXKBCOMMON
 LIBXKBCOMMON_VER="1.6.0"
-if [ ! -f "rootfs/usr/lib64/libxkbcommon.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libxkbcommon.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/xkbcommon.pc" ]; then
     echo "Building libxkbcommon $LIBXKBCOMMON_VER..."
     download_and_extract "https://xkbcommon.org/download/libxkbcommon-$LIBXKBCOMMON_VER.tar.xz" "libxkbcommon-$LIBXKBCOMMON_VER.tar.xz" "libxkbcommon-$LIBXKBCOMMON_VER"
     pushd "$DEP_DIR/libxkbcommon-$LIBXKBCOMMON_VER"
@@ -1728,7 +1895,7 @@ if [ ! -f "rootfs/usr/lib64/libxkbcommon.so" ]; then
     export LD_LIBRARY_PATH="$(pwd)/../../rootfs/usr/lib64:$LD_LIBRARY_PATH"
     export PATH="$(pwd)/../../rootfs/usr/bin:$PATH"
 
-    meson setup build --prefix=/usr --libdir=lib64 -Ddefault_library=shared -Denable-x11=true -Denable-wayland=false -Denable-docs=false -Dwerror=false
+    env -u LD_LIBRARY_PATH meson setup build --prefix=/usr --libdir=lib64 -Ddefault_library=shared -Denable-x11=true -Denable-wayland=false -Denable-docs=false -Dwerror=false
     ninja -C build
     DESTDIR=$(pwd)/../../rootfs ninja -C build install
     
@@ -1765,7 +1932,7 @@ echo "--- PHASE 10: GTK+ 3 ---"
 
 # 1. GTK+ 3
 GTK3_VER="3.24.41"
-if [ ! -f "rootfs/usr/lib64/libgtk-3.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libgtk-3.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/gtk+-3.0.pc" ]; then
     echo "Building gtk+ 3 $GTK3_VER..."
     download_and_extract "https://download.gnome.org/sources/gtk+/3.24/gtk+-$GTK3_VER.tar.xz" "gtk+-$GTK3_VER.tar.xz" "gtk+-$GTK3_VER"    
     pushd "$DEP_DIR/gtk+-$GTK3_VER"
@@ -2335,6 +2502,7 @@ echo "Run: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vg
 echo "Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm"
 echo "Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm"
 echo "Remove the -enable-kvm flag if your host does not support it."
+
 # Remove the object files
 rm src/*.o
 
