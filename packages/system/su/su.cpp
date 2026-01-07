@@ -77,6 +77,12 @@ int main(int argc, char* argv[]) {
     setenv("HOME", u_ptr->home.c_str(), 1);
     setenv("USER", u_ptr->username.c_str(), 1);
     setenv("SHELL", u_ptr->shell.c_str(), 1);
+    setenv("PATH", "/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin", 1);
+    setenv("LD_LIBRARY_PATH", "/lib:/usr/lib:/usr/local/lib:/lib64:/usr/lib64", 1);
+    setenv("LANG", "C.UTF-8", 1);
+    setenv("LC_ALL", "C.UTF-8", 1);
+    setenv("PYTHONUTF8", "1", 1);
+    setenv("PYTHONHOME", "/usr", 1);
 
     chdir(u_ptr->home.c_str());
 

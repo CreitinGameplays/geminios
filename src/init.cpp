@@ -43,7 +43,8 @@ void ensure_fhs() {
         "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", 
         "/mnt", "/opt", "/proc", "/root", "/run", "/sbin", "/srv", 
         "/sys", "/tmp", "/usr", "/usr/bin", "/usr/lib", "/usr/local", 
-        "/usr/share", "/var", "/var/log", "/var/tmp", "/var/repo"
+        "/usr/share", "/var", "/var/log", "/var/tmp", "/var/repo",
+        "/usr/share/X11", "/usr/share/X11/xkb", "/usr/share/X11/xkb/compiled"
     };
     
     for (const char* d : dirs) {
@@ -94,6 +95,25 @@ void scan_executables(const std::string& path, std::vector<std::string>& candida
         }
     }
     closedir(dir);
+}
+
+// Helper to get directories from PATH
+std::vector<std::string> get_path_dirs() {
+    std::vector<std::string> dirs;
+    const char* path_env = getenv("PATH");
+    // Fallback path if environment is not set
+    std::string path_str = path_env ? path_env : "/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin";
+    std::stringstream ss(path_str);
+    std::string dir;
+    while (std::getline(ss, dir, ':')) {
+        if (!dir.empty()) {
+            if (dir.back() != '/') dir += "/";
+            dirs.push_back(dir);
+        } else {
+            dirs.push_back("./");
+        }
+    }
+    return dirs;
 }
 
 // --- Autocomplete & Raw Mode Logic ---
@@ -197,9 +217,11 @@ void handle_tab_completion(std::string& buffer, int& cursor_pos) {
     if (is_command_pos) {
         if (std::string("cd").find(prefix) == 0) candidates.push_back("cd ");
         
-        // Scan system apps and external apps
-        scan_executables("/bin/apps/system/", candidates, prefix);
-        scan_executables("/bin/apps/", candidates, prefix);
+        // Scan all directories in PATH for command completion
+        std::vector<std::string> dirs = get_path_dirs();
+        for (const auto& path : dirs) {
+            scan_executables(path, candidates, prefix);
+        }
     } 
     // Special Autocomplete for 'gpkg'
     else if (cmd == "gpkg") {
@@ -338,7 +360,7 @@ std::string readline(const std::string& prompt) {
         } else if (c == '\n' || c == '\r') {
             std::cout << std::endl;
             break;
-        } else if (c == 127) { // Backspace
+        } else if (c == 127 || c == 8) { // Backspace (^? or ^H)
             if (cursor_pos > 0) {
                 buffer.erase(cursor_pos - 1, 1);
                 cursor_pos--;
@@ -587,19 +609,47 @@ void start_shell() {
                 else chdir("/");
             }
         }
+        else if (cmd == "export") {
+            if (args.size() > 1) {
+                for (size_t i = 1; i < args.size(); ++i) {
+                    std::string arg = args[i];
+                    size_t eq_pos = arg.find('=');
+                    if (eq_pos != std::string::npos) {
+                        std::string key = arg.substr(0, eq_pos);
+                        std::string val = arg.substr(eq_pos + 1);
+                        if (setenv(key.c_str(), val.c_str(), 1) != 0) {
+                             perror("export");
+                        }
+                    }
+                }
+            } else {
+                // List exported variables
+                // We need to declare environ if we want to iterate it manually, 
+                // but usually it's available. To be safe, we declare it inside or use 'extern'
+                extern char** environ;
+                for (char** env = environ; *env != 0; env++) {
+                     std::cout << "declare -x " << *env << "\n";
+                }
+            }
+        }
         else {
             // External Execution
-            std::vector<std::string> search_paths = {
-                "/bin/apps/system/" + cmd,
-                "/bin/apps/" + cmd,
-                "/bin/" + cmd
-            };
-
             std::string executable;
-            for (const auto& path : search_paths) {
-                if (access(path.c_str(), X_OK) == 0) {
-                    executable = path;
-                    break;
+            
+            if (cmd.find('/') != std::string::npos) {
+                // Absolute or relative path (contains a slash)
+                if (access(cmd.c_str(), X_OK) == 0) {
+                    executable = cmd;
+                }
+            } else {
+                // PATH Lookup
+                std::vector<std::string> dirs = get_path_dirs();
+                for (const auto& dir : dirs) {
+                    std::string full_path = dir + cmd;
+                    if (access(full_path.c_str(), X_OK) == 0) {
+                        executable = full_path;
+                        break;
+                    }
                 }
             }
 
@@ -810,8 +860,12 @@ void run_shell(const std::string& tty_dev) {
             setenv("USER", u.username.c_str(), 1);
             setenv("HOME", u.home.c_str(), 1);
             setenv("SHELL", u.shell.c_str(), 1);
-            setenv("PATH", "/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin", 1);
-            setenv("TERM", "linux", 1); // Tell apps we are on a linux console
+            
+            // PATH and basic env are already global from main(), but we ensure library paths
+            setenv("LD_LIBRARY_PATH", "/usr/lib:/usr/local/lib:/usr/lib64:/lib:/lib64", 1);
+            
+            // Python specifics
+            setenv("PYTHONUTF8", "1", 1); setenv("PYTHONHOME", "/usr", 1);
             
             if (chdir(u.home.c_str()) != 0) {
                 std::cerr << "Could not enter home directory: " << u.home << std::endl;
@@ -868,6 +922,19 @@ int main(int argc, char* argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     
+    // 0. Setup Global Environment (Locales and System Paths)
+    // This ensures everything GeminiOS spawns understands en_US.UTF-8
+    setenv("PATH", "/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin", 1);
+    setenv("LANG", "en_US.UTF-8", 1);
+    setenv("LC_ALL", "en_US.UTF-8", 1);
+    setenv("LANGUAGE", "en_US.UTF-8", 1);
+    setenv("LOCPATH", "/usr/lib/locale", 1);
+    setenv("GCONV_PATH", "/usr/lib/gconv", 1);
+    setenv("TERM", "linux", 1);
+    setenv("EDITOR", "nano", 1);
+    setenv("PAGER", "cat", 1);
+    setenv("HOME", "/root", 0); // Default home
+    
     if (getpid() == 1) std::cout << "[INIT] Starting GeminiOS Init..." << std::endl;
     // Check if we are being run as a shell (not PID 1)
     if (getpid() != 1) {
@@ -896,9 +963,38 @@ int main(int argc, char* argv[]) {
     mount_fs("none", "/proc", "proc");
     mount_fs("none", "/sys", "sysfs");
     mount_fs("devtmpfs", "/dev", "devtmpfs");
+    mount_fs("devpts", "/dev/pts", "devpts");
+    mount_fs("tmpfs", "/dev/shm", "tmpfs");
+
+    // Mount tmpfs on writable directories to prevent "No space left on device" errors
+    mount_fs("tmpfs", "/tmp", "tmpfs");
+    mount_fs("tmpfs", "/run", "tmpfs");
+    mount_fs("tmpfs", "/var/log", "tmpfs");
+    mount_fs("tmpfs", "/var/tmp", "tmpfs");
+    mount_fs("tmpfs", "/usr/share/X11/xkb/compiled", "tmpfs");
+
+    // Start udevd to manage device nodes
+    if (fork() == 0) {
+        execl("/usr/sbin/udevd", "udevd", "--daemon", nullptr);
+        exit(0);
+    }
+    // Trigger udev to populate devices
+    system("/usr/bin/udevadm trigger --action=add");
+    system("/usr/bin/udevadm settle");
     
     // 2.0.1 Ensure Directory Structure
     ensure_fhs();
+
+    // Start D-Bus Daemon (Required for XFCE)
+    mkdir("/var/lib/dbus", 0755);
+    system("/usr/bin/dbus-uuidgen --ensure");
+    mkdir("/run/dbus", 0755);
+    if (fork() == 0) {
+        execl("/usr/bin/dbus-daemon", "dbus-daemon", "--system", "--address=systemd:", nullptr);
+        // Fallback if systemd address fails (we don't have systemd but some configs expect it)
+        execl("/usr/bin/dbus-daemon", "dbus-daemon", "--system", nullptr);
+        exit(0);
+    }
 
     // Create standard symlinks for shell scripts
     symlink("/proc/self/fd", "/dev/fd");

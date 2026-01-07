@@ -13,7 +13,7 @@ Taskbar:
 1 - Important: add very robust support to quotation marks ("") and single quotes ('') for ALL filesystem commands like cd, mkdir, rm and many others. Mainly to be able to manage and browser directories with whitespaces.
 1 - Recurrent: make ALL current command lines (except `cd`) including `greq`, `gpkg`, `cat` and others external system packages as well as making packages being installed in /bin/apps/ for external packages and /bin/apps/system/ for system default packages.
 1 - In source code, system packages source code will now going to be located at /packages/system/<sys_package>/<sys_package_src>
-0 - Add a robust account management. Make the default root account: `gemini` (also for liveboot, no password).
+0 - Add a robust account management. Make the default root account: `root` (also for liveboot, no password).
 1 - IMPORTANT: make all current system information (like version and everything else) to be stored in the system core.
 1 - IMPORTANT: add multiple tty support like how it is on linux, and always print in terminal which tty i am. (ctrl + alt + f1/f6) 
 1 - Important: add --help and --version to ALL commands that still don't have it

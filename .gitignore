@@ -2,6 +2,7 @@
 GeminiOS.iso
 rootfs/
 isodir/
+filelist.txt
 
 # --- Compiled Binaries & Objects ---
 # The main init process
@@ -13,18 +14,10 @@ src/*.o
 
 # --- External Dependencies (Downloaded by build.sh) ---
 # Do not commit the massive kernel/gnu source trees
+external_dependencies*/
 linux-*/
-bash-*/
-grep-*/
-nano-*/
-ncurses-*/
-sed-*/
-gawk-*/
-grub*/
-kbd*
-lvgl*
-lv_drivers*
 grub_cache/
+glibc*/
 
 # --- Archives ---
 *.tar.gz
@@ -45,3 +38,5 @@ Thumbs.db
 project_export.txt
 
 TODOS.yaml
+
+GEMINI.md
