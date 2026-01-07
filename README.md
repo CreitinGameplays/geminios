@@ -12,10 +12,12 @@ You need a Linux host (Ubuntu/Debian recommended) with the following tools:
 sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc python3 python-is-python3 mtools grub-pc-bin lz4 gperf libxcb-xkb-dev meson ninja-build
 ```
 
+Update the filepaths of `native.ini` file.
+
 ## Development Workflow
 
 - You MUST build the kernel first!
-
+Run the following commands in order:
 ```sh
 cd ~/geminios
 mkdir external_dependecies
@@ -71,11 +73,6 @@ Build! (this gonna take a very while the first time, just sit, wait and pray you
 - Save source into a txt file if you want to send it to AI Studio:
 ```python
 python save_src.py --root . --exclude packages/system/desktop/stb_image.h --extra-excludes external_dependencies* glibc* grub* rootfs*
-```
-
-Test the virtio GPU:
-```
-qemu-system-x86_64 -m 2G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -enable-kvm
 ```
 
 Note: mkfs only supports ext2 for now.

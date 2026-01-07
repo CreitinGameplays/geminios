@@ -1,10 +1,10 @@
-  How to Test:
-  To verify that everything is working as intended (specifically the input and utilities), follow these steps:
+# TESTS
+To verify that everything is working as intended (specifically the input and utilities), follow these steps:
 
    1. Rebuild and Start GeminiOS:
 
    1     ./build.sh
-   2     qemu-system-x86_64 -cdrom GeminiOS.iso -m 1G -vga std -enable-kvm
+   2     qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -vga std -enable-kvm
 
    2. Test `xinit` and Input:
       Instead of running Xorg directly, use xinit. This will start X and try to run a default client (usually just a terminal or nothing if not configured).
@@ -24,3 +24,8 @@
 
    1     xinit /bin/apps/snake -- :0
        * If successful, this will start X and run the Snake game inside it (though Snake is likely a CLI app, this tests if xinit can pass arguments and manage a session). 
+
+Test the virtio GPU/mesa:
+```
+qemu-system-x86_64 -m 2G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -enable-kvm
+```

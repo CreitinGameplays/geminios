@@ -24,6 +24,7 @@
     - [x] libXext: Common X extensions.
 - [x] Build Xorg-Server:
     - [x] xorg-server binary.
+    - [x] libdrm & Mesa (Provides /dev/dri support).
 - [x] Build Drivers (Hardware Abstraction):
     - [x] xf86-video-fbdev: To allow Xorg to use GeminiOS's current framebuffer.
     - [x] eudev (libudev): Required for device hotplugging and discovery.

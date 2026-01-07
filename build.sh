@@ -186,7 +186,7 @@ fi
 
 # 1. GLIBC (Dynamic Loader & Standard Library)
 GLIBC_VER="2.39"
-if [ ! -f "rootfs/lib64/libc.so.6" ]; then
+if [ ! -f "rootfs/lib64/libc.so.6" ] || [ ! -f "rootfs/usr/include/stdio.h" ]; then
     echo "Downloading and Building Glibc $GLIBC_VER..."
     download_and_extract "https://ftp.gnu.org/gnu/glibc/glibc-$GLIBC_VER.tar.xz" "glibc-$GLIBC_VER.tar.xz" "glibc-$GLIBC_VER"
     
@@ -203,9 +203,9 @@ if [ ! -f "rootfs/lib64/libc.so.6" ]; then
     # 2. Ensure critical static libraries are in the expected location
     # Some build systems (like libtool) expect these in usr/lib64
     echo "Copying missing static libraries to rootfs..."
-    cp -v libc_nonshared.a ../rootfs/usr/lib64/
-    cp -v libc.a ../rootfs/usr/lib64/
-    cp -v math/libm.a ../rootfs/usr/lib64/
+    cp -v libc_nonshared.a ../rootfs/usr/lib64/ || true
+    cp -v libc.a ../rootfs/usr/lib64/ || true
+    cp -v math/libm.a ../rootfs/usr/lib64/ || true
     
     popd
 fi
@@ -465,7 +465,9 @@ if [ ! -f "rootfs/usr/lib64/libz.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/zli
     download_and_extract "https://zlib.net/zlib-$ZLIB_VER.tar.gz" "zlib-$ZLIB_VER.tar.gz" "zlib-$ZLIB_VER"
 
     pushd "$DEP_DIR/zlib-$ZLIB_VER"
-    ./configure --prefix=/usr --libdir=/usr/lib64
+    # Ensure we use the target compiler and sysroot during configure
+    # This prevents the "missing snprintf" warning and ensures correct header detection.
+    CC="gcc --sysroot=$(pwd)/../../rootfs" ./configure --prefix=/usr --libdir=/usr/lib64
     make -j$JOBS
     make install DESTDIR=$(pwd)/../../rootfs
     popd
