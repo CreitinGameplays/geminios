@@ -168,6 +168,22 @@ strip rootfs/bin/apps/system/installer
 
 echo "--- 1.4 Compiling Base System (Glibc & Foundation) ---"
 
+# 0. KERNEL HEADERS (Required for Glibc and other system tools)
+if [ ! -d "rootfs/usr/include/linux" ]; then
+    echo "Installing Kernel Headers..."
+    if [ -d "$DEP_DIR/$KERNEL_VERSION" ]; then
+        mkdir -p rootfs/usr/include
+        pushd "$DEP_DIR/$KERNEL_VERSION"
+        # We use an absolute path for INSTALL_HDR_PATH to avoid issues with pushd
+        make headers_install ARCH=x86_64 INSTALL_HDR_PATH="$(pwd)/../../rootfs/usr"
+        popd
+    else
+        echo "ERROR: Kernel source not found at $DEP_DIR/$KERNEL_VERSION"
+        echo "Please ensure the kernel source is extracted in the external_dependencies directory."
+        exit 1
+    fi
+fi
+
 # 1. GLIBC (Dynamic Loader & Standard Library)
 GLIBC_VER="2.39"
 if [ ! -f "rootfs/lib64/libc.so.6" ]; then
@@ -457,7 +473,7 @@ fi
 
 # 2. OPENSSL (Cryptography)
 OPENSSL_VER="3.3.0"
-if [ ! -f "rootfs/usr/lib64/libssl.so.3" ]; then
+if [ ! -f "rootfs/usr/lib64/libssl.so.3" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/openssl.pc" ]; then
     echo "Downloading and Building OpenSSL $OPENSSL_VER..."
     download_and_extract "https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz" "openssl-$OPENSSL_VER.tar.gz" "openssl-$OPENSSL_VER"
     
@@ -489,7 +505,7 @@ fi
 
 # 4. EXPAT (XML Parser)
 EXPAT_VER="2.6.0"
-if [ ! -f "rootfs/usr/lib64/libexpat.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libexpat.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/expat.pc" ]; then
     echo "Building expat $EXPAT_VER (using CMake)..."
     download_and_extract "https://github.com/libexpat/libexpat/releases/download/R_2_6_0/expat-$EXPAT_VER.tar.xz" "expat-$EXPAT_VER.tar.xz" "expat-$EXPAT_VER"
     
@@ -512,7 +528,7 @@ fi
 
 # 5. UTIL-LINUX (libmount, libblkid)
 UTIL_LINUX_VER="2.39.3"
-if [ ! -f "rootfs/usr/lib64/libmount.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libmount.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/mount.pc" ]; then
     echo "Downloading and Building util-linux $UTIL_LINUX_VER..."
     download_and_extract "https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/v2.39/util-linux-$UTIL_LINUX_VER.tar.xz" "util-linux-$UTIL_LINUX_VER.tar.xz" "util-linux-$UTIL_LINUX_VER"
 
@@ -555,7 +571,7 @@ fi
 
 # 7. LIBFFI (Foreign Function Interface)
 LIBFFI_VER="3.4.4"
-if [ ! -f "rootfs/usr/lib64/libffi.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libffi.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/libffi.pc" ]; then
     echo "Building libffi $LIBFFI_VER..."
     download_and_extract "https://github.com/libffi/libffi/releases/download/v$LIBFFI_VER/libffi-$LIBFFI_VER.tar.gz" "libffi-$LIBFFI_VER.tar.gz" "libffi-$LIBFFI_VER"
     
@@ -568,7 +584,7 @@ fi
 
 # 8. PCRE2 (Required by GLib)
 PCRE2_VER="10.42"
-if [ ! -f "rootfs/usr/lib64/libpcre2-8.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libpcre2-8.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/libpcre2-8.pc" ]; then
     echo "Building pcre2 $PCRE2_VER..."
     download_and_extract "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VER/pcre2-$PCRE2_VER.tar.bz2" "pcre2-$PCRE2_VER.tar.bz2" "pcre2-$PCRE2_VER"
     
@@ -583,7 +599,7 @@ echo "--- PHASE 3: Core Object System (GLib) ---"
 
 # 1. GLIB (Base library for GTK)
 GLIB_VER="2.78.3"
-if [ ! -f "rootfs/usr/lib64/libglib-2.0.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libglib-2.0.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/glib-2.0.pc" ]; then
     echo "Building glib $GLIB_VER..."
     download_and_extract "https://download.gnome.org/sources/glib/2.78/glib-$GLIB_VER.tar.xz" "glib-$GLIB_VER.tar.xz" "glib-$GLIB_VER"
     
@@ -1533,7 +1549,7 @@ echo "--- PHASE 7: Rendering Stack ---"
 
 # 1. CAIRO
 CAIRO_VER="1.18.0"
-if [ ! -f "rootfs/usr/lib64/libcairo.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libcairo.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/cairo.pc" ]; then
     echo "Building cairo $CAIRO_VER..."
     download_and_extract "https://cairographics.org/releases/cairo-$CAIRO_VER.tar.xz" "cairo-$CAIRO_VER.tar.xz" "cairo-$CAIRO_VER"
     pushd "$DEP_DIR/cairo-$CAIRO_VER"
@@ -1545,7 +1561,7 @@ fi
 
 # 2. HARFBUZZ (Text shaping engine)
 HARFBUZZ_VER="8.3.0"
-if [ ! -f "rootfs/usr/lib64/libharfbuzz.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libharfbuzz.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/harfbuzz.pc" ]; then
     echo "Building harfbuzz $HARFBUZZ_VER..."
     download_and_extract "https://github.com/harfbuzz/harfbuzz/releases/download/$HARFBUZZ_VER/harfbuzz-$HARFBUZZ_VER.tar.xz" "harfbuzz-$HARFBUZZ_VER.tar.xz" "harfbuzz-$HARFBUZZ_VER"
     pushd "$DEP_DIR/harfbuzz-$HARFBUZZ_VER"
@@ -1573,7 +1589,7 @@ fi
 
 # 4. PANGO
 PANGO_VER="1.50.14"
-if [ ! -f "rootfs/usr/lib64/libpango-1.0.so" ]; then
+if [ ! -f "rootfs/usr/lib64/libpango-1.0.so" ] || [ ! -f "rootfs/usr/lib64/pkgconfig/pango.pc" ]; then
     echo "Building pango $PANGO_VER..."
     download_and_extract "https://download.gnome.org/sources/pango/1.50/pango-$PANGO_VER.tar.xz" "pango-$PANGO_VER.tar.xz" "pango-$PANGO_VER"
     pushd "$DEP_DIR/pango-$PANGO_VER"

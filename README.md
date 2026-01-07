@@ -63,7 +63,7 @@ Make it executable:
 chmod +x build.sh
 ```
 
-Build! (this gonna take a very while the first time, just sit and wait)
+Build! (this gonna take a very while the first time, just sit, wait and pray you won't get any errors)
 ```bash
 ./build.sh
 ```
@@ -89,3 +89,8 @@ Manual fixes done in source code of external dependencies:
 │ 200 + return (LooseVersion(v), key[1])
 ```
 
+`glibc-build/Makefile`
+```diff
+| 1 - srcdir = ../glibc-2.39 
+│ 1 + srcdir = ../external_dependencies/glibc-2.39
+```

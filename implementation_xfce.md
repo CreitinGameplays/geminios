@@ -90,7 +90,7 @@
     - [ ] Expected ISO size growth: ~25MB -> ~350MB.
 
 
-# DEPENDENCIES LIST SECTION FOR GTK3+, IN ORDER: 
+# DEPENDENCIES LIST SECTION FOR GTK3+ (plus x11), IN ORDER: 
 ### 1. Build Tools & Compilers
 
 *These are required to configure and build the libraries that follow.*
