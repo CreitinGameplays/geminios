@@ -46,7 +46,7 @@ The build system, particularly the Python package build, requires a specific hos
     ```
     *The build scripts are hardcoded to look for `~/.pyenv/versions/3.11.9/bin/python3.11` for critical build steps.*
 
-**Note**: Host Python version > 3.12 may fail due to the removal of the `pipes` and `distutils` modules in some external dependencies (e.g., older GLib/Meson versions). If you encounter issues, consider using a compatibility layer or patching the affected files as shown in the [Utility Tools](#utility-tools) section, though the `builder.py` and `pyenv` should handle this automatically.
+**Note**: Host Python version > 3.12 may fail due to the removal of the `pipes` and `distutils` modules in some external dependencies (e.g., older GLib/Meson versions). If you encounter issues, consider using a compatibility layer or patching the affected files, though the `builder.py` and `pyenv` should handle this automatically.
 
 1.  **Run Builder**:
     ```bash
