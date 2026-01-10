@@ -1,0 +1,539 @@
+{
+    "kernel_headers": [
+        "usr/include/linux"
+    ],
+    "glibc": [
+        "usr/include/linux",
+        "lib64/libc.so.6",
+        "usr/include/stdio.h",
+        "usr/lib64/libstdc++.so.6",
+        "usr/lib64/libgcc_s.so.1",
+        "usr/lib/locale/en_US.UTF-8",
+        "usr/lib/locale/C.UTF-8"
+    ],
+    "libxcrypt": [
+        "lib64/libcrypt.so.1"
+    ],
+    "python": [
+        "usr/bin/python3.11",
+        "usr/include/python3.11/Python.h",
+        "usr/lib64/libpython3.11.so"
+    ],
+    "pkg-config": [
+        "usr/bin/pkg-config"
+    ],
+    "bison": [
+        "usr/bin/bison"
+    ],
+    "flex": [
+        "usr/bin/flex"
+    ],
+    "gperf": [
+        "usr/bin/gperf"
+    ],
+    "gettext": [
+        "usr/bin/msgfmt"
+    ],
+    "perl": [
+        "usr/bin/perl"
+    ],
+    "texinfo": [
+        "usr/bin/makeinfo"
+    ],
+    "util-macros": [
+        "usr/share/pkgconfig/xorg-macros.pc"
+    ],
+    "zlib": [
+        "usr/lib64/libz.so",
+        "usr/lib64/libz.a",
+        "usr/lib64/pkgconfig/zlib.pc",
+        "usr/include/zlib.h",
+        "usr/include/zconf.h"
+    ],
+    "openssl": [
+        "usr/lib64/libssl.so.3",
+        "usr/lib64/pkgconfig/openssl.pc"
+    ],
+    "zstd": [
+        "usr/lib64/libzstd.so",
+        "usr/lib64/pkgconfig/libzstd.pc"
+    ],
+    "elfutils": [
+        "usr/lib64/libelf.so",
+        "usr/lib64/pkgconfig/libelf.pc"
+    ],
+    "libxml2": [
+        "usr/lib64/libxml2.so",
+        "usr/lib64/pkgconfig/libxml-2.0.pc"
+    ],
+    "expat": [
+        "usr/lib64/libexpat.so",
+        "usr/lib64/pkgconfig/expat.pc"
+    ],
+    "e2fsprogs": [
+        "sbin/mkfs.ext2",
+        "sbin/mke2fs"
+    ],
+    "util-linux": [
+        "usr/lib64/libmount.so",
+        "usr/lib64/pkgconfig/mount.pc",
+        "bin/mount",
+        "bin/umount",
+        "bin/kill",
+        "bin/lsblk",
+        "bin/dmesg",
+        "bin/more",
+        "bin/mountpoint",
+        "bin/findmnt",
+        "sbin/fdisk",
+        "sbin/sfdisk",
+        "sbin/cfdisk",
+        "sbin/blkid",
+        "sbin/blockdev",
+        "sbin/losetup",
+        "sbin/mkfs",
+        "sbin/mkswap",
+        "sbin/fsck",
+        "sbin/hwclock",
+        "sbin/switch_root",
+        "sbin/pivot_root",
+        "sbin/wipefs",
+        "usr/bin/lscpu",
+        "usr/bin/lsipc",
+        "usr/bin/lslogins",
+        "usr/bin/lsmem",
+        "usr/bin/lsns",
+        "usr/bin/uuidgen",
+        "usr/bin/uuidparse",
+        "usr/bin/getopt",
+        "usr/bin/rename",
+        "usr/bin/flock",
+        "usr/bin/setsid",
+        "usr/bin/chrt",
+        "usr/bin/ionice",
+        "usr/bin/taskset",
+        "usr/bin/last",
+        "usr/bin/logger",
+        "usr/bin/mesg",
+        "usr/bin/namei",
+        "usr/bin/rename",
+        "usr/bin/rev",
+        "usr/bin/setarch",
+        "usr/bin/whereis",
+        "usr/bin/cal",
+        "usr/bin/hexdump"
+    ],
+    "dbus": [
+        "usr/bin/dbus-daemon"
+    ],
+    "libffi": [
+        "usr/lib64/libffi.so",
+        "usr/lib64/pkgconfig/libffi.pc"
+    ],
+    "pcre2": [
+        "usr/lib64/libpcre2-8.so",
+        "usr/lib64/pkgconfig/libpcre2-8.pc"
+    ],
+    "glib": [
+        "usr/lib64/libglib-2.0.so",
+        "usr/lib64/pkgconfig/glib-2.0.pc"
+    ],
+    "gobject-introspection": [
+        "usr/bin/g-ir-scanner",
+        "usr/lib64/pkgconfig/gobject-introspection-1.0.pc",
+        "usr/lib64/pkgconfig/gobject-introspection-no-export-1.0.pc"
+    ],
+    "xorgproto": [
+        "usr/share/pkgconfig/xproto.pc"
+    ],
+    "xtrans": [
+        "usr/share/pkgconfig/xtrans.pc"
+    ],
+    "libxau": [
+        "usr/lib64/libXau.so",
+        "usr/lib64/pkgconfig/xau.pc"
+    ],
+    "libxdmcp": [
+        "usr/lib64/libXdmcp.so",
+        "usr/lib64/pkgconfig/xdmcp.pc"
+    ],
+    "xcb-proto": [
+        "usr/share/pkgconfig/xcb-proto.pc"
+    ],
+    "libpthread-stubs": [
+        "usr/lib64/pkgconfig/pthread-stubs.pc"
+    ],
+    "libxcb": [
+        "usr/lib64/libxcb.so",
+        "usr/lib64/pkgconfig/xcb.pc"
+    ],
+    "xcb-util": [
+        "usr/lib64/libxcb-util.so",
+        "usr/lib64/pkgconfig/xcb-util.pc"
+    ],
+    "xcb-util-keysyms": [
+        "usr/lib64/libxcb-keysyms.so",
+        "usr/lib64/pkgconfig/xcb-keysyms.pc"
+    ],
+    "libx11": [
+        "usr/lib64/libX11.so",
+        "usr/lib64/pkgconfig/x11.pc"
+    ],
+    "libxext": [
+        "usr/lib64/libXext.so",
+        "usr/lib64/pkgconfig/xext.pc"
+    ],
+    "libxxf86vm": [
+        "usr/lib64/libXxf86vm.so",
+        "usr/lib64/pkgconfig/xxf86vm.pc"
+    ],
+    "libxpm": [
+        "usr/lib64/libXpm.so",
+        "usr/lib64/pkgconfig/xpm.pc"
+    ],
+    "libxrender": [
+        "usr/lib64/libXrender.so",
+        "usr/lib64/pkgconfig/xrender.pc"
+    ],
+    "libxfixes": [
+        "usr/lib64/libXfixes.so",
+        "usr/lib64/pkgconfig/xfixes.pc"
+    ],
+    "libxdamage": [
+        "usr/lib64/libXdamage.so",
+        "usr/lib64/pkgconfig/xdamage.pc"
+    ],
+    "libxcomposite": [
+        "usr/lib64/libXcomposite.so",
+        "usr/lib64/pkgconfig/xcomposite.pc"
+    ],
+    "libxcursor": [
+        "usr/lib64/libXcursor.so",
+        "usr/lib64/pkgconfig/xcursor.pc"
+    ],
+    "libxrandr": [
+        "usr/lib64/libXrandr.so",
+        "usr/lib64/pkgconfig/xrandr.pc"
+    ],
+    "libxi": [
+        "usr/lib64/libXi.so",
+        "usr/lib64/pkgconfig/xi.pc"
+    ],
+    "libxtst": [
+        "usr/lib64/libXtst.so",
+        "usr/lib64/pkgconfig/xtst.pc"
+    ],
+    "libxinerama": [
+        "usr/lib64/libXinerama.so",
+        "usr/lib64/pkgconfig/xinerama.pc"
+    ],
+    "libpng": [
+        "usr/lib64/libpng.so",
+        "usr/lib64/pkgconfig/libpng16.pc"
+    ],
+    "libjpeg-turbo": [
+        "usr/lib64/libjpeg.so",
+        "usr/include/jpeglib.h"
+    ],
+    "tiff": [
+        "usr/lib64/libtiff.so",
+        "usr/include/tiff.h"
+    ],
+    "freetype": [
+        "usr/lib64/libfreetype.so",
+        "usr/lib64/pkgconfig/freetype2.pc"
+    ],
+    "fontconfig": [
+        "usr/lib64/libfontconfig.so",
+        "usr/lib64/pkgconfig/fontconfig.pc"
+    ],
+    "pixman": [
+        "usr/lib64/libpixman-1.so",
+        "usr/lib64/pkgconfig/pixman-1.pc"
+    ],
+    "libxft": [
+        "usr/lib64/libXft.so",
+        "usr/lib64/pkgconfig/xft.pc"
+    ],
+    "libice": [
+        "usr/lib64/libICE.so",
+        "usr/lib64/pkgconfig/ice.pc"
+    ],
+    "libsm": [
+        "usr/lib64/libSM.so",
+        "usr/lib64/pkgconfig/sm.pc"
+    ],
+    "libxt": [
+        "usr/lib64/libXt.so",
+        "usr/lib64/pkgconfig/xt.pc"
+    ],
+    "libxmu": [
+        "usr/lib64/libXmu.so",
+        "usr/lib64/pkgconfig/xmu.pc"
+    ],
+    "libxaw": [
+        "usr/lib64/libXaw.so",
+        "usr/lib64/pkgconfig/xaw7.pc"
+    ],
+    "libxkbfile": [
+        "usr/lib64/libxkbfile.so",
+        "usr/lib64/pkgconfig/xkbfile.pc"
+    ],
+    "libfontenc": [
+        "usr/lib64/libfontenc.so",
+        "usr/lib64/pkgconfig/fontenc.pc"
+    ],
+    "libxfont2": [
+        "usr/lib64/libXfont2.so",
+        "usr/lib64/pkgconfig/xfont2.pc"
+    ],
+    "xkbcomp": [
+        "usr/bin/xkbcomp",
+        "usr/lib64/pkgconfig/xkbcomp.pc"
+    ],
+    "libpciaccess": [
+        "usr/lib64/libpciaccess.so",
+        "usr/lib64/pkgconfig/pciaccess.pc"
+    ],
+    "libxshmfence": [
+        "usr/lib64/libxshmfence.so",
+        "usr/lib64/pkgconfig/xshmfence.pc"
+    ],
+    "font-util": [
+        "usr/lib64/pkgconfig/fontutil.pc"
+    ],
+    "eudev": [
+        "usr/lib64/libudev.so",
+        "usr/lib64/pkgconfig/libudev.pc"
+    ],
+    "libdrm": [
+        "usr/lib64/libdrm.so",
+        "usr/lib64/pkgconfig/libdrm.pc"
+    ],
+    "libglvnd": [
+        "usr/lib64/libGL.so.1",
+        "usr/lib64/libGLdispatch.so.0",
+        "usr/lib64/libEGL.so.1",
+        "usr/lib64/pkgconfig/libglvnd.pc"
+    ],
+    "mesa": [
+        "usr/lib64/libGL.so",
+        "usr/lib64/pkgconfig/gl.pc",
+        "usr/lib64/pkgconfig/dri.pc",
+        "usr/include/GL/internal/dri_interface.h"
+    ],
+    "libepoxy": [
+        "usr/lib64/libepoxy.so",
+        "usr/lib64/pkgconfig/epoxy.pc"
+    ],
+    "xorg-server": [
+        "usr/bin/Xorg",
+        "usr/lib64/pkgconfig/xorg-server.pc"
+    ],
+    "xf86-video-fbdev": [
+        "usr/lib/xorg/modules/drivers/fbdev_drv.so"
+    ],
+    "libevdev": [
+        "usr/lib64/libevdev.so",
+        "usr/lib64/pkgconfig/libevdev.pc"
+    ],
+    "mtdev": [
+        "usr/lib64/libmtdev.so",
+        "usr/lib64/pkgconfig/mtdev.pc"
+    ],
+    "xf86-input-evdev": [
+        "usr/lib/xorg/modules/input/evdev_drv.so"
+    ],
+    "xkeyboard-config": [
+        "usr/share/pkgconfig/xkeyboard-config.pc"
+    ],
+    "setxkbmap": [
+        "usr/bin/setxkbmap"
+    ],
+    "xinit": [
+        "usr/bin/xinit"
+    ],
+    "xterm": [
+        "usr/bin/xterm"
+    ],
+    "xprop": [
+        "usr/bin/xprop"
+    ],
+    "gsettings-desktop-schemas": [
+        "usr/share/glib-2.0/schemas",
+        "usr/share/pkgconfig/gsettings-desktop-schemas.pc"
+    ],
+    "cairo": [
+        "usr/lib64/libcairo.so",
+        "usr/lib64/pkgconfig/cairo.pc"
+    ],
+    "harfbuzz": [
+        "usr/lib64/libharfbuzz.so",
+        "usr/lib64/pkgconfig/harfbuzz.pc"
+    ],
+    "fribidi": [
+        "usr/lib64/libfribidi.so",
+        "usr/include/fribidi/fribidi.h"
+    ],
+    "pango": [
+        "usr/lib64/libpango-1.0.so",
+        "usr/lib64/pkgconfig/pango.pc"
+    ],
+    "shared-mime-info": [
+        "usr/share/mime/magic"
+    ],
+    "gdk-pixbuf": [
+        "usr/lib64/libgdk_pixbuf-2.0.so",
+        "usr/lib64/pkgconfig/gdk-pixbuf-2.0.pc"
+    ],
+    "at-spi2-core": [
+        "usr/lib64/libatspi.so",
+        "usr/lib64/pkgconfig/atspi-2.pc"
+    ],
+    "at-spi2-atk": [
+        "usr/lib64/libatk-bridge-2.0.so",
+        "usr/lib64/pkgconfig/atk-bridge-2.0.pc"
+    ],
+    "atk": [
+        "usr/lib64/libatk-1.0.so",
+        "usr/lib64/pkgconfig/atk.pc"
+    ],
+    "libxkbcommon": [
+        "usr/lib64/libxkbcommon.so",
+        "usr/lib64/pkgconfig/xkbcommon.pc"
+    ],
+    "hicolor-icon-theme": [
+        "usr/share/icons/hicolor"
+    ],
+    "adwaita-icon-theme": [
+        "usr/share/icons/Adwaita"
+    ],
+    "gtk3": [
+        "usr/lib64/libgtk-3.so",
+        "usr/lib64/pkgconfig/gtk+-3.0.pc"
+    ],
+    "grub": [
+        "usr/sbin/grub-install"
+    ],
+    "setuptools": [
+        "usr/lib/python3.11/site-packages/setuptools"
+    ],
+    "markupsafe": [
+        "usr/lib/python3.11/site-packages/markupsafe"
+    ],
+    "mako": [
+        "usr/lib/python3.11/site-packages/mako"
+    ],
+    "meson": [
+        "usr/bin/meson"
+    ],
+    "ninja": [
+        "usr/bin/ninja"
+    ],
+    "bash": [
+        "usr/bin/bash"
+    ],
+    "ncurses": [
+        "usr/lib/libncursesw.a",
+        "bin/clear"
+    ],
+    "nano": [
+        "usr/bin/nano"
+    ],
+    "grep": [
+        "usr/bin/grep"
+    ],
+    "sed": [
+        "usr/bin/sed"
+    ],
+    "gawk": [
+        "usr/bin/gawk"
+    ],
+    "kbd": [
+        "usr/share/keymaps"
+    ],
+    "geminios_core": [
+        "bin/init"
+    ],
+    "geminios_pkgs": [
+        "bin/apps/system/gtop",
+        "bin/apps/system/poweroff",
+        "bin/apps/system/reboot"
+    ],
+    "coreutils": [
+        "bin/ls",
+        "bin/cp",
+        "bin/mv",
+        "bin/rm",
+        "bin/mkdir",
+        "bin/cat",
+        "bin/pwd"
+    ],
+    "tar": [
+        "usr/bin/tar"
+    ],
+    "gzip": [
+        "bin/gzip"
+    ],
+    "findutils": [
+        "bin/find",
+        "usr/bin/xargs"
+    ],
+    "diffutils": [
+        "usr/bin/diff",
+        "usr/bin/cmp"
+    ],
+    "patch": [
+        "usr/bin/patch"
+    ],
+    "which": [
+        "usr/bin/which",
+        "bin/which"
+    ],
+    "procps-ng": [
+        "bin/ps",
+        "bin/top",
+        "bin/free",
+        "bin/uptime",
+        "bin/pgrep",
+        "bin/pkill",
+        "usr/lib64/libproc2.so"
+    ],
+    "geminios_complex": [
+        "bin/apps/system/gpkg",
+        "bin/apps/system/installer",
+        "bin/apps/system/sudo"
+    ],
+    "pciutils": [
+        "usr/bin/lspci",
+        "usr/sbin/update-pciids",
+        "usr/share/pci.ids"
+    ],
+    "libXres": [
+        "usr/lib64/libXRes.so.1",
+        "usr/lib64/pkgconfig/xres.pc"
+    ],
+    "startup-notification": [
+        "usr/lib64/libstartup-notification-1.so.0",
+        "usr/lib64/pkgconfig/libstartup-notification-1.0.pc"
+    ],
+    "libwnck": [
+        "usr/lib64/libwnck-3.so.0",
+        "usr/lib64/pkgconfig/libwnck-3.0.pc"
+    ],
+    "binutils": [
+        "usr/bin/ld",
+        "usr/bin/as",
+        "usr/bin/objdump",
+        "usr/bin/strip",
+        "usr/lib64/libbfd.so"
+    ],
+    "gcc": [
+        "usr/bin/gcc",
+        "usr/bin/g++",
+        "usr/bin/cpp",
+        "usr/lib64/libgcc_s.so.1",
+        "usr/lib64/libstdc++.so.6",
+        "usr/libexec/gcc/x86_64-linux-gnu/14/cc1"
+    ]
+}

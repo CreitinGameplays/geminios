@@ -9,8 +9,14 @@
 #include <termios.h>
 #include <cstring>
 #include <algorithm>
+#include <sys/stat.h>
+#include <ctime>
 #include "../../../src/user_mgmt.h"
 #include "../../../src/sys_info.h"
+
+// Configuration
+const int SUDO_TIMEOUT_MINUTES = 15;
+const char* SUDO_TS_DIR = "/run/sudo/ts";
 
 // Helper to read password without echo
 std::string get_pass(const std::string& prompt) {
@@ -39,7 +45,10 @@ void print_usage() {
 
 bool check_sudoers(const std::string& user, const std::vector<std::string>& user_groups) {
     std::ifstream f("/etc/sudoers");
-    if (!f) return false;
+    if (!f) {
+        std::cerr << "sudo: unable to open /etc/sudoers: " << strerror(errno) << "\n";
+        return false;
+    }
 
     std::string line;
     while(std::getline(f, line)) {
@@ -63,6 +72,42 @@ bool check_sudoers(const std::string& user, const std::vector<std::string>& user
         }
     }
     return false;
+}
+
+std::string get_tty_name() {
+    char* tty = ttyname(STDIN_FILENO);
+    if (!tty) return "unknown";
+    std::string s(tty);
+    size_t last_slash = s.find_last_of('/');
+    if (last_slash != std::string::npos) return s.substr(last_slash + 1);
+    return s;
+}
+
+bool check_timestamp(uid_t uid) {
+    std::string tty = get_tty_name();
+    std::string ts_path = std::string(SUDO_TS_DIR) + "/" + std::to_string(uid) + "_" + tty;
+    
+    struct stat st;
+    if (stat(ts_path.c_str(), &st) == 0) {
+        time_t now = time(nullptr);
+        if (now - st.st_mtime < SUDO_TIMEOUT_MINUTES * 60) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void update_timestamp(uid_t uid) {
+    mkdir("/run/sudo", 0700);
+    mkdir(SUDO_TS_DIR, 0700);
+    
+    std::string tty = get_tty_name();
+    std::string ts_path = std::string(SUDO_TS_DIR) + "/" + std::to_string(uid) + "_" + tty;
+    
+    std::ofstream f(ts_path);
+    f << time(nullptr);
+    f.close();
+    chmod(ts_path.c_str(), 0600);
 }
 
 int main(int argc, char* argv[]) {
@@ -93,8 +138,8 @@ int main(int argc, char* argv[]) {
     // 1. Identify the Real User (Caller)
     uid_t real_uid = getuid();
     
-    // If already root, just exec
-    if (real_uid == 0) {
+    // If already root and NO -u flag, just exec
+    if (real_uid == 0 && cmd_idx == 1) {
         execvp(argv[1], &argv[1]);
         perror("sudo: execvp");
         return 1;
@@ -158,18 +203,26 @@ int main(int argc, char* argv[]) {
     }
 
     // 6. Authenticate (Ask for CURRENT USER'S password)
-    // Allow 3 attempts
-    bool authenticated = false;
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        std::string prompt = "[sudo] password for " + current_user->username + ": ";
-        std::string input = get_pass(prompt);
-        
-        if (UserMgmt::check_password(input, current_user->password)) {
-            authenticated = true;
-            break;
-        } else {
-            std::cout << "Sorry, try again.\n";
+    // First, check if we have a valid timestamp
+    bool authenticated = check_timestamp(real_uid);
+
+    if (!authenticated) {
+        // Allow 3 attempts
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            std::string prompt = "[sudo] password for " + current_user->username + ": ";
+            std::string input = get_pass(prompt);
+            
+            if (UserMgmt::check_password(input, current_user->password)) {
+                authenticated = true;
+                update_timestamp(real_uid);
+                break;
+            } else {
+                std::cout << "Sorry, try again.\n";
+            }
         }
+    } else {
+        // Update timestamp even if we didn't ask for password (extend the window)
+        update_timestamp(real_uid);
     }
 
     if (!authenticated) {

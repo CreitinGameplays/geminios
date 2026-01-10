@@ -1,0 +1,12 @@
+{
+    "package": "test-app-b",
+    "version": "1.0.0",
+    "architecture": "x86_64",
+    "maintainer": "Test Team",
+    "depends": [
+        "test-lib-a"
+    ],
+    "description": "A dummy app package that depends on test-lib-a.",
+    "section": "utils",
+    "priority": "optional"
+}

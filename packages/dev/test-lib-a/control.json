@@ -1,0 +1,10 @@
+{
+    "package": "test-lib-a",
+    "version": "1.0.0",
+    "architecture": "x86_64",
+    "maintainer": "Test Team",
+    "depends": [],
+    "description": "A dummy library package for testing dependencies.",
+    "section": "libs",
+    "priority": "optional"
+}

@@ -1,0 +1,13 @@
+--- libffi-3.4.4/src/tramp.c.orig
++++ libffi-3.4.4/src/tramp.c
+@@ -56,6 +56,10 @@
+ #include <limits.h>
+ #endif
+ #endif
++
++#if defined (__linux__) || defined (__CYGWIN__)
++extern int open_temp_exec_file (void);
++#endif
+ 
+ /*
+  * Each architecture defines static code for a trampoline code table. The

@@ -25,6 +25,10 @@ int main(int argc, char* argv[]) {
     for (auto& u : users) {
         if (u.username == username) {
             if (!new_name.empty()) {
+                if (!UserMgmt::is_valid_username(new_name)) {
+                    std::cerr << "usermod: invalid new username '" << new_name << "'.\n";
+                    return 1;
+                }
                 std::cout << "Changing name: " << u.username << " -> " << new_name << "\n";
                 u.username = new_name;
                 modified = true;

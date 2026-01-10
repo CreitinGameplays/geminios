@@ -1,0 +1,10 @@
+--- xorg-server-1.20.14/glx/glxdri2.c.orig
++++ xorg-server-1.20.14/glx/glxdri2.c
+@@ -33,6 +33,7 @@
+ 
+ #include <GL/gl.h>
+ #include <GL/internal/dri_interface.h>
++#undef bool
+ #include <GL/glxtokens.h>
+ 
+ #include <windowstr.h>

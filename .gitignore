@@ -3,6 +3,9 @@ GeminiOS.iso
 rootfs/
 isodir/
 filelist.txt
+export/
+iso_root/
+iso_root*/
 
 # --- Compiled Binaries & Objects ---
 # The main init process
@@ -11,13 +14,19 @@ init
 src/*.o
 # Specific package binaries that might be built locally
 *.gpkg
+temp_pkg.tar
 
 # --- External Dependencies (Downloaded by build.sh) ---
 # Do not commit the massive kernel/gnu source trees
 external_dependencies*/
 linux-*/
-grub_cache/
-glibc*/
+grub_cache*/
+glibc-build*/
+logs*/
+
+# --- Ports Build Directories ---
+ports/*/build/
+ports/*/.built
 
 # --- Archives ---
 *.tar.gz
@@ -37,7 +46,28 @@ Thumbs.db
 # --- Context Exports ---
 project_export.txt
 
-TODOS.yaml
-
 GEMINI.md
 GEMINI.md.bak
+PROJECT_STRUCT_REWORK.md
+
+*.built
+*.built*/
+ports/glibc/build
+
+# --- Build System & Artifacts ---
+output/
+build_system/shim/
+build_system/wrap_bin/
+build_system/shim_wrapper
+build_system/shim_wrapper_static
+
+# --- Temporary & Cache ---
+__pycache__/
+*.tmp
+.aiexclude
+initramfs_build/*
+initramfs_build*/
+
+
+.vscode/
+build_system/ldd.sh

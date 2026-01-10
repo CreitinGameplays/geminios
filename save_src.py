@@ -2,11 +2,6 @@
 """
 Export project files into a single text file in the format:
 
---- Full File List (Including Excluded Files) ---
-/path/to/file1
-/path/to/dir/file2
-...
-
 File: path/to/file
 
 1 |first line
@@ -19,8 +14,7 @@ File: path/to/second/file
 
 
 This tool tries to be robust: it skips binary files, very large files,
-permission-denied files, and common virtual env / git directories
-FOR THE CONTENT EXPORT. However, the file list at the top includes everything.
+permission-denied files, and common virtual env / git directories.
 
 Usage:
     python export_project_files.py --root /path/to/project --out export.txt
@@ -47,7 +41,12 @@ logger = logging.getLogger("exporter")
 
 
 def is_probably_text_file_bytes(b: bytes) -> bool:
-    """Return True if bytes appear to be text, using a few heuristics."""
+    """Return True if bytes appear to be text, using a few heuristics.
+
+    Heuristics:
+    - If there are NUL bytes, treat as binary
+    - Compute ratio of control/non-printable bytes (except \t\n\r); if > threshold -> binary
+    """
     if not b:
         return True
     if b.find(b"\x00") != -1:
@@ -72,7 +71,10 @@ def is_probably_text_file_bytes(b: bytes) -> bool:
 
 
 def is_text_file(path: Path, max_check_bytes: int = TEXT_CHECK_BYTES) -> bool:
-    """Quickly test whether a file is text by reading a chunk of bytes."""
+    """Quickly test whether a file is text by reading a chunk of bytes.
+
+    Return False for files that are likely binary or unreadable.
+    """
     try:
         with path.open('rb') as f:
             chunk = f.read(max_check_bytes)
@@ -82,7 +84,7 @@ def is_text_file(path: Path, max_check_bytes: int = TEXT_CHECK_BYTES) -> bool:
 
 
 def iter_files(root: Path, max_size: int, exclude_dirs: set[str] = None, exclude_files: set[Path] = None, exclude_patterns: list[str] = None) -> Iterable[Path]:
-    """Yield files under root, skipping directories and patterns (Used for Content Export)."""
+    """Yield files under root, skipping directories and patterns."""
     if exclude_dirs is None:
         exclude_dirs = set()
     if exclude_files is None:
@@ -125,35 +127,14 @@ def iter_files(root: Path, max_size: int, exclude_dirs: set[str] = None, exclude
             yield p
 
 
-def write_full_file_list(root: Path, out_f):
-    """
-    Writes a list of ALL files in the directory to the output file, 
-    ignoring all exclusions, size limits, and checks.
-    """
-    out_f.write("--- Full File List (Including Excluded Files) ---\n")
-    
-    # We use a raw os.walk here without modifying dirnames, so it traverses everything
-    for dirpath, _, filenames in os.walk(root):
-        for name in filenames:
-            try:
-                full_path = Path(dirpath) / name
-                try:
-                    rel_path = full_path.relative_to(root)
-                except ValueError:
-                    # Should not happen if walking root, but just in case
-                    rel_path = full_path
-                
-                # Format: /path/to/file (POSIX style)
-                path_str = f"/{rel_path.as_posix()}"
-                out_f.write(f"{path_str}\n")
-            except Exception:
-                continue
-    
-    out_f.write("\n" + "="*50 + "\n\n")
-
-
 def export_file(path: Path, out_f, rel_root: Path) -> bool:
-    """Write a single file's contents to out_f using the numbered-line format."""
+    """Write a single file's contents to out_f using the numbered-line format.
+
+    Returns True on success (file written), False if file was skipped.
+    """
+    # Write a single initial header
+    if out_f.tell() == 0:
+        out_f.write(f"This is the full source code in a single text file just for the context.\n\n")
     # Determine relative path for header
     try:
         rel = path.relative_to(rel_root)
@@ -198,17 +179,7 @@ def build_export(root: Path, out_path: Path, max_size: int, exclude_dirs: set[st
     skipped = 0
     # Ensure parent dir exists for output
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    
     with out_path.open('w', encoding='utf-8', newline='\n') as out_f:
-        # 1. Write the generic header
-        out_f.write(f"This is the full source code in a single text file just for the context.\n\n")
-        
-        # 2. Write the Tree View (ignores exclusions)
-        logger.info("Generating full file list (ignoring exclusions)...")
-        write_full_file_list(root, out_f)
-        
-        # 3. Write the actual content (respects exclusions)
-        logger.info("Exporting file contents (respecting exclusions)...")
         for p in iter_files(root, max_size=max_size, exclude_dirs=exclude_dirs, exclude_files=exclude_files, exclude_patterns=exclude_patterns):
             try:
                 ok = export_file(p, out_f, rel_root=root)
@@ -244,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     script_path = Path(__file__).resolve()
     exclude_files = {out_path, script_path}
     # Collect wildcard patterns from positional args (extra_excludes)
-    exclude_patterns = list(args.extra_excludes) if args.extra_excludes else []
+    exclude_patterns = list(args.extra_excludes)
     # Always exclude the output file by name pattern as well
     exclude_patterns.append(out_path.name)
 
@@ -254,7 +225,13 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info(f"Exporting files under: {root}")
     logger.info(f"Output will be written to: {out_path}")
-    
+    logger.info(f"Max file size: {args.max_size} bytes")
+    if exclude_dirs:
+        logger.info(f"User-excluded directories: {', '.join(exclude_dirs)}")
+    logger.info(f"Always-excluded files: {', '.join(str(f) for f in exclude_files)}")
+    if exclude_patterns:
+        logger.info(f"Wildcard exclude patterns: {', '.join(exclude_patterns)}")
+
     written, skipped = build_export(
         root, out_path,
         max_size=args.max_size,
@@ -268,4 +245,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
-    

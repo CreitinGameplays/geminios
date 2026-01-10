@@ -39,6 +39,8 @@ public:
     static int get_next_uid(const std::vector<User>& users);
     static int get_next_gid(const std::vector<Group>& groups);
 
+    static bool is_valid_username(const std::string& username);
+
     static void initialize_defaults();
 };
 

@@ -1,0 +1,29 @@
+--- libXrender-0.9.11/src/Glyph.c.orig
++++ libXrender-0.9.11/src/Glyph.c
+@@ -480,7 +480,7 @@
+ 	if (n_glyphs > (size_t) (65535 - elt->nchars))
+ 	    break;
+ 	if (elt->nchars == 0 || (n_glyphs > 0 && chars != (const char *) glyphs)) {
+-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
+ 	    elt->nchars = 0;
+ 	    elt->deltax = 0;
+ 	    elt->deltay = 0;
+@@ -594,7 +594,7 @@
+ 	if (n_glyphs > (size_t) (65535 - elt->nchars))
+ 	    break;
+ 	if (elt->nchars == 0 || (n_glyphs > 0 && chars != (const char *) glyphs)) {
+-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
+ 	    elt->nchars = 0;
+ 	    elt->deltax = 0;
+ 	    elt->deltay = 0;
+@@ -703,7 +703,7 @@
+ 	if (n_glyphs > (size_t) (65535 - elt->nchars))
+ 	    break;
+ 	if (elt->nchars == 0 || (n_glyphs > 0 && chars != (const char *) glyphs)) {
+-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
+ 	    elt->nchars = 0;
+ 	    elt->deltax = 0;
+ 	    elt->deltay = 0;

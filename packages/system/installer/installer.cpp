@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <cstdlib>
 #include <fstream> // stop forggeting this
+#include <cctype>
 #include "../../../src/sys_info.h"
 #include "../../../src/user_mgmt.h"
 #include <sys/wait.h>
@@ -224,7 +225,10 @@ InstallConfig get_config() {
     print_header("User Configuration");
     std::cout << "Create default user account for the new system.\n\n";
     
-    while (cfg.username.empty()) {
+    while (cfg.username.empty() || !UserMgmt::is_valid_username(cfg.username)) {
+        if (!cfg.username.empty()) {
+            std::cout << C_RED << "Invalid username. " << C_RESET << "Use 4-16 lowercase chars/numbers only.\n";
+        }
         std::cout << "Username: ";
         std::cin >> cfg.username;
     }
@@ -309,7 +313,6 @@ int main(int argc, char* argv[]) {
     std::cout << "This wizard will install the OS to your hard disk.\n\n";
     std::cout << C_YELLOW << "WARNING: ALL DATA ON TARGET DISK WILL BE ERASED!" << C_RESET << "\n\n";
     std::cout << "Press ENTER to continue or Ctrl+C to abort.";
-    std::cin.ignore();
     std::cin.get();
 
     InstallConfig cfg = get_config();
@@ -320,6 +323,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Are you sure you want to install? Type 'YES' to confirm: ";
     std::string confirm;
     std::cin >> confirm;
+    std::transform(confirm.begin(), confirm.end(), confirm.begin(), ::toupper);
 
     if (confirm != "YES") {
         std::cout << "Aborted.\n";
@@ -344,13 +348,13 @@ int main(int argc, char* argv[]) {
     }
 
     // 2. Format
-    std::cout << "[1/5] Formatting (Ext2)...\n";
+    std::cout << "[1/5] Formatting (Ext4)...\n";
     // Execute mkfs directly
     std::vector<std::string> mkfs_args = {"-L", "GeminiRoot", part_dev};
     if (g_verbose) mkfs_args.insert(mkfs_args.begin(), "-v");
-    else mkfs_args.insert(mkfs_args.begin(), ""); 
 
-    if (!RunCommand("/bin/apps/system/mkfs", mkfs_args)) {
+    // Use mkfs.ext4 for journaling and modern features
+    if (!RunCommand("/sbin/mkfs.ext4", mkfs_args)) {
         std::cerr << "Format failed.\n";
         return 1;
     }
@@ -358,8 +362,8 @@ int main(int argc, char* argv[]) {
     // 3. Mount
     std::cout << "[2/5] Mounting...\n";
     mkdir_p("/mnt/target");
-    // Run mount tool
-    if (!RunCommand("/bin/apps/system/mount", {"-t", "ext2", part_dev, "/mnt/target"})) {
+    // Run mount tool with ext4
+    if (!RunCommand("/bin/mount", {"-t", "ext4", part_dev, "/mnt/target"})) {
         std::cerr << "Mount failed.\n";
         return 1;
     }
@@ -367,60 +371,39 @@ int main(int argc, char* argv[]) {
     // 4. Copy System
     std::cout << "[3/5] Copying System Files...\n";
     
-    // Create directory structure
-    mkdir_p("/mnt/target/bin/apps/system");
+    // Create basic directory structure
     mkdir_p("/mnt/target/etc");
     mkdir_p("/mnt/target/var/repo");
+    mkdir_p("/mnt/target/var/log");
+    mkdir_p("/mnt/target/var/tmp");
     mkdir_p("/mnt/target/boot/grub");
     mkdir_p("/mnt/target/dev");
     mkdir_p("/mnt/target/proc");
     mkdir_p("/mnt/target/sys");
     mkdir_p("/mnt/target/tmp");
     mkdir_p("/mnt/target/mnt");
+    mkdir_p("/mnt/target/run");
     mkdir_p("/mnt/target/home");
     mkdir_p("/mnt/target/root");
 
-    // Copy Files
-    // Note: wildcards (*) won't work without a shell. 
-    // We use recursive copy on the parent directories.
-    // 'copy -r /source /dest' -> copies contents of source into dest if dest exists?
-    // Our copy tool: copies 'source' directory INTO 'dest' if dest is a dir.
+    // Copy Main Directories
+    RunCommand("/bin/cp", {"-r", "-p", "/bin", "/mnt/target/"});
+    RunCommand("/bin/cp", {"-r", "-p", "/sbin", "/mnt/target/"});
+    RunCommand("/bin/cp", {"-r", "-p", "/lib64", "/mnt/target/"});
+    RunCommand("/bin/cp", {"-r", "-p", "/usr", "/mnt/target/"});
+    RunCommand("/bin/cp", {"-r", "-p", "/etc", "/mnt/target/"});
     
-    RunCommand("/bin/apps/system/copy", {"-r", "-p", "/bin/apps", "/mnt/target/bin/"});
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/init", "/mnt/target/bin/"});
-    
-    // Copy Bash and Sh
-    if (!RunCommand("/bin/apps/system/copy", {"-p", "/bin/bash", "/mnt/target/bin/"})) {
-        LOG("Warning: bash copy failed");
-    }
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/sh", "/mnt/target/bin/"});
-    if (!RunCommand("/bin/apps/system/copy", {"-p", "/bin/nano", "/mnt/target/bin/"})) {
-         LOG("Warning: nano copy failed");
-         debug_ls("/bin");
-    }
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/grep", "/mnt/target/bin/"});
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/sed", "/mnt/target/bin/"});
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/gawk", "/mnt/target/bin/"});
-    RunCommand("/bin/apps/system/copy", {"-p", "/bin/awk", "/mnt/target/bin/"});
-
-    // For /etc and /boot, we want to copy contents. 
-    // copy -r /etc /mnt/target/ -> creates /mnt/target/etc filled with content.
-    RunCommand("/bin/apps/system/copy", {"-r", "-p", "/etc", "/mnt/target/"});
-    
-    if (!RunCommand("/bin/apps/system/copy", {"-r", "-p", "/boot", "/mnt/target/"})) {
+    if (!RunCommand("/bin/cp", {"-r", "-p", "/boot", "/mnt/target/"})) {
         std::cerr << C_RED << "Critical Error: Failed to copy /boot (kernel)" << C_RESET << "\n";
         debug_ls("/");
         debug_ls("/boot");
         return 1;
     }
-    
-    // Copy Terminfo (Required for Nano)
-    // We need to create /usr/share structure on target
-    // Note: We create parent /usr, then copy 'lib' into it.
-    mkdir_p("/mnt/target/usr");
-    mkdir_p("/mnt/target/usr/share");
-    RunCommand("/bin/apps/system/copy", {"-r", "-p", "/usr/lib", "/mnt/target/usr/"});
-    RunCommand("/bin/apps/system/copy", {"-r", "-p", "/usr/share/terminfo", "/mnt/target/usr/share/"});
+
+    // Ensure /lib and /usr/lib symlinks exist
+    if (access("/mnt/target/lib", F_OK) != 0) symlink("lib64", "/mnt/target/lib");
+    if (access("/mnt/target/usr/lib", F_OK) != 0) symlink("lib64", "/mnt/target/usr/lib");
+
     // 5. Configure
     std::cout << "[4/5] Configuring User...\n";
     
@@ -433,7 +416,7 @@ int main(int argc, char* argv[]) {
     root.username = "root";
     root.uid = 0; root.gid = 0;
     root.home = "/root"; root.shell = "/bin/init";
-    root.password = UserMgmt::hash_password(cfg.password); // Root gets same pass? Or ask? Let's give same.
+    root.password = UserMgmt::hash_password(cfg.password); // Root passed same as user
     new_users.push_back(root);
 
     // New User
@@ -508,23 +491,38 @@ int main(int argc, char* argv[]) {
     if (grub) {
         grub << "set timeout=5\nset default=0\n";
         grub << "insmod part_msdos\n"; // Support MBR partitions
-        grub << "insmod ext2\n";       // Support Ext2 filesystem
+        grub << "insmod ext2\n";       // Support Ext2/3/4 filesystem
         // Assuming single drive install to partition 1. 
         // Ideally we use 'search' but we lack uuid tools in this minimal env.
         grub << "set root=(hd0,msdos1)\n";
         grub << "menuentry \"GeminiOS (HD)\" {\n";
-        grub << "  linux /boot/kernel root=" << part_dev << " rw quiet\n";
+        grub << "  linux /boot/kernel root=" << part_dev << " rootfstype=ext4 rw quiet\n";
         grub << "}\n";
         grub.close();
     }
 
     // Check if we have the tools to install GRUB
-    if (access("/bin/grub-install", X_OK) == 0) {
-        LOG("Found grub-install, attempting automatic installation...");
+    std::string grub_install_path = "";
+    const std::vector<std::string> search_paths = {
+        "/usr/sbin/grub-install",
+        "/usr/local/sbin/grub-install",
+        "/sbin/grub-install",
+        "/bin/grub-install",
+        "/usr/bin/grub-install"
+    };
+    for (const auto& path : search_paths) {
+        if (access(path.c_str(), X_OK) == 0) {
+            grub_install_path = path;
+            break;
+        }
+    }
+
+    if (!grub_install_path.empty()) {
+        LOG("Found grub-install at " + grub_install_path + ", attempting automatic installation...");
         std::cout << "Installing GRUB to " << cfg.device << "...\n";
         
         // Command: grub-install --target=i386-pc --boot-directory=/mnt/target/boot /dev/sda
-        if (RunCommand("/bin/grub-install", {"--target=i386-pc", "--boot-directory=/mnt/target/boot", "--directory=/usr/lib/grub/i386-pc", "--force", cfg.device})) {
+        if (RunCommand(grub_install_path, {"--target=i386-pc", "--boot-directory=/mnt/target/boot", "--directory=/usr/lib/grub/i386-pc", "--force", cfg.device})) {
             std::cout << C_GREEN << "GRUB installed successfully!" << C_RESET << "\n";
         } else {
             std::cerr << C_RED << "GRUB installation failed." << C_RESET << "\n";

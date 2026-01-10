@@ -19,7 +19,7 @@ std::vector<std::string> split(const std::string& s, char delimiter) {
         tokens.push_back(token);
     }
     // Handle trailing delimiter or empty fields
-    if (s.back() == delimiter) tokens.push_back("");
+    if (!s.empty() && s.back() == delimiter) tokens.push_back("");
     return tokens;
 }
 
@@ -160,6 +160,16 @@ int UserMgmt::get_next_gid(const std::vector<Group>& groups) {
         if (g.gid > max_gid && g.gid < 65534) max_gid = g.gid;
     }
     return max_gid + 1;
+}
+
+bool UserMgmt::is_valid_username(const std::string& username) {
+    if (username.length() < 4 || username.length() > 16) return false;
+    for (char c : username) {
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void UserMgmt::initialize_defaults() {

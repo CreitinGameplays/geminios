@@ -1,0 +1,14 @@
+--- giscanner/ccompiler.py.orig	2024-01-08 12:00:00.000000000 +0000
++++ giscanner/ccompiler.py	2024-01-08 12:01:00.000000000 +0000
+@@ -26,7 +26,10 @@
+ import sys
+ import distutils
+ 
+-from distutils.msvccompiler import MSVCCompiler
++try:
++    from distutils.msvccompiler import MSVCCompiler
++except ImportError:
++    class MSVCCompiler: pass
+ from distutils.unixccompiler import UnixCCompiler
+ from distutils.cygwinccompiler import Mingw32CCompiler
+ from distutils.sysconfig import get_config_vars

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <arpa/inet.h>
@@ -20,6 +21,12 @@
 #include <cstdlib> // for atoi
 #include <chrono>
 #include <iomanip>
+#include <thread>
+#include <future>
+#include <mutex>
+#include <atomic>
+#include <cmath>
+#include <numeric>
 
 // QEMU Default Network Settings
 #define MY_IP "10.0.2.15"
@@ -30,6 +37,18 @@
 void ConfigureNetwork() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return;
+
+    // 0. Setup Loopback (lo)
+    struct ifreq ifr_lo;
+    memset(&ifr_lo, 0, sizeof(ifr_lo));
+    strncpy(ifr_lo.ifr_name, "lo", IFNAMSIZ);
+    // Get current flags
+    if (ioctl(sock, SIOCGIFFLAGS, &ifr_lo) >= 0) {
+        ifr_lo.ifr_flags |= (IFF_UP | IFF_LOOPBACK | IFF_RUNNING);
+        if (ioctl(sock, SIOCSIFFLAGS, &ifr_lo) < 0) {
+             perror("[NET] Failed to bring up lo");
+        }
+    }
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
@@ -79,7 +98,29 @@ void ConfigureNetwork() {
     }
 
     close(sock);
-    std::cout << "[NET] Network Configured: " << MY_IP << std::endl;
+
+    // 4. Generate /etc/resolv.conf for system tools (pip, wget, etc)
+    std::ofstream resolv("/etc/resolv.conf");
+    if (resolv) {
+        resolv << "nameserver " << DNS_SERVER << "\n"; // 10.0.2.3
+        resolv << "nameserver 8.8.8.8\n"; // Fallback
+        resolv << "options timeout:2 attempts:1\n";
+        resolv.close();
+        std::cout << "[NET] Generated /etc/resolv.conf" << std::endl;
+    }
+
+    // 5. Generate /etc/hosts
+    std::ofstream hosts("/etc/hosts");
+    if (hosts) {
+        hosts << "127.0.0.1\tlocalhost\n";
+        hosts << "127.0.1.1\tgeminios-pc\n";
+        hosts << MY_IP << "\tgeminios-pc\n";
+        hosts << "::1\tlocalhost ip6-localhost ip6-loopback\n";
+        hosts.close();
+        std::cout << "[NET] Generated /etc/hosts" << std::endl;
+    }
+
+    std::cout << "[NET] Network Configured: " << MY_IP << " (DNS: " << DNS_SERVER << ")" << std::endl;
 }
 
 // Minimal DNS Resolver (UDP to 8.8.8.8)
@@ -163,22 +204,61 @@ std::string ResolveDNS(const std::string& host) {
 // Helper: Base64 Encoding for Basic Auth
 std::string base64_encode(const std::string& in) {
     std::string out;
-    std::string val = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int valb = -6;
+    const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int val = 0, valb = -6;
     for (unsigned char c : in) {
-        valb = (valb << 8) + c;
+        val = (val << 8) + c;
         valb += 8;
         while (valb >= 0) {
-            out.push_back(val[(valb >> valb) & 0x3F]);
+            out.push_back(chars[(val >> valb) & 0x3F]);
             valb -= 6;
         }
     }
-    if (valb > -6) out.push_back(val[((valb << 8) >> (valb + 8)) & 0x3F]);
+    if (valb > -6) out.push_back(chars[((val << 8) >> (valb + 8)) & 0x3F]);
     while (out.size() % 4) out.push_back('=');
     return out;
 }
 
-bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions& opts) {
+// Helper to format speed
+std::string format_speed(double bytes_per_sec) {
+    if (bytes_per_sec > 1024 * 1024 * 1024) return std::to_string((int)(bytes_per_sec / (1024 * 1024 * 1024))) + " GBps";
+    if (bytes_per_sec > 1024 * 1024) return std::to_string((int)(bytes_per_sec / (1024 * 1024))) + " MBps";
+    if (bytes_per_sec > 1024) return std::to_string((int)(bytes_per_sec / 1024)) + " KBps";
+    return std::to_string((int)bytes_per_sec) + " Bps";
+}
+
+bool HttpRequestInternal(const std::string& url_in, std::ostream& out, const HttpOptions& opts);
+
+bool HttpRequest(const std::string& url, std::ostream& out, const HttpOptions& opts) {
+    int attempts = 0;
+    int max_attempts = opts.retry_count + 1;
+    
+    while (attempts < max_attempts) {
+        if (g_stop_sig) return false;
+        
+        if (attempts > 0) {
+            if (opts.verbose) std::cerr << "[NET] Retry attempt " << attempts << " for " << url << "..." << std::endl;
+            sleep(opts.retry_delay);
+        }
+        
+        // We need a way to clear the output stream if it's a file, 
+        // but since it's an ostream, we can't easily "reset" it unless it's a file we can seek.
+        // For simplicity, we assume the internal logic handles it or it's okay.
+        // Actually, if it's an ofstream, we might want to truncate it.
+        // But ostream doesn't have truncate.
+        
+        if (HttpRequestInternal(url, out, opts)) {
+            return true;
+        }
+        
+        attempts++;
+        if (g_stop_sig) return false;
+    }
+    
+    return false;
+}
+
+bool HttpRequestInternal(const std::string& url_in, std::ostream& out, const HttpOptions& opts) {
     if (opts.max_redirects < 0) {
         if (opts.verbose) std::cerr << "[NET] Max redirects reached" << std::endl;
         return false;
@@ -229,7 +309,6 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
     std::string proxy_auth_header;
 
     if (!opts.proxy.empty()) {
-        // Parse Proxy: [user:pass@]host:port
         std::string p_host_port = opts.proxy;
         size_t at = opts.proxy.find('@');
         if (at != std::string::npos) {
@@ -237,19 +316,18 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
             p_host_port = opts.proxy.substr(at + 1);
             proxy_auth_header = "Proxy-Authorization: Basic " + base64_encode(p_auth) + "\r\n";
         }
-        // Split host:port
         size_t c = p_host_port.find(':');
         if (c != std::string::npos) {
             connect_host = p_host_port.substr(0, c);
             connect_port = std::atoi(p_host_port.substr(c + 1).c_str());
         } else {
             connect_host = p_host_port;
-            connect_port = 8080; // Default proxy port
+            connect_port = 8080; 
         }
         if (opts.verbose) std::cerr << "[NET] Using Proxy: " << connect_host << ":" << connect_port << std::endl;
     }
 
-    // Resolve Target (Proxy or Host)
+    // Resolve
     std::string ip = ResolveDNS(connect_host);
     if (ip.empty()) {
         if (opts.verbose) std::cerr << "[ERR] Could not resolve: " << connect_host << std::endl;
@@ -278,11 +356,10 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
         return false;
     }
 
-    // 6. SSL Setup (Optional)
+    // 6. SSL Setup
     SSL_CTX* ctx = nullptr;
     SSL* ssl = nullptr;
 
-    // Handle HTTPS via Proxy (CONNECT Tunnel)
     if (!opts.proxy.empty() && use_ssl) {
         std::string connect_req = "CONNECT " + host + ":" + std::to_string(port) + " HTTP/1.1\r\n";
         connect_req += "Host: " + host + ":" + std::to_string(port) + "\r\n";
@@ -292,7 +369,6 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
         if (opts.verbose) std::cerr << "[NET] Sending Proxy CONNECT..." << std::endl;
         write(sock, connect_req.c_str(), connect_req.length());
         
-        // Read Proxy Response (Expect HTTP/1.1 200 OK)
         char tmp[1024];
         int len = read(sock, tmp, sizeof(tmp)-1);
         if (len > 0) {
@@ -326,12 +402,12 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
 
     // 7. Send Request
     std::string method = opts.method;
-    std::string full_path = (!opts.proxy.empty() && !use_ssl) ? url_in : path; // HTTP Proxy expects full URL
+    std::string full_path = (!opts.proxy.empty() && !use_ssl) ? url_in : path;
     
     std::string req = method + " " + full_path + " HTTP/1.1\r\n";
     req += "Host: " + host + "\r\n";
     req += "User-Agent: " + opts.user_agent + "\r\n";
-    req += "Connection: close\r\n"; // Keep it simple for now
+    req += "Connection: close\r\n";
     if (!opts.auth.empty()) req += "Authorization: Basic " + base64_encode(opts.auth) + "\r\n";
     if (!opts.proxy.empty() && !use_ssl) req += proxy_auth_header;
     
@@ -358,41 +434,146 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
     // 8. Read Response
     char buffer[4096];
     int bytes;
-    bool header_done = false;
     
+    long content_length = -1;
+    long total_read = 0;
+    std::string header_buffer;
+    bool header_parsed = false;
+    
+    auto start_time = std::chrono::steady_clock::now();
+    auto last_update = start_time;
+    
+    // Set a timeout for the socket to allow checking signals periodically
+    struct timeval tv = {1, 0}; // 1 second timeout
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     while (true) {
+        if (g_stop_sig) {
+            if (opts.verbose) std::cerr << "\n[NET] Interrupted by signal." << std::endl;
+            break;
+        }
+
         if (use_ssl) {
             bytes = SSL_read(ssl, buffer, sizeof(buffer));
         } else {
             bytes = read(sock, buffer, sizeof(buffer));
         }
         
-        if (bytes <= 0) break;
-
-        // Simple header skipping if not requested
-        if (!opts.include_headers && !header_done) {
-            std::string chunk(buffer, bytes);
-            size_t header_end = chunk.find("\r\n\r\n");
-            if (header_end != std::string::npos) {
-                header_done = true;
-                out.write(buffer + header_end + 4, bytes - (header_end + 4));
+        if (bytes <= 0) {
+            if (use_ssl) {
+                int ssl_err = SSL_get_error(ssl, bytes);
+                if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
+                    continue; 
+                }
+                // Check if it's a real error or just clean close
+                if (ssl_err == SSL_ERROR_SYSCALL && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+                     if (errno == EINTR) continue; // Signal handled, loop will check g_stop_sig
+                     if (errno == EAGAIN || errno == EWOULDBLOCK) continue; // Timeout, check g_stop_sig
+                }
+                break; // Real error or close
             } else {
-                // Headers might span chunks, simplified: check last part of previous chunk + this chunk?
-                // For this simplified OS, we assume headers are in first packet or we accept seeing some headers.
-                // If header_end not found, it's all headers (skip) or body started?
-                // This is hard to get right without buffering.
-                // Let's just write it if we already found it, or keep searching?
-                // Fallback: just write everything if we can't easily strip
-                 out.write(buffer, bytes);
+                if (bytes < 0) {
+                     if (errno == EINTR) continue;
+                     if (errno == EAGAIN || errno == EWOULDBLOCK) continue; 
+                }
+                break; // EOF or Error
             }
+        }
+
+        if (!header_parsed && !opts.include_headers) {
+             header_buffer.append(buffer, bytes);
+             size_t header_end = header_buffer.find("\r\n\r\n");
+             if (header_end != std::string::npos) {
+                 std::string headers = header_buffer.substr(0, header_end);
+
+                 // Check HTTP Status
+                 size_t first_line_end = headers.find("\r\n");
+                 if (first_line_end != std::string::npos) {
+                     std::string status_line = headers.substr(0, first_line_end);
+                     if (status_line.find(" 200 ") == std::string::npos && 
+                         status_line.find(" 201 ") == std::string::npos && 
+                         status_line.find(" 206 ") == std::string::npos &&
+                         status_line.find(" 302 ") == std::string::npos &&
+                         status_line.find(" 301 ") == std::string::npos) {
+                         if (opts.verbose) std::cerr << "[ERR] HTTP Status Error: " << status_line << std::endl;
+                         if (use_ssl) { SSL_shutdown(ssl); SSL_free(ssl); SSL_CTX_free(ctx); }
+                         close(sock);
+                         return false; 
+                     }
+                 }
+                 
+                 // Look for Content-Length
+                 std::string lower_headers = headers;
+                 std::transform(lower_headers.begin(), lower_headers.end(), lower_headers.begin(), ::tolower);
+                 
+                 size_t cl_pos = lower_headers.find("content-length: ");
+                 if (cl_pos != std::string::npos) {
+                     size_t val_start = cl_pos + 16;
+                     size_t val_end = lower_headers.find("\r\n", val_start);
+                     if (val_end != std::string::npos) {
+                         content_length = std::atol(headers.substr(val_start, val_end - val_start).c_str());
+                     }
+                 }
+                 
+                 out.write(header_buffer.c_str() + header_end + 4, header_buffer.length() - (header_end + 4));
+                 total_read += (header_buffer.length() - (header_end + 4));
+                 header_parsed = true;
+             }
         } else {
-            out.write(buffer, bytes);
+             out.write(buffer, bytes);
+             total_read += bytes;
         }
         
-        if (opts.show_progress) {
-            std::cout << "." << std::flush;
+        if (opts.show_progress && header_parsed) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+            auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update).count();
+
+            if (delta > 200 || bytes <= 0) { // Update every 200ms
+                 double speed = 0;
+                 if (elapsed > 0) speed = (double)total_read * 1000.0 / elapsed;
+                 
+                 int percent = 0;
+                 if (content_length > 0) percent = (int)((total_read * 100) / content_length);
+                 if (percent > 100) percent = 100;
+
+                 // Bar: [===              ]
+                 int bar_width = 25;
+                 int filled = (percent * bar_width) / 100;
+                 
+                 std::cout << "\r[";
+                 for(int i=0; i<bar_width; i++) {
+                     if (i < filled) std::cout << "=";
+                     else std::cout << " ";
+                 }
+                 std::cout << "] " << percent << "% (" << format_speed(speed) << ") " << std::flush;
+                 last_update = now;
+            }
         }
     }
+    
+    // Check if we were interrupted
+    if (g_stop_sig) {
+         if (use_ssl) { SSL_shutdown(ssl); SSL_free(ssl); SSL_CTX_free(ctx); }
+         close(sock);
+         return false;
+    }
+
+    // Force final progress update to 100% if valid download
+    if (opts.show_progress && header_parsed && content_length > 0 && total_read >= content_length) {
+         auto now = std::chrono::steady_clock::now();
+         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+         double speed = 0;
+         if (elapsed > 0) speed = (double)total_read * 1000.0 / elapsed;
+         
+         int percent = 100;
+         int bar_width = 25;
+         
+         std::cout << "\r[";
+         for(int i=0; i<bar_width; i++) std::cout << "=";
+         std::cout << "] " << percent << "% (" << format_speed(speed) << ") " << std::flush;
+    }
+
     if (opts.show_progress) std::cout << std::endl;
 
     if (use_ssl) {
@@ -401,16 +582,144 @@ bool HttpRequest(const std::string& url_in, std::ostream& out, const HttpOptions
         SSL_CTX_free(ctx);
     }
     close(sock);
+    if (content_length > 0 && total_read != content_length && opts.method != "HEAD") {
+        if (opts.verbose) std::cerr << "[ERR] Incomplete download. Expected " << content_length << " bytes, got " << total_read << std::endl;
+        return false;
+    }
     return true;
 }
 
-bool DownloadFile(std::string url, const std::string& dest_path, bool verbose) {
-    std::ofstream outfile(dest_path, std::ios::binary);
-    if (!outfile) return false;
+// Helper to get remote file size
+long GetRemoteFileSize(std::string url) {
+    HttpOptions opts;
+    opts.method = "HEAD";
+    opts.include_headers = true; 
+    opts.verbose = false;
     
+    std::stringstream ss;
+    if (!HttpRequest(url, ss, opts)) return -1;
+    
+    std::string response = ss.str();
+    
+    // Parse Content-Length
+    std::string lower_resp = response;
+    std::transform(lower_resp.begin(), lower_resp.end(), lower_resp.begin(), ::tolower);
+    size_t pos = lower_resp.find("content-length: ");
+    if (pos != std::string::npos) {
+        size_t end = lower_resp.find("\r\n", pos);
+        if (end != std::string::npos) {
+            std::string val = response.substr(pos + 16, end - (pos + 16));
+            return std::atol(val.c_str());
+        }
+    }
+    return -1;
+}
+
+bool DownloadWorker(std::string url, std::string dest, long start, long end, int id, bool verbose) {
+    int attempts = 0;
+    while(attempts < 3) {
+        std::ofstream out(dest, std::ios::binary);
+        if (!out) return false;
+        
+        HttpOptions opts;
+        opts.verbose = false; // Workers are silent
+        opts.headers.push_back("Range: bytes=" + std::to_string(start) + "-" + std::to_string(end));
+        
+        if (HttpRequest(url, out, opts)) return true;
+        
+        attempts++;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    if (verbose) std::cerr << "[ERR] Worker " << id << " failed after retries." << std::endl;
+    return false;
+}
+
+bool DownloadFileParallel(std::string url, const std::string& dest_path, long content_length, bool verbose) {
+    int num_threads = 4;
+    long part_size = content_length / num_threads;
+    
+    if (verbose) std::cout << "Parallel Download: " << num_threads << " threads, " << (content_length/1024/1024) << " MB" << std::endl;
+
+    std::vector<std::future<bool>> futures;
+    std::vector<std::string> temp_files;
+    
+    // Start threads
+    for(int i=0; i<num_threads; i++) {
+        long start = i * part_size;
+        long end = (i == num_threads - 1) ? content_length - 1 : (start + part_size - 1);
+        std::string temp_file = dest_path + ".part" + std::to_string(i);
+        temp_files.push_back(temp_file);
+        
+        futures.push_back(std::async(std::launch::async, DownloadWorker, url, temp_file, start, end, i, verbose));
+    }
+    
+    // Wait for all
+    bool success = true;
+    for(auto& f : futures) {
+        if (!f.get()) success = false;
+    }
+    
+    if (success) {
+        // Merge
+        if (verbose) std::cout << "Merging parts..." << std::endl;
+        std::ofstream final_out(dest_path, std::ios::binary);
+        if (!final_out) success = false;
+        else {
+            for(const auto& tf : temp_files) {
+                std::ifstream part_in(tf, std::ios::binary);
+                final_out << part_in.rdbuf();
+                part_in.close();
+                remove(tf.c_str());
+            }
+        }
+    } else {
+        // Cleanup
+        for(const auto& tf : temp_files) remove(tf.c_str());
+    }
+    
+    return success;
+}
+
+bool DownloadFile(std::string url, const std::string& dest_path, bool verbose) {
+    // Check if parallel download is suitable
+    long size = GetRemoteFileSize(url);
+    if (size > 5 * 1024 * 1024) { // > 5 MB use parallel
+        if (DownloadFileParallel(url, dest_path, size, verbose)) return true;
+        if (verbose) std::cerr << "Parallel download failed, falling back to single connection..." << std::endl;
+    }
+
     HttpOptions opts;
     opts.verbose = verbose;
-    opts.show_progress = !verbose; // Show progress if not verbose
+    opts.show_progress = !verbose; 
     opts.follow_location = true;
-    return HttpRequest(url, outfile, opts);
+    opts.retry_count = 0; // Disable inner retry
+
+    // Robust Retry Loop (Manual)
+    int attempts = 0;
+    int max_attempts = 5; // Increased default retries
+    
+    while (attempts < max_attempts) {
+        if (g_stop_sig) return false;
+
+        if (attempts > 0) {
+             if (verbose) std::cout << "Retrying download (" << attempts << "/" << max_attempts << ")..." << std::endl;
+             sleep(2);
+        }
+
+        // Always truncate/reset file on each attempt
+        std::ofstream outfile(dest_path, std::ios::binary);
+        if (!outfile) {
+            std::cerr << "E: Could not open output file: " << dest_path << std::endl;
+            return false;
+        }
+
+        if (HttpRequest(url, outfile, opts)) {
+            return true;
+        }
+        
+        outfile.close(); // Flush and close
+        attempts++;
+    }
+    
+    return false;
 }

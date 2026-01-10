@@ -1,0 +1,8 @@
+{
+  "package": "gemfetch",
+  "version": "1.0.0",
+  "architecture": "x86_64",
+  "maintainer": "GeminiOS",
+  "depends": [],
+  "description": "A beautiful system information fetch tool for GeminiOS."
+}

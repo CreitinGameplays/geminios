@@ -11,6 +11,12 @@ int main(int argc, char* argv[]) {
     }
     std::string username = argv[1];
     
+    if (!UserMgmt::is_valid_username(username)) {
+        std::cerr << "adduser: invalid username '" << username << "'.\n";
+        std::cerr << "Usernames must be 4-16 characters long and contain only lowercase letters and numbers.\n";
+        return 1;
+    }
+
     std::vector<User> users;
     UserMgmt::load_users(users);
     

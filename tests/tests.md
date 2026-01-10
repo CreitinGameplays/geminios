@@ -1,31 +1,12 @@
 # TESTS
 To verify that everything is working as intended (specifically the input and utilities), follow these steps:
 
-   1. Rebuild and Start GeminiOS:
-
-   1     ./build.sh
-   2     qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -vga std -enable-kvm
-
-   2. Test `xinit` and Input:
-      Instead of running Xorg directly, use xinit. This will start X and try to run a default client (usually just a terminal or nothing if not configured).
-
-   1     xinit
-       * Verify the screen turns black/gray with the "X" cursor.
-       * Verify the cursor moves with your mouse.
-       * Press Ctrl+Alt+F1 (or whatever your QEMU setup uses to switch back to TTY) and then Ctrl+C in the terminal to kill X.
-
-   3. Test `setxkbmap`:
-      Since we don't have a window manager yet, you can test if the utility runs without library errors:
-   1     setxkbmap -layout br -print
-       * This should output the XKB configuration for the Brazilian layout without crashing or complaining about missing .so files.
-
-   4. Integration Test (The "Poor Man's Desktop"):
-      You can try to run a command automatically when X starts:
-
-   1     xinit /bin/apps/snake -- :0
-       * If successful, this will start X and run the Snake game inside it (though Snake is likely a CLI app, this tests if xinit can pass arguments and manage a session). 
-
 Test the virtio GPU/mesa:
 ```
-qemu-system-x86_64 -m 2G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -enable-kvm
+qemu-system-x86_64 -m 2G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -enable-kvm -serial stdio -hda disk.qcow2 -boot d
+```
+
+Check if `xinit` runs without errors:
+```
+xinit
 ```

@@ -23,11 +23,11 @@ std::string get_pass(const std::string& prompt) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string target_user = "gemini"; // Default to root
+    std::string target_user = "root"; // Default to root
     
     if (argc > 1) {
         target_user = argv[1];
-        if (target_user == "-") target_user = "gemini"; // handle 'su -' partly
+        if (target_user == "-") target_user = "root"; // handle 'su -' partly
     }
 
     std::vector<User> users;

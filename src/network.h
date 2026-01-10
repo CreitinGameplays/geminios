@@ -14,6 +14,8 @@ struct HttpOptions {
     bool insecure = true;
     int max_redirects = 5;
     int timeout = 30;
+    int retry_count = 3;      // Number of retries on failure
+    int retry_delay = 2;      // Seconds to wait between retries
     std::string proxy;
     std::string method = "GET";
     std::string user_agent = "GeminiOS/1.0";
