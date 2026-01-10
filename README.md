@@ -4,6 +4,10 @@ GeminiOS is a minimal, open-source, educational Linux-based Operating System bui
 
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
+## Showcase
+
+![GeminiOS Screenshot](screenshot/img0.png)
+
 ## Setup and Build
 
 To build GeminiOS, you need a Linux host (Ubuntu/Debian recommended) with the following dependencies:
