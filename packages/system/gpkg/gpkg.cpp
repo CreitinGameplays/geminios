@@ -834,8 +834,33 @@ bool run_package_script(const std::string& path, const std::string& name, bool v
     return true;
 }
 
+std::string find_installed_provider(const std::string& capability) {
+    for (const auto& p_name : get_installed_packages()) {
+        std::ifstream f(INFO_DIR + p_name + ".json");
+        if (!f) continue;
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::vector<std::string> p_provides;
+        if (get_json_array(content, "provides", p_provides)) {
+            for (const auto& prov : p_provides) {
+                Dependency d = parse_dependency(prov);
+                if (d.name == capability) return p_name;
+            }
+        }
+    }
+    return "";
+}
+
 bool remove_package_v2(const std::string& pkg, bool verbose) {
-    if (!is_installed(pkg)) return false;
+    if (!is_installed(pkg)) {
+        std::string provider = find_installed_provider(pkg);
+        if (!provider.empty()) {
+            std::cerr << Color::RED << "E: Package '" << pkg << "' is not installed. However, '" << provider << "' provides it." << Color::RESET << std::endl;
+            std::cerr << "   To remove it, run: gpkg remove " << provider << std::endl;
+        } else {
+             std::cerr << Color::RED << "E: Package '" << pkg << "' is not installed." << Color::RESET << std::endl;
+        }
+        return false;
+    }
     run_package_script(INFO_DIR + pkg + ".prerm", "pre-removal", verbose);
 
     std::ifstream f(INFO_DIR + pkg + ".list");

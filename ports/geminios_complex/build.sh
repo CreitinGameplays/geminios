@@ -4,9 +4,9 @@ set -e
 SRC="$ROOT_DIR/src"
 PKGS="$ROOT_DIR/packages/system"
 
-echo "Compiling gpkg..."
-g++ $CXXFLAGS -I "$SRC" -o "$ROOTFS/bin/apps/system/gpkg" "$PKGS/gpkg/gpkg.cpp" "$SRC/network.cpp" "$SRC/signals.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
-strip "$ROOTFS/bin/apps/system/gpkg"
+#echo "Compiling gpkg..."
+#g++ $CXXFLAGS -I "$SRC" -o "$ROOTFS/bin/apps/system/gpkg" "$PKGS/gpkg/gpkg.cpp" "$SRC/network.cpp" "$SRC/signals.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
+#strip "$ROOTFS/bin/apps/system/gpkg"
 
 echo "Compiling ping..."
 g++ $CXXFLAGS -I "$SRC" -o "$ROOTFS/bin/apps/system/ping" "$PKGS/ping/ping.cpp" "$SRC/network.cpp" "$SRC/signals.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread

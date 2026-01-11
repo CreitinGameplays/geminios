@@ -23,6 +23,10 @@ echo "Compiling Getty..."
 g++ $CXXFLAGS -o getty "$ROOT_DIR/src/getty.cpp"
 strip getty
 
+echo "Compiling Package Manager (gpkg)..."
+g++ $CXXFLAGS -o gpkg "$ROOT_DIR/packages/system/gpkg/gpkg.cpp" "$ROOT_DIR/src/network.cpp" "$ROOT_DIR/src/signals.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
+strip gpkg
+
 # Install binaries
 mkdir -p "$ROOTFS/bin" "$ROOTFS/sbin"
 
@@ -35,6 +39,7 @@ ln -sf gsh "$ROOTFS/bin/sh"
 
 cp login "$ROOTFS/bin/login"
 cp getty "$ROOTFS/sbin/getty"
+cp gpkg "$ROOTFS/bin/gpkg"
 
 # Create default system files (passwd, group, shadow)
 mkdir -p "$ROOTFS/etc"
@@ -147,4 +152,4 @@ EOF
 
 # Cleanup (don't remove signals.o and user_mgmt.o, geminios_complex needs them)
 echo "Cleaning up compiled artifacts..."
-rm -f ginit gsh login getty init
+rm -f ginit gsh login getty init gpkg
