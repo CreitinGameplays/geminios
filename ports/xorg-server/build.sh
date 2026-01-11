@@ -1,5 +1,32 @@
 #!/bin/bash
 set -e
+
+# Auto-detect project root directory
+if [ -z "$ROOT_DIR" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+    export ROOT_DIR
+fi
+
+# Fix broken libXfont2.la path if it exists
+if [ -f "$ROOT_DIR/rootfs/usr/lib64/libXfont2.la" ]; then
+    sed -i "s|/usr/lib/libfontenc.la|$ROOT_DIR/rootfs/usr/lib64/libfontenc.la|g" "$ROOT_DIR/rootfs/usr/lib64/libXfont2.la"
+fi
+
+# Fix missing libudev.la
+if [ ! -f "$ROOT_DIR/rootfs/usr/lib64/libudev.la" ]; then
+    echo "libudev.la not found in rootfs. Attempting to recover..."
+    # Try to find it in external_dependencies
+    FOUND_LA=$(find "$DEP_DIR" -name "libudev.la" 2>/dev/null | grep "src/libudev/libudev.la" | head -n 1)
+    if [ -n "$FOUND_LA" ]; then
+        echo "Found libudev.la at $FOUND_LA. Installing to rootfs..."
+        cp "$FOUND_LA" "$ROOT_DIR/rootfs/usr/lib64/libudev.la"
+        sed -i "s/installed=no/installed=yes/g" "$ROOT_DIR/rootfs/usr/lib64/libudev.la"
+    else
+        echo "Warning: libudev.la not found in dependencies. Build might fail."
+    fi
+fi
+
 XORG_SERVER_VER="1.20.14"
 download_and_extract "https://www.x.org/archive/individual/xserver/xorg-server-$XORG_SERVER_VER.tar.gz" "xorg-server-$XORG_SERVER_VER.tar.gz" "xorg-server-$XORG_SERVER_VER"
 cd "$DEP_DIR/xorg-server-$XORG_SERVER_VER"
