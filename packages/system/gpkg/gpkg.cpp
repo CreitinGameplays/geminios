@@ -803,8 +803,17 @@ bool save_package_metadata(const std::string& pkg_name, const std::string& tmp_p
     std::stringstream ss_out;
 
     for (const auto& line : file_list) {
+        std::string p = trim(line);
+        // Remove leading ./ or /
+        while (p.size() >= 2 && p.substr(0, 2) == "./") p = p.substr(2);
+        while (!p.empty() && p[0] == '/') p = p.substr(1);
+        // Remove trailing /
+        while (p.size() > 1 && p.back() == '/') p.pop_back();
+        
+        if (p.empty() || p == ".") continue;
+
         // Prepend / for the .list file to represent absolute paths in the system
-        ss_out << "/" << line << "\n";
+        ss_out << "/" << p << "\n";
     }
     
     std::ofstream list_file(INFO_DIR + pkg_name + ".list");
@@ -836,39 +845,6 @@ bool run_package_script(const std::string& path, const std::string& name, bool v
 
 std::string find_installed_provider(const std::string& capability);
 
-bool is_system_directory(const std::string& path) {
-    static const std::set<std::string> system_dirs = {
-        "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", 
-        "/media", "/mnt", "/opt", "/proc", "/root", "/run", "/sbin", 
-        "/srv", "/sys", "/tmp", "/usr", "/usr/bin", "/usr/include", 
-        "/usr/lib", "/usr/lib64", "/usr/local", "/usr/sbin", "/usr/share", 
-        "/usr/src", "/var", "/var/cache", "/var/lib", "/var/log", 
-        "/var/opt", "/var/spool", "/var/tmp", "/var/repo", "/var/lib/gpkg",
-        // Extended system directories
-        "/usr/games", "/usr/libexec", "/usr/local/bin", "/usr/local/etc", 
-        "/usr/local/games", "/usr/local/include", "/usr/local/lib", 
-        "/usr/local/sbin", "/usr/local/share", "/usr/local/src"
-    };
-
-    std::string p = path;
-    
-    // Handle ROOT_PREFIX (for dev mode or chroots)
-    if (!ROOT_PREFIX.empty() && p.find(ROOT_PREFIX) == 0) {
-        p = p.substr(ROOT_PREFIX.length());
-        // If ROOT_PREFIX didn't end with /, we might have a leading slash in remainder or not
-        // e.g. rootfs/usr -> /usr
-    }
-    
-    // Ensure absolute path format for checking
-    if (p.empty()) return true; // Safety
-    if (p.front() != '/') p = "/" + p;
-    
-    // Normalize trailing slash
-    if (p.size() > 1 && p.back() == '/') p.pop_back();
-    
-    return system_dirs.count(p);
-}
-
 std::string find_installed_provider(const std::string& capability) {
     for (const auto& p_name : get_installed_packages()) {
         std::ifstream f(INFO_DIR + p_name + ".json");
@@ -886,59 +862,8 @@ std::string find_installed_provider(const std::string& capability) {
 }
 
 bool remove_package_v2(const std::string& pkg, bool verbose) {
-    if (!is_installed(pkg)) {
-        std::string provider = find_installed_provider(pkg);
-        if (!provider.empty()) {
-            std::cerr << Color::RED << "E: Package '" << pkg << "' is not installed. However, '" << provider << "' provides it." << Color::RESET << std::endl;
-            std::cerr << "   To remove it, run: gpkg remove " << provider << std::endl;
-        } else {
-             std::cerr << Color::RED << "E: Package '" << pkg << "' is not installed." << Color::RESET << std::endl;
-        }
-        return false;
-    }
-    run_package_script(INFO_DIR + pkg + ".prerm", "pre-removal", verbose);
-
-    std::ifstream f(INFO_DIR + pkg + ".list");
-    std::vector<std::string> files;
-    std::string line;
-    while(std::getline(f, line)) if(!line.empty()) files.push_back(line);
-    
-    check_triggers(files);
-    std::reverse(files.begin(), files.end());
-    
-    for(const auto& file : files) {
-        std::string path = trim(file);
-        while (path.size() > 1 && path[0] == '/' && path[1] == '/') path = path.substr(1);
-        std::string full_path = ROOT_PREFIX + (path.front() == '/' ? "" : "/") + path;
-        
-        struct stat st;
-        if(lstat(full_path.c_str(), &st) == 0) {
-            if(S_ISDIR(st.st_mode)) {
-                if (is_system_directory(full_path)) {
-                     VLOG(verbose, "Skipping removal of system directory: " << full_path);
-                } else {
-                     VLOG(verbose, "Removing directory: " << full_path);
-                     rmdir(full_path.c_str());
-                }
-            } else {
-                // If the path ends with /, it was meant to be a directory in the package.
-                // If it's not a directory now (e.g. it's a symlink to one), 
-                // we should NOT use remove() because that would delete the symlink.
-                if (!path.empty() && path.back() == '/') {
-                    VLOG(verbose, "Skipping removal of " << full_path << " (not a real directory)");
-                    rmdir(full_path.c_str()); // Fail safely
-                } else {
-                    VLOG(verbose, "Removing file: " << full_path);
-                    remove(full_path.c_str());
-                }
-            }
-        }
-    }
-
-    run_package_script(INFO_DIR + pkg + ".postrm", "post-removal", verbose);
-    run_command("rm -f " + INFO_DIR + pkg + ".*", verbose);
-    std::cout << "✓ Removed " << pkg << std::endl;
-    return true;
+    std::cerr << Color::RED << "E: Package removal is not implemented in this version of gpkg." << Color::RESET << std::endl;
+    return false;
 }
 
 bool are_files_different(const std::string& p1, const std::string& p2) {
@@ -1200,13 +1125,8 @@ int handle_install(int argc, char* argv[], const std::set<std::string>& installe
 }
 
 int handle_remove(int argc, char* argv[], bool verbose) {
-    for (int i = 2; i < argc; ++i) {
-        std::string pkg = trim(argv[i]);
-        if (pkg == "-v" || pkg == "--verbose") continue;
-        std::cout << "Removing " << pkg << "..." << std::endl;
-        if (!remove_package_v2(pkg, verbose)) std::cerr << "E: Failed to remove " << pkg << std::endl;
-    }
-    return 0;
+    std::cerr << Color::RED << "E: The 'remove' command is not implemented in this version." << Color::RESET << std::endl;
+    return 1;
 }
 
 int handle_search(const std::string& query, bool verbose) {
