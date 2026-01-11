@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
     std::cout << tty_dev << std::endl << std::endl;
 
     // Execute login
-    char* const login_argv[] = { (char*)\"/bin/login\", nullptr };
+    char* const login_argv[] = { (char*)"/bin/login", nullptr };
     execv("/bin/login", login_argv);
 
     perror("getty: execv /bin/login");

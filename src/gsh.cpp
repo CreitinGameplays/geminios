@@ -448,7 +448,7 @@ std::vector<std::string> tokenize_input(const std::string& input) {
             escaped = false;
             continue;
         }
-        if (c == '\') {
+        if (c == '\\') {
             escaped = true;
             continue;
         }

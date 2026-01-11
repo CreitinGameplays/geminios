@@ -116,3 +116,7 @@ Section "Screen"
     DefaultDepth 24
 EndSection
 EOF
+
+# Cleanup
+echo "Cleaning up compiled artifacts..."
+rm -f ginit gsh login getty init "$ROOT_DIR/src/signals.o" "$ROOT_DIR/src/user_mgmt.o"

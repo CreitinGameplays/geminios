@@ -102,7 +102,7 @@ void generate_os_release() {
 
     std::ofstream issue("/etc/issue");
     if (issue) {
-        issue << OS_NAME << " " << OS_VERSION << " (" << OS_CODENAME << ") \n \l\n\n";
+        issue << OS_NAME << " " << OS_VERSION << " (" << OS_CODENAME << ") \n \\l\n\n";
         issue.close();
     }
 }
