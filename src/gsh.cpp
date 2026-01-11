@@ -468,21 +468,20 @@ std::vector<std::string> tokenize_input(const std::string& input) {
         if (isdigit(c) && next == '>') {
             if (current.empty()) {
                 // Handle file descriptor redirections (e.g., 2>, 2>>, 2>&1)
-                push_token();
                 current += c;
                 i++; // Consume '>'
                 current += '>';
                 
-                if (input[i+1] == '>') {
+                if (i + 1 < input.length() && input[i+1] == '>') {
                      current += '>';
                      i++;
-                } else if (input[i+1] == '&') {
+                } else if (i + 1 < input.length() && input[i+1] == '&') {
                      current += '&';
                      i++;
-                     if (isdigit(input[i+1])) {
+                     if (i + 1 < input.length() && isdigit(input[i+1])) {
                          current += input[i+1];
                          i++;
-                     } else if (input[i+1] == '-') {
+                     } else if (i + 1 < input.length() && input[i+1] == '-') {
                          current += input[i+1];
                          i++;
                      }
@@ -1138,8 +1137,12 @@ int main(int argc, char* argv[]) {
 
     // Handle -c option (for system())
     if (argc > 1 && std::string(argv[1]) == "-c") {
-        if (argc > 2) {
-            std::string cmd = argv[2];
+        int cmd_idx = 2;
+        if (argc > cmd_idx && std::string(argv[cmd_idx]) == "--") {
+            cmd_idx++;
+        }
+        if (argc > cmd_idx) {
+            std::string cmd = argv[cmd_idx];
             // If there are more args, they are arguments to the command (not handled in this simple shell yet, usually $0 $1...)
             execute_command_string(cmd);
             return last_exit_code;

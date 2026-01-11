@@ -51,6 +51,27 @@ const std::string LOCK_FILE = ROOT_PREFIX + "/var/lib/gpkg/lock";
 // Forward Declaration
 int run_command(const std::string& cmd, bool verbose);
 
+bool mkdir_p(const std::string& path) {
+    if (path.empty()) return false;
+    std::string current_path = "";
+    std::stringstream ss(path);
+    std::string segment;
+    
+    if (path[0] == '/') current_path = "/";
+
+    while (std::getline(ss, segment, '/')) {
+        if (segment.empty()) continue;
+        current_path += segment + "/";
+        struct stat st;
+        if (stat(current_path.c_str(), &st) != 0) {
+            if (mkdir(current_path.c_str(), 0755) != 0 && errno != EEXIST) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 std::set<std::string> g_pending_triggers;
 
 void release_lock(bool verbose) {
@@ -63,10 +84,11 @@ bool acquire_lock(bool verbose) {
     std::string lock_dir = LOCK_FILE.substr(0, LOCK_FILE.find_last_of('/'));
     struct stat st;
     if (stat(lock_dir.c_str(), &st) != 0) {
-        // Since we don't have mkdir -p helper handy in C++, let's use system()
-        // It's a bit hacky but consistent with other parts of this file
         if (verbose) std::cout << "[DEBUG] Creating lock directory: " << lock_dir << std::endl;
-        system(("mkdir -p " + lock_dir).c_str());
+        if (!mkdir_p(lock_dir)) {
+            std::cerr << Color::RED << "E: Failed to create lock directory: " << lock_dir << " (errno: " << errno << ")" << Color::RESET << std::endl;
+            return false;
+        }
     }
 
     if (access(LOCK_FILE.c_str(), F_OK) == 0) {
@@ -75,7 +97,7 @@ bool acquire_lock(bool verbose) {
     }
     // Create lock file
     if (verbose) std::cout << "[DEBUG] Acquiring lock: " << LOCK_FILE << std::endl;
-    int fd = creat(LOCK_FILE.c_str(), 0644);
+    int fd = open(LOCK_FILE.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd < 0) {
         std::cerr << Color::RED << "E: Failed to create lock file: " << LOCK_FILE << " (errno: " << errno << ")" << Color::RESET << std::endl;
         return false;
@@ -366,7 +388,6 @@ int run_command(const std::string& cmd, bool verbose) {
 // Helper to get file list from tar
 std::vector<std::string> get_tar_file_list(const std::string& tar_path, bool strip_data) {
     std::string tar_list_cmd = "tar -tf " + tar_path;
-    if (strip_data) tar_list_cmd += " --strip-components=1";
     
     std::string raw_list = get_command_output(tar_list_cmd);
     std::stringstream ss_in(raw_list);
@@ -381,6 +402,19 @@ std::vector<std::string> get_tar_file_list(const std::string& tar_path, bool str
         if (line.size() >= 2 && line.substr(0, 2) == "./") {
             line = line.substr(2);
         }
+
+        if (line.empty() || line == ".") continue;
+
+        if (strip_data) {
+            size_t first_slash = line.find('/');
+            if (first_slash != std::string::npos) {
+                line = line.substr(first_slash + 1);
+            } else {
+                continue; // It was just the prefix directory itself
+            }
+        }
+        
+        if (line.empty() || line == "." || line == "./") continue;
         
         file_list.push_back(line);
     }
@@ -765,28 +799,10 @@ bool save_package_metadata(const std::string& pkg_name, const std::string& tmp_p
     // 3. Generate file list
     if (verbose) std::cout << "[DEBUG] Generating file list from " << tar_path << std::endl;
     
-    // We use a more robust way to get the file list that matches how it's extracted
-    std::string tar_list_cmd = "tar -tf " + tar_path;
-    if (strip_data) tar_list_cmd += " --strip-components=1";
-    
-    std::string raw_list = get_command_output(tar_list_cmd);
-    std::stringstream ss_in(raw_list);
+    std::vector<std::string> file_list = get_tar_file_list(tar_path, strip_data);
     std::stringstream ss_out;
-    std::string line;
-    std::vector<std::string> file_list;
 
-    while (std::getline(ss_in, line)) {
-        line = trim(line);
-        if (line.empty() || line == "." || line == "./") continue;
-        
-        // Remove ./ prefix if it exists
-        if (line.size() >= 2 && line.substr(0, 2) == "./") {
-            line = line.substr(2);
-        }
-        
-        // Add to vector for trigger analysis
-        file_list.push_back(line);
-        
+    for (const auto& line : file_list) {
         // Prepend / for the .list file to represent absolute paths in the system
         ss_out << "/" << line << "\n";
     }
@@ -837,10 +853,20 @@ bool remove_package_v2(const std::string& pkg, bool verbose) {
         
         struct stat st;
         if(lstat(full_path.c_str(), &st) == 0) {
-            if(S_ISDIR(st.st_mode)) rmdir(full_path.c_str());
-            else {
-                VLOG(verbose, "Removing file: " << full_path);
-                remove(full_path.c_str());
+            if(S_ISDIR(st.st_mode)) {
+                VLOG(verbose, "Removing directory: " << full_path);
+                rmdir(full_path.c_str());
+            } else {
+                // If the path ends with /, it was meant to be a directory in the package.
+                // If it's not a directory now (e.g. it's a symlink to one), 
+                // we should NOT use remove() because that would delete the symlink.
+                if (!path.empty() && path.back() == '/') {
+                    VLOG(verbose, "Skipping removal of " << full_path << " (not a real directory)");
+                    rmdir(full_path.c_str()); // Fail safely
+                } else {
+                    VLOG(verbose, "Removing file: " << full_path);
+                    remove(full_path.c_str());
+                }
             }
         }
     }
@@ -940,7 +966,10 @@ bool install_package_from_file(const std::string& pkg_file, bool verbose) {
     }
 
     // Move files from stage to destination
-    if (run_command("cp -a " + stage_dir + "/. " + dest, verbose) != 0) {
+    // We use tar to merge because cp -a fails if a directory in source matches a symlink in destination
+    VLOG(verbose, "Merging staged files to destination: " << dest);
+    std::string install_cmd = "tar -C " + stage_dir + " -cf - . | tar -C " + dest + " -xf -";
+    if (run_command(install_cmd, verbose) != 0) {
         std::cerr << "E: Failed to install files from staging." << std::endl;
         unlink(payload_tar.c_str());
         return false;
