@@ -521,7 +521,13 @@ def finalize_rootfs():
     if os.path.exists(mime_tool) and os.path.exists(mime_dir):
         subprocess.run([mime_tool, mime_dir], env=env)
 
-    # 4. Final Integrity Check
+    # 4. Create Live Marker
+    # This file tells ginit that we are booting the Live CD (enabling autologin)
+    # The installer will remove this file from the installed system.
+    with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
+        f.write("1")
+
+    # 5. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)

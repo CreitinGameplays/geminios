@@ -177,7 +177,7 @@ void UserMgmt::initialize_defaults() {
         std::cout << "[INIT] Creating default /etc/passwd..." << std::endl;
         std::ofstream p("/etc/passwd");
         // Root Account
-        p << "root:x:0:0:System Administrator:/root:/bin/init\n";
+        p << "root:x:0:0:System Administrator:/root:/bin/gsh\n";
         p.close();
     }
     

@@ -34,46 +34,79 @@ void set_env(const User& u) {
 
 int main(int argc, char* argv[]) {
     std::string username;
-    if (argc > 1) {
-        username = argv[1];
+    bool autologin = false;
+
+    // Argument parsing
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-f") {
+            if (i + 1 < argc) {
+                username = argv[i+1];
+                autologin = true;
+                i++; // Skip username arg
+            }
+        } else if (username.empty()) {
+            username = arg;
+        }
     }
 
     while (true) {
-        if (username.empty()) {
-            std::cout << OS_NAME << " login: ";
-            if (!std::getline(std::cin, username) || username.empty()) {
-                if (std::cin.eof()) return 0;
-                continue;
-            }
-        }
-
-        // Disable Echo for password
-        struct termios t;
-        tcgetattr(STDIN_FILENO, &t);
-        struct termios oldt = t;
-        t.c_lflag &= ~ECHO;
-        tcsetattr(STDIN_FILENO, TCSANOW, &t);
-
-        std::string password;
-        std::cout << "Password: ";
-        if (!std::getline(std::cin, password)) {
-            tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-            return 0;
-        }
-
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-        std::cout << std::endl;
-
         std::vector<User> users;
         bool authenticated = false;
         User authenticated_user;
 
         if (UserMgmt::load_users(users)) {
+            // Check if user exists first
+            bool user_found = false;
             for (const auto& u : users) {
-                if (u.username == username && UserMgmt::check_password(password, u.password)) {
-                    authenticated = true;
+                if (u.username == username) {
                     authenticated_user = u;
+                    user_found = true;
                     break;
+                }
+            }
+            
+            if (autologin && user_found) {
+                authenticated = true;
+            } else {
+                // Normal Login Flow
+                if (username.empty()) {
+                    std::cout << OS_NAME << " login: ";
+                    if (!std::getline(std::cin, username) || username.empty()) {
+                        if (std::cin.eof()) return 0;
+                        continue;
+                    }
+                    // Re-check user existence after getting username
+                    if (UserMgmt::load_users(users)) {
+                         for (const auto& u : users) {
+                            if (u.username == username) {
+                                authenticated_user = u;
+                                user_found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Disable Echo for password
+                struct termios t;
+                tcgetattr(STDIN_FILENO, &t);
+                struct termios oldt = t;
+                t.c_lflag &= ~ECHO;
+                tcsetattr(STDIN_FILENO, TCSANOW, &t);
+
+                std::string password;
+                std::cout << "Password: ";
+                if (!std::getline(std::cin, password)) {
+                    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+                    return 0;
+                }
+
+                tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+                std::cout << std::endl;
+                
+                if (user_found && UserMgmt::check_password(password, authenticated_user.password)) {
+                    authenticated = true;
                 }
             }
         }
@@ -113,6 +146,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Login incorrect" << std::endl;
             sleep(2);
             username.clear(); // Prompt again
+            autologin = false; // Disable autologin on failure (though it shouldn't fail if user exists)
         }
     }
 

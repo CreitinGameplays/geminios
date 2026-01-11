@@ -521,7 +521,7 @@ std::vector<std::string> tokenize_input(const std::string& input) {
             if (next == '>') {
                 push_token(); tokens.push_back(">>"); i++;
             } else if (next == '&') {
-                push_token(); tokens.push_back(">& "); i++;
+                push_token(); tokens.push_back(">&"); i++;
             } else {
                 push_token(); tokens.push_back(">");
             }
@@ -1130,6 +1130,44 @@ int main(int argc, char* argv[]) {
     // Ignore SIGTTOU to allow background process management
     signal(SIGTTOU, SIG_IGN); 
 
-    start_shell();
+    // Handle --version
+    if (argc > 1 && std::string(argv[1]) == "--version") {
+        std::cout << OS_NAME << " " << OS_VERSION << " (gsh)" << std::endl;
+        return 0;
+    }
+
+    // Handle -c option (for system())
+    if (argc > 1 && std::string(argv[1]) == "-c") {
+        if (argc > 2) {
+            std::string cmd = argv[2];
+            // If there are more args, they are arguments to the command (not handled in this simple shell yet, usually $0 $1...)
+            execute_command_string(cmd);
+            return last_exit_code;
+        } else {
+            std::cerr << "gsh: -c: option requires an argument" << std::endl;
+            return 2;
+        }
+    }
+
+    // Handle script execution (gsh script.sh)
+    if (argc > 1) {
+        std::string filename = argv[1];
+        std::ifstream file(filename);
+        if (file) {
+            std::string line;
+            while (std::getline(file, line)) {
+                size_t first = line.find_first_not_of(" \t");
+                if (first == std::string::npos) continue;
+                if (line[first] == '#') continue;
+                execute_command_string(line);
+            }
+            return last_exit_code;
+        } else {
+             perror(("gsh: " + filename).c_str());
+             return 127;
+        }
+    }
+
+    start_shell(true);
     return 0;
 }

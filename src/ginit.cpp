@@ -110,12 +110,15 @@ void generate_os_release() {
 // Map to track TTY Supervisor PIDs: PID -> TTY Device Path
 std::map<pid_t, std::string> g_tty_pids;
 
-pid_t spawn_getty(const std::string& tty) {
+pid_t spawn_getty(const std::string& tty, const std::string& autologin_user = "") {
     pid_t pid = fork();
     if (pid == 0) {
         // Child: Exec getty
-        char* const argv[] = { (char*)"/sbin/getty", (char*)tty.c_str(), nullptr };
-        execv("/sbin/getty", argv);
+        if (!autologin_user.empty()) {
+             execl("/sbin/getty", "getty", tty.c_str(), autologin_user.c_str(), nullptr);
+        } else {
+             execl("/sbin/getty", "getty", tty.c_str(), nullptr);
+        }
         perror("execv /sbin/getty");
         exit(1);
     }
@@ -150,17 +153,36 @@ mount_fs("tmpfs", "/var/log", "tmpfs");
 mount_fs("tmpfs", "/var/tmp", "tmpfs");
 mount_fs("tmpfs", "/usr/share/X11/xkb/compiled", "tmpfs");
 
+    std::cerr << "[GINIT] Starting system services..." << std::endl;
     if (fork() == 0) {
         execl("/usr/sbin/udevd", "udevd", "--daemon", nullptr);
         exit(0);
     }
-    system("/usr/bin/udevadm trigger --action=add");
-    system("/usr/bin/udevadm settle");
+    
+    // Give udevd a moment to initialize its socket
+    usleep(500000); 
+
+    if (fork() == 0) {
+        execl("/usr/bin/udevadm", "udevadm", "trigger", "--action=add", nullptr);
+        exit(0);
+    }
+    wait(NULL);
+
+    if (fork() == 0) {
+        execl("/usr/bin/udevadm", "udevadm", "settle", nullptr);
+        exit(0);
+    }
+    wait(NULL);
     
     ensure_fhs();
 
     mkdir("/var/lib/dbus", 0755);
-    system("/usr/bin/dbus-uuidgen --ensure");
+    if (fork() == 0) {
+        execl("/usr/bin/dbus-uuidgen", "dbus-uuidgen", "--ensure", nullptr);
+        exit(0);
+    }
+    wait(NULL);
+
     mkdir("/run/dbus", 0755);
     if (fork() == 0) {
         execl("/usr/bin/dbus-daemon", "dbus-daemon", "--system", "--nofork", "--nopidfile", nullptr);
@@ -177,9 +199,22 @@ mount_fs("tmpfs", "/usr/share/X11/xkb/compiled", "tmpfs");
 
     std::vector<std::string> terminals = {"/dev/tty1", "/dev/tty2", "/dev/tty3", "/dev/ttyS0"};
     
+    // Check if we are in Live Environment
+    bool is_live = (access("/etc/geminios-live", F_OK) == 0);
+
     for (const auto& tty : terminals) {
-        pid_t pid = spawn_getty(tty);
-        if (pid > 0) g_tty_pids[pid] = tty;
+        pid_t pid;
+        if (is_live) {
+             // Autologin as root on all terminals for Live CD
+             pid = spawn_getty(tty, "root");
+        } else {
+             // Standard Login Prompt for Installed System
+             pid = spawn_getty(tty);
+        }
+
+        if (pid > 0) {
+            g_tty_pids[pid] = tty;
+        }
     }
 
     // Supervisor Loop: Reap and respawn processes
@@ -193,15 +228,18 @@ mount_fs("tmpfs", "/usr/share/X11/xkb/compiled", "tmpfs");
                 std::string tty = it->second;
                 g_tty_pids.erase(it);
                 
-                std::cerr << "[GINIT] TTY " << tty << " respawning..." << std::endl;
+                // std::cerr << "[GINIT] TTY " << tty << " respawning..." << std::endl;
                 
-                pid_t new_pid = spawn_getty(tty);
+                pid_t new_pid;
+                if (is_live) {
+                    new_pid = spawn_getty(tty, "root");
+                } else {
+                    new_pid = spawn_getty(tty);
+                }
+
                 if (new_pid > 0) {
                     g_tty_pids[new_pid] = tty;
                 }
-            } else {
-                // Not a tracked getty. Might be a service (udevd, dbus-daemon).
-                // In a more complete init, we would track these too.
             }
         }
     }

@@ -48,8 +48,23 @@ EOF
 # 2. /etc/group
 cat > "$ROOTFS/etc/group" <<EOF
 root:x:0:
+bin:x:1:
+sys:x:2:
+kmem:x:9:
+tty:x:5:
+disk:x:6:
+lp:x:7:
+dialout:x:20:
+cdrom:x:24:
 sudo:x:27:root
+audio:x:29:
+video:x:44:
 users:x:100:
+input:x:101:
+render:x:102:
+sgx:x:103:
+tape:x:26:
+kvm:x:78:
 messagebus:x:18:
 EOF
 
@@ -76,13 +91,19 @@ Section "Files"
     ModulePath "/usr/lib64/xorg/modules"
     ModulePath "/usr/lib64/dri"
     XkbDir "/usr/share/X11/xkb"
+    FontPath "/usr/share/fonts/X11/misc"
+    FontPath "/usr/share/fonts/X11/TTF"
+    FontPath "/usr/share/fonts/X11/OTF"
+    FontPath "/usr/share/fonts/X11/Type1"
+    FontPath "/usr/share/fonts/X11/75dpi"
+    FontPath "/usr/share/fonts/X11/100dpi"
 EndSection
 
 Section "Module"
-    Load "fbdevhw"
     Load "glx"
     Load "dri"
     Load "dri2"
+    Load "dri3"
 EndSection
 
 Section "ServerFlags"
@@ -92,17 +113,24 @@ Section "ServerFlags"
 EndSection
 
 Section "InputClass"
-    Identifier "keyboard"
+    Identifier "evdev keyboard catchall"
     MatchIsKeyboard "on"
-    Option "XkbRules" "evdev"
-    Option "XkbModel" "pc105"
-    Option "XkbLayout" "us"
+    MatchDevicePath "/dev/input/event*"
+    Driver "evdev"
+EndSection
+
+Section "InputClass"
+    Identifier "evdev pointer catchall"
+    MatchIsPointer "on"
+    MatchDevicePath "/dev/input/event*"
+    Driver "evdev"
 EndSection
 
 Section "Device"
     Identifier "Card0"
-    Driver "fbdev"
-    Option "fbdev" "/dev/fb0"
+    Driver "modesetting"
+    Option "kmsdev" "/dev/dri/card0"
+    Option "SWcursor" "on"
 EndSection
 
 Section "Monitor"
@@ -117,6 +145,6 @@ Section "Screen"
 EndSection
 EOF
 
-# Cleanup
+# Cleanup (don't remove signals.o and user_mgmt.o, geminios_complex needs them)
 echo "Cleaning up compiled artifacts..."
-rm -f ginit gsh login getty init "$ROOT_DIR/src/signals.o" "$ROOT_DIR/src/user_mgmt.o"
+rm -f ginit gsh login getty init

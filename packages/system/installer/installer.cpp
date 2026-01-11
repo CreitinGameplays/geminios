@@ -415,7 +415,7 @@ int main(int argc, char* argv[]) {
     User root;
     root.username = "root";
     root.uid = 0; root.gid = 0;
-    root.home = "/root"; root.shell = "/bin/init";
+    root.home = "/root"; root.shell = "/bin/gsh";
     root.password = UserMgmt::hash_password(cfg.password); // Root passed same as user
     new_users.push_back(root);
 
@@ -424,7 +424,7 @@ int main(int argc, char* argv[]) {
     u.username = cfg.username;
     u.uid = 1000; u.gid = 1000;
     u.home = "/home/" + cfg.username;
-    u.shell = "/bin/init";
+    u.shell = "/bin/gsh";
     u.password = UserMgmt::hash_password(cfg.password);
     new_users.push_back(u);
 
@@ -432,7 +432,7 @@ int main(int argc, char* argv[]) {
     std::vector<Group> new_groups;
     
     Group g_root;
-    g_root.name = "root"; g_root.password = "x"; g_root.gid = 0; g_root.members = {"root"};
+    g_root.name = "root"; g_root.password = "x"; g_root.gid = 0; g_root.members = {};
 
     Group g_sudo;
     g_sudo.name = "sudo"; g_sudo.password = "x"; g_sudo.gid = 27; g_sudo.members = {"root", cfg.username};
@@ -485,6 +485,10 @@ int main(int argc, char* argv[]) {
 
     // 6. Bootloader
     std::cout << "[5/5] Setting up Bootloader...\n";
+    
+    // Remove Live Environment Marker from Target
+    unlink("/mnt/target/etc/geminios-live");
+
     // Warning: We cannot install GRUB to MBR without grub binaries.
     // Create a default grub.cfg just in case
     std::ofstream grub("/mnt/target/boot/grub/grub.cfg");
