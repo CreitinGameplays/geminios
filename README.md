@@ -50,6 +50,22 @@ The build system, particularly the Python package build, requires a specific hos
 
 **Note**: Host Python version > 3.12 may fail due to the removal of the `pipes` and `distutils` modules in some external dependencies (e.g., older GLib/Meson versions). If you encounter issues, consider using a compatibility layer or patching the affected files, though the `builder.py` and `pyenv` should handle this automatically.
 
+### The Shim Wrapper (`build_system/shim_wrapper.c`)
+This is the core component that enforces the cross-compilation environment. 
+- **What it is**: A small C program compiled into `build_system/shim_wrapper`.
+- **How it works**: We create symlinks for standard tools (gcc, g++, ar, etc.) in `build_system/shim/` that all point to this wrapper binary.
+- **Runtime Behavior**: When a build script calls `gcc`, it actually calls our wrapper. The wrapper:
+  1.  **Sanitizes the Environment**: Unsets `LD_LIBRARY_PATH`, `PYTHONPATH`, etc., to prevent host contamination.
+  2.  **Injects Flags**: Automatically adds `--sysroot=/path/to/geminios/rootfs` to compiler arguments.
+  3.  **Redirects**: Calls the path to the real cross-compiler or system tool with the modified arguments.
+
+To recompile the wrapper if you modify `shim_wrapper.c`:
+```bash
+make -C build_system
+```
+
+This ensures that every package build automagically targets GeminiOS without requiring every single makefile to be perfectly configured for cross-compilation.
+
 1.  **Run Builder**:
     ```bash
     python3 builder.py
@@ -85,22 +101,6 @@ The build system, particularly the Python package build, requires a specific hos
 ## Build System Architecture
 
 GeminiOS uses a custom "Shim Wrapper" architecture to ensure build isolation and correct cross-compilation without needing a complex chroot setup during the build phase.
-
-### The Shim Wrapper (`build_system/shim_wrapper.c`)
-This is the core component that enforces the cross-compilation environment. 
-- **What it is**: A small C program compiled into `build_system/shim_wrapper`.
-- **How it works**: We create symlinks for standard tools (gcc, g++, ar, etc.) in `build_system/shim/` that all point to this wrapper binary.
-- **Runtime Behavior**: When a build script calls `gcc`, it actually calls our wrapper. The wrapper:
-  1.  **Sanitizes the Environment**: Unsets `LD_LIBRARY_PATH`, `PYTHONPATH`, etc., to prevent host contamination.
-  2.  **Injects Flags**: Automatically adds `--sysroot=/path/to/geminios/rootfs` to compiler arguments.
-  3.  **Redirects**: Calls the path to the real cross-compiler or system tool with the modified arguments.
-
-To recompile the wrapper if you modify `shim_wrapper.c`:
-```bash
-make -C build_system
-```
-
-This ensures that every package build automagically targets GeminiOS without requiring every single makefile to be perfectly configured for cross-compilation.
 
 ## Kernel Compilation
 
