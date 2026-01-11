@@ -834,6 +834,41 @@ bool run_package_script(const std::string& path, const std::string& name, bool v
     return true;
 }
 
+std::string find_installed_provider(const std::string& capability);
+
+bool is_system_directory(const std::string& path) {
+    static const std::set<std::string> system_dirs = {
+        "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", 
+        "/media", "/mnt", "/opt", "/proc", "/root", "/run", "/sbin", 
+        "/srv", "/sys", "/tmp", "/usr", "/usr/bin", "/usr/include", 
+        "/usr/lib", "/usr/lib64", "/usr/local", "/usr/sbin", "/usr/share", 
+        "/usr/src", "/var", "/var/cache", "/var/lib", "/var/log", 
+        "/var/opt", "/var/spool", "/var/tmp", "/var/repo", "/var/lib/gpkg",
+        // Extended system directories
+        "/usr/games", "/usr/libexec", "/usr/local/bin", "/usr/local/etc", 
+        "/usr/local/games", "/usr/local/include", "/usr/local/lib", 
+        "/usr/local/sbin", "/usr/local/share", "/usr/local/src"
+    };
+
+    std::string p = path;
+    
+    // Handle ROOT_PREFIX (for dev mode or chroots)
+    if (!ROOT_PREFIX.empty() && p.find(ROOT_PREFIX) == 0) {
+        p = p.substr(ROOT_PREFIX.length());
+        // If ROOT_PREFIX didn't end with /, we might have a leading slash in remainder or not
+        // e.g. rootfs/usr -> /usr
+    }
+    
+    // Ensure absolute path format for checking
+    if (p.empty()) return true; // Safety
+    if (p.front() != '/') p = "/" + p;
+    
+    // Normalize trailing slash
+    if (p.size() > 1 && p.back() == '/') p.pop_back();
+    
+    return system_dirs.count(p);
+}
+
 std::string find_installed_provider(const std::string& capability) {
     for (const auto& p_name : get_installed_packages()) {
         std::ifstream f(INFO_DIR + p_name + ".json");
@@ -879,8 +914,12 @@ bool remove_package_v2(const std::string& pkg, bool verbose) {
         struct stat st;
         if(lstat(full_path.c_str(), &st) == 0) {
             if(S_ISDIR(st.st_mode)) {
-                VLOG(verbose, "Removing directory: " << full_path);
-                rmdir(full_path.c_str());
+                if (is_system_directory(full_path)) {
+                     VLOG(verbose, "Skipping removal of system directory: " << full_path);
+                } else {
+                     VLOG(verbose, "Removing directory: " << full_path);
+                     rmdir(full_path.c_str());
+                }
             } else {
                 // If the path ends with /, it was meant to be a directory in the package.
                 // If it's not a directory now (e.g. it's a symlink to one), 

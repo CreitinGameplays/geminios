@@ -38,6 +38,8 @@ Goal: Evolve `gpkg` from a package extractor into a full transaction manager cap
 - [x] **Configuration Protection (`.pacnew`)**
     - Identify configuration files (in `/etc`).
     - If modifying an existing file with different content, install the new version as `.pacnew` instead of overwriting.
+- [x] **Protected System Directories**
+    - Prevent removal of critical system directories (e.g., `/usr`, `/bin`) even if they become empty during package removal.
 
 ## 4. UI/UX Improvements
 - [x] **Detailed Progress Bars**
