@@ -16,7 +16,8 @@ cd "$DEP_DIR/$DIR"
             --docdir=/usr/share/doc/procps-ng-$PKG_VER \
             --disable-static \
             --disable-kill \
-            --without-systemd
+            --without-systemd \
+            LIBS="-ltinfow"
 
 # We disable kill because util-linux provides it (or we enabled it there). 
 # Actually, procps-ng kill is usually preferred over util-linux kill? 

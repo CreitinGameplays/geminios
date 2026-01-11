@@ -11,24 +11,37 @@ echo "Compiling Init (Ginit)..."
 g++ $CXXFLAGS -o ginit "$ROOT_DIR/src/ginit.cpp" "$ROOT_DIR/src/network.cpp" "$ROOT_DIR/src/signals.o" "$ROOT_DIR/src/user_mgmt.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
 strip ginit
 
-# Install ginit
-cp ginit "$ROOTFS/ginit"
-chmod +x "$ROOTFS/ginit"
-cp ginit "$ROOTFS/bin/ginit"
+echo "Compiling Shell (Gsh)..."
+g++ $CXXFLAGS -o gsh "$ROOT_DIR/src/gsh.cpp" "$ROOT_DIR/src/signals.o" -lz -lzstd -ldl -lpthread
+strip gsh
 
-# Create compatibility symlink for /bin/init
+echo "Compiling Login..."
+g++ $CXXFLAGS -o login "$ROOT_DIR/src/login.cpp" "$ROOT_DIR/src/user_mgmt.o" "$ROOT_DIR/src/signals.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
+strip login
+
+echo "Compiling Getty..."
+g++ $CXXFLAGS -o getty "$ROOT_DIR/src/getty.cpp"
+strip getty
+
+# Install binaries
+mkdir -p "$ROOTFS/bin" "$ROOTFS/sbin"
+
+cp ginit "$ROOTFS/bin/ginit"
+cp ginit "$ROOTFS/init" # Keeping at root for robustness
 ln -sf ginit "$ROOTFS/bin/init"
-# Optional: maintain /init as symlink if feasible, or just rely on kernel finding ginit if we update kernel cmdline?
-# But typically kernel looks for /init. If we rename /init to /ginit on root, kernel fails unless we pass init=/ginit.
-# Safer to keep /init as a symlink or copy to ginit.
-cp ginit "$ROOTFS/init" # Keeping as copy at root for simplicity/robustness
+
+cp gsh "$ROOTFS/bin/gsh"
+ln -sf gsh "$ROOTFS/bin/sh"
+
+cp login "$ROOTFS/bin/login"
+cp getty "$ROOTFS/sbin/getty"
 
 # Create default system files (passwd, group, shadow)
 mkdir -p "$ROOTFS/etc"
 
-# 1. /etc/passwd
+# 1. /etc/passwd - Use /bin/gsh as shell
 cat > "$ROOTFS/etc/passwd" <<EOF
-root:x:0:0:System Administrator:/root:/bin/init
+root:x:0:0:System Administrator:/root:/bin/gsh
 messagebus:x:18:18:D-Bus Message Daemon User:/var/run/dbus:/bin/false
 EOF
 

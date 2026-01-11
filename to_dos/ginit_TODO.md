@@ -5,7 +5,7 @@ Decouple `ginit` into modular components to improve robustness and follow standa
 
 ## Phase 1: New Components
 
-### 1. Create `src/gsh.cpp` (Gemini Shell)
+### 1. [x] Create `src/gsh.cpp` (Gemini Shell)
 Extract the shell implementation from `src/ginit.cpp` into a standalone shell binary.
 - **Responsibilities**:
     - Command parsing (tokenize, parse input, job control).
@@ -17,7 +17,7 @@ Extract the shell implementation from `src/ginit.cpp` into a standalone shell bi
     - Move `tokenize_input`, `parse_input`, `execute_pipeline`, `readline`.
     - Main function should just initialize signals and call `start_shell`.
 
-### 2. Create `src/login.cpp`
+### 2. [x] Create `src/login.cpp`
 Create a standalone login program.
 - **Responsibilities**:
     - Authenticate users.
@@ -31,7 +31,7 @@ Create a standalone login program.
     - `execv(shell_path, ...)`
     - Handle login failures with a delay.
 
-### 3. Create `src/getty.cpp`
+### 3. [x] Create `src/getty.cpp`
 Create a standalone TTY manager.
 - **Responsibilities**:
     - Open specific TTY device.
@@ -48,7 +48,7 @@ Create a standalone TTY manager.
 
 ## Phase 2: Refactor Init
 
-### 4. Simplify `src/ginit.cpp`
+### 4. [x] Simplify `src/ginit.cpp`
 Reduce `ginit` to a system initializer and process supervisor.
 - **Responsibilities**:
     - Mount filesystems (`/proc`, `/sys`, `/dev`, etc.).
@@ -64,7 +64,7 @@ Reduce `ginit` to a system initializer and process supervisor.
 
 ## Phase 3: Build & Integrate
 
-### 5. Update `ports/geminios_core/build.sh`
+### 5. [x] Update `ports/geminios_core/build.sh`
 - Compile `gsh` -> install to `/bin/gsh`.
 - Symlink `/bin/sh` -> `/bin/gsh`.
 - Compile `login` -> install to `/bin/login` (link `user_mgmt`, `signals`, `crypt`).

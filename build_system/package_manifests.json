@@ -453,7 +453,10 @@
         "usr/share/keymaps"
     ],
     "geminios_core": [
-        "bin/init"
+        "bin/init",
+        "bin/gsh",
+        "bin/login",
+        "sbin/getty"
     ],
     "geminios_pkgs": [
         "bin/apps/system/gtop",
