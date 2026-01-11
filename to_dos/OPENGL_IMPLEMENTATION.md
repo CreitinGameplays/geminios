@@ -62,5 +62,3 @@ Once the OS is booted, run these tests:
 
 ---
 
-## Maintenance Note
-Adding Mesa will significantly increase the `rootfs` size (approx 50MB-150MB depending on LLVM). Ensure the `initramfs` size limits in your bootloader are sufficient.
