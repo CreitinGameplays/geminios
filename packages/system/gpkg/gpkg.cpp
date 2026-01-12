@@ -1060,8 +1060,20 @@ int handle_search(const std::string& query, bool verbose) {
         get_json_value(obj, "package", name);
         get_json_value(obj, "description", desc);
         get_json_value(obj, "version", version);
+        
         if (name.find(query) != std::string::npos || desc.find(query) != std::string::npos) {
-            std::cout << Color::GREEN << name << Color::RESET << " (" << version << ") - " << desc << std::endl;
+            std::string installed_ver;
+            std::string status_str = "";
+            
+            if (is_installed(name, &installed_ver)) {
+                if (compare_versions(installed_ver, version) == 0) {
+                     status_str = Color::BLUE + " [installed]" + Color::RESET;
+                } else {
+                     status_str = Color::BLUE + " [installed: " + installed_ver + "]" + Color::RESET;
+                }
+            }
+
+            std::cout << Color::GREEN << name << Color::RESET << " (" << version << ")" << status_str << " - " << desc << std::endl;
             found = true;
         }
         return true;
