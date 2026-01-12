@@ -152,4 +152,4 @@ EOF
 
 # Cleanup (don't remove signals.o and user_mgmt.o, geminios_complex needs them)
 echo "Cleaning up compiled artifacts..."
-rm -f ginit gsh login getty init gpkg
+rm -f ginit gsh login getty init gpkg gpkg-worker

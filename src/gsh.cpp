@@ -16,6 +16,7 @@
 #include <csignal>
 #include <cctype>
 #include <glob.h>
+#include <cstdlib>
 
 #include "signals.h"
 #include "sys_info.h"
@@ -772,6 +773,46 @@ int last_exit_code = 0;
 
 void execute_command_string(const std::string& input);
 
+// Helper to update global proxy config
+void update_proxy_config(const std::string& key, const std::string& value, bool remove) {
+    std::string path = "/etc/geminios/proxy.conf";
+    std::string key_upper = key;
+    std::transform(key_upper.begin(), key_upper.end(), key_upper.begin(), ::toupper);
+    
+    if (key_upper != "HTTP_PROXY" && key_upper != "HTTPS_PROXY") return;
+
+    std::map<std::string, std::string> config;
+    std::ifstream in(path);
+    if (in) {
+        std::string line;
+        while (std::getline(in, line)) {
+            size_t eq = line.find('=');
+            if (eq != std::string::npos) {
+                config[line.substr(0, eq)] = line.substr(eq + 1);
+            }
+        }
+    }
+    
+    if (remove) {
+        config.erase(key_upper);
+    } else {
+        config[key_upper] = value;
+    }
+    
+    // Ensure dir exists
+    struct stat st;
+    if (stat("/etc/geminios", &st) != 0) {
+        mkdir("/etc/geminios", 0755);
+    }
+
+    std::ofstream out(path);
+    if (out) {
+        for (const auto& kv : config) {
+            out << kv.first << "=" << kv.second << "\n";
+        }
+    }
+}
+
 void execute_pipeline(Job& job) {
     if (job.commands.empty()) return;
 
@@ -807,12 +848,25 @@ void execute_pipeline(Job& job) {
                         std::string arg = args[i];
                         size_t pos = arg.find('=');
                         if (pos != std::string::npos) {
-                            setenv(arg.substr(0, pos).c_str(), arg.substr(pos+1).c_str(), 1);
+                            std::string key = arg.substr(0, pos);
+                            std::string val = arg.substr(pos+1);
+                            setenv(key.c_str(), val.c_str(), 1);
+                            update_proxy_config(key, val, false);
                         }
                     }
                 } else {
                     extern char** environ;
                     for (char** e = environ; *e; e++) std::cout << "declare -x " << *e << "\n";
+                }
+                last_exit_code=0;
+                return;
+            }
+            else if (cmd == "unset") {
+                if (args.size() > 1) {
+                    for (size_t i = 1; i < args.size(); ++i) {
+                        unsetenv(args[i].c_str());
+                        update_proxy_config(args[i], "", true);
+                    }
                 }
                 last_exit_code=0;
                 return;
@@ -1115,7 +1169,26 @@ void start_shell(bool clear_on_start = false) {
     }
 }
 
+// Helper to load global proxy config on startup
+void load_proxy_config() {
+    std::ifstream in("/etc/geminios/proxy.conf");
+    if (in) {
+        std::string line;
+        while (std::getline(in, line)) {
+            size_t eq = line.find('=');
+            if (eq != std::string::npos) {
+                std::string key = line.substr(0, eq);
+                std::string val = line.substr(eq + 1);
+                setenv(key.c_str(), val.c_str(), 1);
+            }
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
+    // Load proxy settings immediately
+    load_proxy_config();
+
     if (isatty(STDIN_FILENO)) {
         tcgetattr(STDIN_FILENO, &orig_termios);
     }

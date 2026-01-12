@@ -160,6 +160,9 @@ struct TransactionGuard {
 void sig_handler(int) { 
     g_stop_sig = 1; 
     // Lock will be released by cleanup or forceful unlink if needed
+    unlink(LOCK_FILE.c_str());
+    std::cerr << "\n[!] Interrupted. Lock released." << std::endl;
+    exit(130);
 }
 
 std::string get_command_output(const std::string& cmd) {
@@ -861,117 +864,15 @@ std::string find_installed_provider(const std::string& capability) {
     return "";
 }
 
-bool remove_package_v2(const std::string& pkg, bool verbose) {
-    std::cerr << Color::RED << "E: Package removal is not implemented in this version of gpkg." << Color::RESET << std::endl;
-    return false;
-}
-
-bool are_files_different(const std::string& p1, const std::string& p2) {
-    std::ifstream f1(p1, std::ios::binary | std::ios::ate);
-    std::ifstream f2(p2, std::ios::binary | std::ios::ate);
-    if (f1.fail() || f2.fail()) return true; 
-    if (f1.tellg() != f2.tellg()) return true; 
-
-    f1.seekg(0, std::ios::beg);
-    f2.seekg(0, std::ios::beg);
-    std::istreambuf_iterator<char> begin1(f1);
-    std::istreambuf_iterator<char> begin2(f2);
-    std::istreambuf_iterator<char> end;
-
-    return !std::equal(begin1, end, begin2);
-}
-
 bool install_package_from_file(const std::string& pkg_file, bool verbose) {
-    VLOG(verbose, "Cleaning and creating temporary extraction directory: " << TMP_EXTRACT_PATH);
-    run_command("rm -rf " + TMP_EXTRACT_PATH + " && mkdir -p " + TMP_EXTRACT_PATH, verbose);
-
-    std::cout << "Extracting " << pkg_file << "..." << std::endl;
-    std::string tmp_tar = "/tmp/gpkg_temp.tar";
-    if (run_command("zstd -df " + pkg_file + " -o " + tmp_tar, verbose) != 0 ||
-        run_command("tar -xf " + tmp_tar + " -C " + TMP_EXTRACT_PATH, verbose) != 0) {
-        std::cerr << "E: Failed to extract package." << std::endl;
-        unlink(tmp_tar.c_str());
-        return false;
-    }
-    unlink(tmp_tar.c_str());
-
-    std::ifstream control_f(TMP_EXTRACT_PATH + "control.json");
-    std::string content((std::istreambuf_iterator<char>(control_f)), std::istreambuf_iterator<char>());
-    std::string pkg_name;
-    if (!get_json_value(content, "package", pkg_name)) return false;
-    pkg_name = trim(pkg_name);
-
-    if (!run_package_script(TMP_EXTRACT_PATH + "scripts/preinst", "pre-installation", verbose)) return false;
-
-    std::cout << "Installing files for " << pkg_name << "..." << std::endl;
-    std::string payload_zst = TMP_EXTRACT_PATH + "data.tar.zst";
-    std::string payload_tar = "/tmp/gpkg_payload.tar";
-    if (run_command("zstd -df " + payload_zst + " -o " + payload_tar, verbose) != 0) return false;
+    std::string cmd = "gpkg-worker --install " + pkg_file;
+    if (verbose) cmd += " --verbose";
     
-    // Auto-detect 'data/' prefix
-    std::string list_output = get_command_output("tar -tf " + payload_tar + " | head -n 10");
-    bool strip_data = list_output.find("data/") == 0 || list_output.find("./data/") == 0;
-    if (strip_data) VLOG(verbose, "Detected 'data/' prefix. Auto-stripping.");
+    // Pass root prefix if set (dev mode)
+    if (!ROOT_PREFIX.empty()) cmd += " --root " + ROOT_PREFIX;
 
-    std::vector<std::string> new_files = get_tar_file_list(payload_tar, strip_data);
-    if (!check_file_collisions(pkg_name, new_files, verbose)) {
-        unlink(payload_tar.c_str());
-        return false;
-    }
-
-    std::string dest = ROOT_PREFIX.empty() ? "/" : ROOT_PREFIX + "/";
-    std::string stage_dir = TMP_EXTRACT_PATH + "stage";
-    run_command("mkdir -p " + stage_dir, verbose);
-    
-    // Extract to staging area first
-    std::string payload_cmd = "tar -xf " + payload_tar + " -C " + stage_dir + (strip_data ? " --strip-components=1" : "");
-    if (run_command(payload_cmd, verbose) != 0) {
-        unlink(payload_tar.c_str());
-        return false;
-    }
-
-    // Process Configuration Protection (.pacnew)
-    for (const auto& file : new_files) {
-         // Construct staged path
-         std::string staged_file = stage_dir + "/" + file;
-         
-         // Basic check if it's a file (skip dirs)
-         struct stat st;
-         if (lstat(staged_file.c_str(), &st) != 0 || S_ISDIR(st.st_mode)) continue;
-
-         if (file.find("etc/") == 0) { // Is config file
-             std::string dest_file = dest + file;
-             // Normalize slashes just in case
-             while (dest_file.find("//") != std::string::npos) dest_file.replace(dest_file.find("//"), 2, "/");
-
-             if (access(dest_file.c_str(), F_OK) == 0) {
-                 if (are_files_different(staged_file, dest_file)) {
-                     std::cout << Color::YELLOW << "C: Configuration mismatch for " << file << ". Installing as .pacnew" << Color::RESET << std::endl;
-                     std::string pacnew = staged_file + ".pacnew";
-                     rename(staged_file.c_str(), pacnew.c_str());
-                 }
-             }
-         }
-    }
-
-    // Move files from stage to destination
-    // We use tar to merge because cp -a fails if a directory in source matches a symlink in destination
-    VLOG(verbose, "Merging staged files to destination: " << dest);
-    std::string install_cmd = "tar -C " + stage_dir + " -cf - . | tar -C " + dest + " -xf -";
-    if (run_command(install_cmd, verbose) != 0) {
-        std::cerr << "E: Failed to install files from staging." << std::endl;
-        unlink(payload_tar.c_str());
-        return false;
-    }
-    
-    save_package_metadata(pkg_name, TMP_EXTRACT_PATH, payload_tar, strip_data, verbose);
-    unlink(payload_tar.c_str());
-
-    run_package_script(TMP_EXTRACT_PATH + "scripts/postinst", "post-installation", verbose);
-
-    std::cout << "✓ Installed " << pkg_name << " successfully." << std::endl;
-    run_command("rm -rf " + TMP_EXTRACT_PATH, verbose);
-    return true;
+    int ret = run_command(cmd, verbose);
+    return (ret == 0);
 }
 
 bool install_package_v2(const std::string& pkg_name, bool verbose) {
@@ -1125,8 +1026,16 @@ int handle_install(int argc, char* argv[], const std::set<std::string>& installe
 }
 
 int handle_remove(int argc, char* argv[], bool verbose) {
-    std::cerr << Color::RED << "E: The 'remove' command is not implemented in this version." << Color::RESET << std::endl;
-    return 1;
+    if (argc < 3) {
+        std::cerr << "Usage: gpkg remove <package_name>" << std::endl;
+        return 1;
+    }
+    std::string pkg = argv[2];
+    std::string cmd = "gpkg-worker --remove " + pkg;
+    if (verbose) cmd += " --verbose";
+    if (!ROOT_PREFIX.empty()) cmd += " --root " + ROOT_PREFIX;
+    
+    return run_command(cmd, verbose);
 }
 
 int handle_search(const std::string& query, bool verbose) {
@@ -1184,6 +1093,10 @@ int handle_clean(bool verbose) {
 }
 
 int main(int argc, char* argv[]) {
+    // Register signal handlers
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
     if (argc < 2) {
         print_help();
         return 1;

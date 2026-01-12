@@ -4,6 +4,10 @@ set -e
 SRC="$ROOT_DIR/src"
 PKGS="$ROOT_DIR/packages/system"
 
+echo "Compiling gpkg-worker..."
+g++ $CXXFLAGS -o "$ROOTFS/bin/apps/system/gpkg-worker" "$PKGS/gpkg/gpkg_worker.cpp" -lssl -lcrypto -lz -lzstd -ldl -lpthread
+strip "$ROOTFS/bin/apps/system/gpkg-worker"
+
 echo "Compiling gpkg..."
 g++ $CXXFLAGS -I "$SRC" -o "$ROOTFS/bin/apps/system/gpkg" "$PKGS/gpkg/gpkg.cpp" "$SRC/network.cpp" "$SRC/signals.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
 strip "$ROOTFS/bin/apps/system/gpkg"

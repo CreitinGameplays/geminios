@@ -307,13 +307,59 @@ bool HttpRequestInternal(const std::string& url_in, std::ostream& out, const Htt
     std::string connect_host = host;
     int connect_port = port;
     std::string proxy_auth_header;
+    std::string proxy_str = opts.proxy;
 
-    if (!opts.proxy.empty()) {
-        std::string p_host_port = opts.proxy;
-        size_t at = opts.proxy.find('@');
+    // Auto-detect proxy if not manually specified
+    if (proxy_str.empty()) {
+        // 1. Environment Variables
+        const char* env_proxy = nullptr;
+        if (use_ssl) {
+            env_proxy = getenv("https_proxy");
+            if (!env_proxy) env_proxy = getenv("HTTPS_PROXY");
+        } else {
+            env_proxy = getenv("http_proxy");
+            if (!env_proxy) env_proxy = getenv("HTTP_PROXY");
+        }
+        if (env_proxy) proxy_str = env_proxy;
+
+        // 2. Global Config (/etc/geminios/proxy.conf)
+        if (proxy_str.empty()) {
+            std::ifstream pf("/etc/geminios/proxy.conf");
+            if (pf) {
+                std::string line;
+                std::string key_target = use_ssl ? "HTTPS_PROXY" : "HTTP_PROXY";
+                while(std::getline(pf, line)) {
+                    // Simple parsing KEY=VALUE
+                    size_t eq = line.find('=');
+                    if (eq != std::string::npos) {
+                        std::string key = line.substr(0, eq);
+                        std::string val = line.substr(eq + 1);
+                        
+                        // Case-insensitive comparison for key
+                        std::string key_upper = key;
+                        std::transform(key_upper.begin(), key_upper.end(), key_upper.begin(), ::toupper);
+                        
+                        if (key_upper == key_target) {
+                            proxy_str = val;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!proxy_str.empty()) {
+        std::string p_host_port = proxy_str;
+        // Handle http:// prefix in proxy string if present
+        if (p_host_port.find("://") != std::string::npos) {
+            p_host_port = p_host_port.substr(p_host_port.find("://") + 3);
+        }
+
+        size_t at = p_host_port.find('@');
         if (at != std::string::npos) {
-            std::string p_auth = opts.proxy.substr(0, at);
-            p_host_port = opts.proxy.substr(at + 1);
+            std::string p_auth = p_host_port.substr(0, at);
+            p_host_port = p_host_port.substr(at + 1);
             proxy_auth_header = "Proxy-Authorization: Basic " + base64_encode(p_auth) + "\r\n";
         }
         size_t c = p_host_port.find(':');
@@ -360,7 +406,7 @@ bool HttpRequestInternal(const std::string& url_in, std::ostream& out, const Htt
     SSL_CTX* ctx = nullptr;
     SSL* ssl = nullptr;
 
-    if (!opts.proxy.empty() && use_ssl) {
+    if (!proxy_str.empty() && use_ssl) {
         std::string connect_req = "CONNECT " + host + ":" + std::to_string(port) + " HTTP/1.1\r\n";
         connect_req += "Host: " + host + ":" + std::to_string(port) + "\r\n";
         connect_req += proxy_auth_header;
@@ -402,14 +448,14 @@ bool HttpRequestInternal(const std::string& url_in, std::ostream& out, const Htt
 
     // 7. Send Request
     std::string method = opts.method;
-    std::string full_path = (!opts.proxy.empty() && !use_ssl) ? url_in : path;
+    std::string full_path = (!proxy_str.empty() && !use_ssl) ? url_in : path;
     
     std::string req = method + " " + full_path + " HTTP/1.1\r\n";
     req += "Host: " + host + "\r\n";
     req += "User-Agent: " + opts.user_agent + "\r\n";
     req += "Connection: close\r\n";
     if (!opts.auth.empty()) req += "Authorization: Basic " + base64_encode(opts.auth) + "\r\n";
-    if (!opts.proxy.empty() && !use_ssl) req += proxy_auth_header;
+    if (!proxy_str.empty() && !use_ssl) req += proxy_auth_header;
     
     if (!opts.data.empty()) req += "Content-Length: " + std::to_string(opts.data.length()) + "\r\n";
     for (const auto& h : opts.headers) req += h + "\r\n";

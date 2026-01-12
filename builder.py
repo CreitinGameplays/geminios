@@ -433,6 +433,7 @@ def verify_rootfs_integrity():
         "usr/lib64/libglib-2.0.so",
         "usr/lib64/libgtk-3.so",
         "usr/share/mime/magic",
+        "bin/apps/system/gpkg-worker",
         "usr/share/glib-2.0/schemas/gschemas.compiled"
     ]
     
