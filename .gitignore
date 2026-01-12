@@ -24,6 +24,11 @@ grub_cache*/
 glibc-build*/
 logs*/
 
+# only allow xfce4 builder
+packages/xfce/*
+!packages/xfce/
+!packages/xfce/xfce_builder.py
+
 # --- Ports Build Directories ---
 ports/*/build/
 ports/*/.built

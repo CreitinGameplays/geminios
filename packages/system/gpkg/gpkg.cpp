@@ -1031,6 +1031,20 @@ int handle_remove(int argc, char* argv[], bool verbose) {
         return 1;
     }
     std::string pkg = argv[2];
+
+    if (!is_installed(pkg)) {
+        std::cerr << Color::RED << "E: Package '" << pkg << "' is not installed." << Color::RESET << std::endl;
+        return 1;
+    }
+
+    std::cout << "The following package will be REMOVED:" << std::endl;
+    std::cout << "  " << Color::RED << pkg << Color::RESET << std::endl;
+
+    if (!ask_confirmation("Do you want to continue?")) {
+        std::cout << "Abort." << std::endl;
+        return 0;
+    }
+
     std::string cmd = "gpkg-worker --remove " + pkg;
     if (verbose) cmd += " --verbose";
     if (!ROOT_PREFIX.empty()) cmd += " --root " + ROOT_PREFIX;

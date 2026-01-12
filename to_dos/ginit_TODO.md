@@ -80,3 +80,8 @@ Reduce `ginit` to a system initializer and process supervisor.
     - Login prompt appears.
     - Authentication works.
     - Shell works.
+
+# NEW: services for ginit (like systemd)
+stores in:
+/etc/ginit/services/user/...
+/etc/ginit/services/system/...

@@ -302,6 +302,9 @@
     "font-util": [
         "usr/lib64/pkgconfig/fontutil.pc"
     ],
+    "system-fonts": [
+        "usr/share/fonts/TTF/Inter-Regular.otf"
+    ],
     "eudev": [
         "usr/lib64/libudev.so",
         "usr/lib64/pkgconfig/libudev.pc"

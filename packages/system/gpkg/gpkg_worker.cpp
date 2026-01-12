@@ -126,7 +126,8 @@ bool remove_path(const std::string& abs_path) {
             }
 
             if (count > 1) {
-                std::cout << "W: Directory " << full_path << " contains " << count << " items (>1). Aborting removal instantly." << std::endl;
+                // this may spam the terminal. leave this commented out
+                // std::cout << "W: Directory " << full_path << " contains " << count << " items (>1). Aborting removal instantly." << std::endl;
                 return true; 
             } else {
                 // count == 1

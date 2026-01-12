@@ -16,7 +16,7 @@ To build GeminiOS, you need a Linux host (Ubuntu/Debian recommended) with the fo
 sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev \
                  zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
                  python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
-                 gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio texinfo
+                 gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio texinfo intltool
 ```
 
 Make sure to make the build scripts executable:

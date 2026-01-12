@@ -151,6 +151,7 @@ PACKAGES = [
     "pciutils",
     "libxshmfence",
     "font-util",
+    "system-fonts",
     "eudev",
     "libdrm",
     "libglvnd",
@@ -434,7 +435,8 @@ def verify_rootfs_integrity():
         "usr/lib64/libgtk-3.so",
         "usr/share/mime/magic",
         "bin/apps/system/gpkg-worker",
-        "usr/share/glib-2.0/schemas/gschemas.compiled"
+        "usr/share/glib-2.0/schemas/gschemas.compiled",
+        "usr/share/fonts/TTF/Inter-Regular.otf"
     ]
     
     missing = False

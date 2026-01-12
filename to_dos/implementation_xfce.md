@@ -62,17 +62,17 @@
     - [x] adwaita-icon-theme: Default GTK icon theme.
 
 # PHASE 4: XFCE4 CORE COMPONENTS
-# These must be built in this specific order due to internal dependencies.
-- [ ] libxfce4util: Basic utility library for XFCE.
-- [ ] xfconf: Configuration storage system (requires D-Bus).
-- [ ] libxfce4ui: Interface library for XFCE widgets.
-- [ ] garcon: Freedesktop.org compliant menu implementation (REQUIRED for the Start Menu).
-- [ ] exo: Application library for XFCE.
-- [ ] xfwm4: The XFCE Window Manager (handles window borders/decorations).
-- [ ] xfce4-panel: The taskbar, clock, and start menu.
-- [ ] xfdesktop: Manages the desktop background and icons.
-- [ ] xfce4-session: Manages login, logout, and startup apps.
-- [ ] xfce4-settings: Configuration tools (display, mouse, keyboard).
+# These were built and packaged as .gpkg files.
+- [x] libxfce4util: Basic utility library for XFCE.
+- [x] xfconf: Configuration storage system (requires D-Bus).
+- [x] libxfce4ui: Interface library for XFCE widgets.
+- [x] garcon: Freedesktop.org compliant menu implementation.
+- [x] exo: Application library for Xfce.
+- [x] xfwm4: The XFCE Window Manager.
+- [x] xfce4-panel: The taskbar, clock, and start menu.
+- [x] xfdesktop: Manages the desktop background and icons.
+- [x] xfce4-session: Manages login, logout, and startup apps.
+- [x] xfce4-settings: Configuration tools (display, mouse, keyboard).
 
 # PHASE 5: ESSENTIAL XFCE APPLICATIONS
 # Without these, the desktop environment is unusable (cannot browse files or type commands).
