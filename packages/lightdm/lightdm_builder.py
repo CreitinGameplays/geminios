@@ -79,7 +79,7 @@ PACKAGES = [
         "version": "1.32.0",
         "desc": "Lightweight Display Manager",
         "url": "https://github.com/canonical/lightdm/releases/download/1.32.0/lightdm-1.32.0.tar.xz",
-        "depends": ["linux-pam", "libxcb", "glib", "libgcrypt", "libxklavier"]
+        "depends": ["linux-pam", "libgcrypt", "libxklavier"] 
     },
     {
         "name": "xfce4-dev-tools",
