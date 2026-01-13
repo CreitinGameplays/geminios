@@ -74,8 +74,9 @@
 - [x] xfce4-session: Manages login, logout, and startup apps.
 - [x] xfce4-settings: Configuration tools (display, mouse, keyboard).
 
-# PHASE 5: ESSENTIAL XFCE APPLICATIONS
+# PHASE 5: # ESSENTIAL XFCE APPLICATIONS (for xfce4-utils package)
 # Without these, the desktop environment is unusable (cannot browse files or type commands).
+# Base Source: https://archive.xfce.org/src/xfce/
 - [ ] tumbler: D-Bus service for file thumbnails (Required by Thunar).
 - [ ] Thunar: The XFCE File Manager (Vital).
     - [ ] thunar-volman: Automatic management of removable drives/USBs.
@@ -85,10 +86,53 @@
 - [ ] mousepad: Lightweight text editor (Vital for editing configs).
 - [ ] xfce4-power-manager: Manages screen blanking, battery, and sleep.
 
+# XFCE4 GOODIES - STANDALONE APPLICATIONS
+# Additional useful applications often included in the goodies metapackage.
+# Base Source: https://archive.xfce.org/src/apps/
+- [ ] ristretto: Lightweight image viewer.
+- [ ] xfburn: CD/DVD burning application.
+- [ ] xfce4-dict: Dictionary client to query different dictionaries.
+- [ ] xfce4-screenshooter: Application to take screenshots.
+- [ ] xfce4-taskmanager: Easy to use task manager/process viewer.
+- [ ] gigolo: Frontend to manage connections to remote filesystems (GIO/GVfs).
+- [ ] parole: Modern media player based on GStreamer.
+
+# XFCE4 GOODIES - THUNAR PLUGINS
+# Extensions specifically for the file manager.
+# Base Source: https://archive.xfce.org/src/thunar-plugins/
+- [ ] thunar-archive-plugin: Adds "Create Archive" and "Extract Here" to context menus.
+- [ ] thunar-media-tags-plugin: Adds ID3/OGG tag support to file properties dialog.
+- [ ] thunar-shares-plugin: Quickly share folders using Samba (optional but common).
+
+# XFCE4 GOODIES - PANEL PLUGINS
+# Applets that sit on the taskbar/panel.
+# Base Source: https://archive.xfce.org/src/panel-plugins/
+- [ ] xfce4-whiskermenu-plugin: Modern, searchable application menu (Popular alternative to default menu).
+- [ ] xfce4-battery-plugin: Battery monitor for laptops.
+- [ ] xfce4-clipman-plugin: Clipboard manager (History of copied text).
+- [ ] xfce4-pulseaudio-plugin: Audio volume control (for PulseAudio/PipeWire systems).
+- [ ] xfce4-cpufreq-plugin: CPU frequency scaling monitor.
+- [ ] xfce4-cpugraph-plugin: Graphical representation of CPU load.
+- [ ] xfce4-diskperf-plugin: Disk performance monitor (read/write speeds).
+- [ ] xfce4-fsguard-plugin: Monitors free space on filesystems.
+- [ ] xfce4-genmon-plugin: Generic monitor (runs custom scripts and displays output).
+- [ ] xfce4-mailwatch-plugin: Multi-protocol mail checker.
+- [ ] xfce4-netload-plugin: Network load monitor.
+- [ ] xfce4-notes-plugin: Sticky notes for the desktop.
+- [ ] xfce4-places-plugin: Quick access menu for folders, documents, and removable media.
+- [ ] xfce4-sensors-plugin: Hardware sensors monitor (temperature/fan speed).
+- [ ] xfce4-smartbookmark-plugin: Quick web search from the panel.
+- [ ] xfce4-systemload-plugin: System load monitor (CPU, RAM, Swap usage).
+- [ ] xfce4-timer-plugin: Simple countdown and alarm timer.
+- [ ] xfce4-verve-plugin: Command line input on the panel.
+- [ ] xfce4-wavelan-plugin: Wireless network stats.
+- [ ] xfce4-weather-plugin: Weather information.
+- [ ] xfce4-xkb-plugin: Keyboard layout switcher.
+
 # PHASE 6: GEMINIOS INTEGRATION
 - [ ] Environment Configuration:
     - [ ] Create /etc/X11/xinit/xinitrc to launch 'exec startxfce4'.
-    - [ ] Populate /usr/share/fonts/ with standard TTF fonts (e.g., DejaVu).
+    - [/] Populate /usr/share/fonts/ with standard TTF fonts (e.g., DejaVu).
     - [x] Populate /usr/share/icons/ with a basic icon theme (e.g., Adwaita).
 - [ ] Init Update:
     - [ ] Update src/init.cpp to handle the transition from TTY to a Display Manager (or start X manually).

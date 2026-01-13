@@ -6,7 +6,7 @@ import glob
 from datetime import datetime
 
 # Configuration
-LOG_DIR = "/home/creitin/Documents/geminios/logs"
+LOG_DIR = "/home/creitin/Documents/geminios/logs/"
 REFRESH_RATE = 0.1
 IDLE_THRESHOLD = 300
 ACTIVE_THRESHOLD = 1  # seconds

@@ -8,7 +8,7 @@ echo "Compiling User Management..."
 g++ -c "$ROOT_DIR/src/user_mgmt.cpp" -o "$ROOT_DIR/src/user_mgmt.o" -lssl -lcrypto
 
 echo "Compiling Init (Ginit)..."
-g++ $CXXFLAGS -o ginit "$ROOT_DIR/src/ginit.cpp" "$ROOT_DIR/src/network.cpp" "$ROOT_DIR/src/signals.o" "$ROOT_DIR/src/user_mgmt.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
+g++ $CXXFLAGS -o ginit "$ROOT_DIR/src/ginit.cpp" "$ROOT_DIR/src/gservice_parser.cpp" "$ROOT_DIR/src/gservice_manager.cpp" "$ROOT_DIR/src/network.cpp" "$ROOT_DIR/src/signals.o" "$ROOT_DIR/src/user_mgmt.o" -lssl -lcrypto -lz -lzstd -ldl -lpthread
 strip ginit
 
 echo "Compiling Shell (Gsh)..."

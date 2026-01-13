@@ -54,3 +54,5 @@ Goal: Evolve `gpkg` from a package extractor into a full transaction manager cap
     - Scan installed packages against their checksums/file lists to detect corruption.
 - [ ] **Test Suites**
     - Create mock repositories to test dependency resolution logic without hitting the network.
+
+[x] Add a robust `--purge` argument so it will remove the package and also ALL its dependencies it installed together to gpkg

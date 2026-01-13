@@ -16,7 +16,8 @@ To build GeminiOS, you need a Linux host (Ubuntu/Debian recommended) with the fo
 sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev \
                  zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
                  python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
-                 gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio texinfo intltool
+                 gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
+                 libxml2-dev libxslt1-dev texinfo intltool 
 ```
 
 Make sure to make the build scripts executable:
@@ -158,3 +159,6 @@ Current patches included:
 - `gobject-introspection-1.78.1-msvc.patch`: Fixes `MSVCCompiler` import issues.
 - `libXrender-0.9.11-glyph.patch`: Fixes glyph allocation in XRender.
 - `xorg-server-1.20.14-glxdri2.patch`: Fixes `bool` type conflict in GLX DRI2.
+
+---
+

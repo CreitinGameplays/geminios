@@ -23,6 +23,11 @@
 #include "signals.h"
 #include "sys_info.h"
 #include "user_mgmt.h"
+#include "gservice_parser.hpp"
+#include "gservice_manager.hpp"
+
+ginit::GServiceManager service_manager;
+#include "gservice_manager.hpp"
 
 // Mount filesystems and ensure target directory exists
 void mount_fs(const char* source, const char* target, const char* fs_type) {
@@ -130,6 +135,10 @@ int main(int argc, char* argv[]) {
     setvbuf(stderr, NULL, _IONBF, 0);
 
     if (getpid() != 1) {
+        if (argc > 1 && std::string(argv[1]) == "status") {
+            std::cout << "ginit: Status requires IPC with PID 1 (Coming Soon)" << std::endl;
+            return 0;
+        }
         std::cerr << "ginit must be run as PID 1" << std::endl;
         return 1;
     }
@@ -154,6 +163,9 @@ mount_fs("tmpfs", "/var/tmp", "tmpfs");
 mount_fs("tmpfs", "/usr/share/X11/xkb/compiled", "tmpfs");
 
     std::cerr << "[GINIT] Starting system services..." << std::endl;
+    service_manager.load_services_from_dir("/etc/ginit/services/system");
+    service_manager.start_enabled_services();
+
     if (fork() == 0) {
         execl("/usr/sbin/udevd", "udevd", "--daemon", nullptr);
         exit(0);
@@ -223,22 +235,26 @@ mount_fs("tmpfs", "/usr/share/X11/xkb/compiled", "tmpfs");
         pid_t pid = wait(&status);
 
         if (pid > 0) {
-            auto it = g_tty_pids.find(pid);
-            if (it != g_tty_pids.end()) {
-                std::string tty = it->second;
-                g_tty_pids.erase(it);
-                
-                // std::cerr << "[GINIT] TTY " << tty << " respawning..." << std::endl;
-                
-                pid_t new_pid;
-                if (is_live) {
-                    new_pid = spawn_getty(tty, "root");
-                } else {
-                    new_pid = spawn_getty(tty);
-                }
+            if (service_manager.is_managed_process(pid)) {
+                service_manager.handle_process_death(pid, status);
+            } else {
+                auto it = g_tty_pids.find(pid);
+                if (it != g_tty_pids.end()) {
+                    std::string tty = it->second;
+                    g_tty_pids.erase(it);
+                    
+                    // std::cerr << "[GINIT] TTY " << tty << " respawning..." << std::endl;
+                    
+                    pid_t new_pid;
+                    if (is_live) {
+                        new_pid = spawn_getty(tty, "root");
+                    } else {
+                        new_pid = spawn_getty(tty);
+                    }
 
-                if (new_pid > 0) {
-                    g_tty_pids[new_pid] = tty;
+                    if (new_pid > 0) {
+                        g_tty_pids[new_pid] = tty;
+                    }
                 }
             }
         }
