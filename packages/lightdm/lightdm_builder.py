@@ -72,7 +72,7 @@ PACKAGES = [
         "version": "5.4",
         "desc": "High-level API for X Keyboard Extension",
         "url": "https://people.freedesktop.org/~svu/libxklavier-5.4.tar.bz2",
-        "depends": ["glib", "libxml2", "libxi", "iso-codes"]
+        "depends": ["iso-codes"]
     },
     {
         "name": "lightdm",
@@ -86,14 +86,14 @@ PACKAGES = [
         "version": "4.18.0",
         "desc": "Xfce developer tools",
         "url": "https://archive.xfce.org/src/xfce/xfce4-dev-tools/4.18/xfce4-dev-tools-4.18.0.tar.bz2",
-        "depends": ["glib"]
+        "depends": []
     },
     {
         "name": "lightdm-gtk-greeter",
         "version": "2.0.8",
         "desc": "GTK+ greeter for LightDM",
         "url": "https://github.com/Xubuntu/lightdm-gtk-greeter/releases/download/lightdm-gtk-greeter-2.0.8/lightdm-gtk-greeter-2.0.8.tar.gz",
-        "depends": ["lightdm", "gtk3"]
+        "depends": ["lightdm"]
     }
 ]
 
