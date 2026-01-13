@@ -79,7 +79,7 @@ PACKAGES = [
         "version": "1.32.0",
         "desc": "Lightweight Display Manager",
         "url": "https://github.com/canonical/lightdm/releases/download/1.32.0/lightdm-1.32.0.tar.xz",
-        "depends": ["linux-pam", "libgcrypt", "libxklavier"] 
+        "depends": ["linux-pam", "libgcrypt", "libxklavier", "lightdm-gtk-greeter"] 
     },
     {
         "name": "xfce4-dev-tools",
@@ -272,6 +272,14 @@ def build_package(pkg, force=False):
     subprocess.run(f"rm -f {install_dir}/usr/share/info/dir", shell=True)
     subprocess.run(f"rm -f {STAGING_DIR}/usr/share/info/dir", shell=True)
     
+    # Configure LightDM for GeminiOS (No logind)
+    if name == "lightdm":
+        conf_path = os.path.join(install_dir, "etc/lightdm/lightdm.conf")
+        if os.path.exists(conf_path):
+            subprocess.run(f"sed -i 's/#logind-check-graphical=true/logind-check-graphical=false/' {conf_path}", shell=True)
+            subprocess.run(f"sed -i 's/#greeter-session=example-gtk-gnome/greeter-session=lightdm-gtk-greeter/' {conf_path}", shell=True)
+            subprocess.run(f"sed -i 's/#user-session=default/user-session=xfce/' {conf_path}", shell=True)
+
     print("  Fixing .pc files in staging...")
     rel_staging_usr = to_sysroot_path(os.path.join(STAGING_DIR, "usr"))
     rel_staging_lib = to_sysroot_path(os.path.join(STAGING_DIR, "lib"))
@@ -290,6 +298,20 @@ def build_package(pkg, force=False):
     with open(os.path.join(work_dir, "control.json"), "w") as f:
         json.dump(control_data, f, indent=2)
     
+    # Create scripts directory and postinst for lightdm
+    scripts_dir = os.path.join(work_dir, "scripts")
+    os.makedirs(scripts_dir, exist_ok=True)
+    if name == "lightdm":
+        postinst_path = os.path.join(scripts_dir, "postinst")
+        with open(postinst_path, "w") as f:
+            f.write("#!/bin/bash\n")
+            f.write("if ! grep -q '^lightdm:' /etc/passwd; then\n")
+            f.write("    adduser -S -H -h /var/lib/lightdm -s /bin/false lightdm 2>/dev/null\n")
+            f.write("fi\n")
+            f.write("mkdir -p /var/lib/lightdm /var/log/lightdm /var/run/lightdm\n")
+            f.write("chown -R lightdm:lightdm /var/lib/lightdm /var/log/lightdm /var/run/lightdm\n")
+        os.chmod(postinst_path, 0o755)
+
     print("  Packaging...")
     import tempfile
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -301,6 +323,10 @@ def build_package(pkg, force=False):
         with tarfile.open(final_tar, "w") as tar:
             tar.add(os.path.join(work_dir, "control.json"), arcname="control.json")
             tar.add(data_tar_zst, arcname="data.tar.zst")
+            if os.path.exists(scripts_dir) and os.listdir(scripts_dir):
+                # Add scripts as a directory in final.tar
+                for s in os.listdir(scripts_dir):
+                    tar.add(os.path.join(scripts_dir, s), arcname=f"scripts/{s}")
         subprocess.run(f"zstd -q -f {final_tar} -o {gpkg_path}", shell=True, check=True)
     
     duration = time.time() - start_time
