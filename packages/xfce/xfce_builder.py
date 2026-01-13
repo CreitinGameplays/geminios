@@ -276,6 +276,10 @@ def build_package(pkg):
         # Remove .la files from staging
         subprocess.run(f"find {staging_dir} -name '*.la' -delete", shell=True)        
 
+        # Remove /usr/share/info/dir to avoid conflicts
+        subprocess.run(f"rm -f {install_dir}/usr/share/info/dir", shell=True)
+        subprocess.run(f"rm -f {staging_dir}/usr/share/info/dir", shell=True)
+
     # 4. Create Control File
     print("  Creating control.json...")
     control_data = {

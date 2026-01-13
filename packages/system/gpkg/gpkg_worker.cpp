@@ -269,6 +269,10 @@ bool check_collisions(const std::string& pkg_name, const std::vector<std::string
              struct stat st;
              if (stat(full_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
              if (owned_by_me.count(file)) continue;
+             
+             // Special case: Ignore /usr/share/info/dir as it's a shared directory index
+             if (file == "/usr/share/info/dir") continue;
+
              collisions.push_back(file);
         }
     }

@@ -15,7 +15,7 @@ compile_sys_pkg() {
 
 mkdir -p "$ROOTFS/bin/apps/system"
 
-for pkg in gtop poweroff reboot; do
+for pkg in gtop poweroff reboot snake; do
     compile_sys_pkg $pkg &
     if [[ $(jobs -r -p | wc -l) -ge $JOBS ]]; then
         wait -n

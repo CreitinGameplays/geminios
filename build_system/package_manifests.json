@@ -464,7 +464,8 @@
     "geminios_pkgs": [
         "bin/apps/system/gtop",
         "bin/apps/system/poweroff",
-        "bin/apps/system/reboot"
+        "bin/apps/system/reboot",
+        "bin/apps/system/snake"
     ],
     "coreutils": [
         "bin/ls",

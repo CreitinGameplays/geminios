@@ -268,6 +268,10 @@ def build_package(pkg, force=False):
     run_shell(f"make DESTDIR={STAGING_DIR} install", cwd=src_dir, log_file=log_file)
     subprocess.run(f"find {STAGING_DIR} -name '*.la' -delete", shell=True)
     
+    # Remove /usr/share/info/dir to avoid conflicts between packages
+    subprocess.run(f"rm -f {install_dir}/usr/share/info/dir", shell=True)
+    subprocess.run(f"rm -f {STAGING_DIR}/usr/share/info/dir", shell=True)
+    
     print("  Fixing .pc files in staging...")
     rel_staging_usr = to_sysroot_path(os.path.join(STAGING_DIR, "usr"))
     rel_staging_lib = to_sysroot_path(os.path.join(STAGING_DIR, "lib"))

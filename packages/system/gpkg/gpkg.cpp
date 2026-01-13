@@ -457,6 +457,11 @@ bool check_file_collisions(const std::string& pkg_name, const std::vector<std::s
                 continue;
             }
             
+            // Special case: Ignore /usr/share/info/dir as it's a shared directory index
+            if (abs_path == "/usr/share/info/dir") {
+                continue;
+            }
+
             collisions.push_back(abs_path);
         }
     }
