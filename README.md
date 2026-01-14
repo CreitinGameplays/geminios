@@ -108,7 +108,7 @@ To build it manually:
 ```bash
 cd ginit && make
 ```
-For more information, see [ginit/README.md](ginit/README.md).
+For more information, see [ginit/README.md](https://github.com/CreitinGameplays/ginit/blob/master/README.md).
 
 ## Build System Architecture
 
