@@ -62,24 +62,20 @@ Reduce `ginit` to a system initializer and process supervisor.
     - Remove `run_shell` function.
     - In the supervision loop, if a child dies, check which TTY it was and respawn `getty`.
 
-## Phase 3: Build & Integrate
+## Phase 3: Build & Integrate [COMPLETED]
 
 ### 5. [x] Update `ports/geminios_core/build.sh`
-- Compile `gsh` -> install to `/bin/gsh`.
-- Symlink `/bin/sh` -> `/bin/gsh`.
-- Compile `login` -> install to `/bin/login` (link `user_mgmt`, `signals`, `crypt`).
-- Compile `getty` -> install to `/sbin/getty`.
-- Compile `ginit` -> install to `/bin/init` (link `signals`, `network`, etc.).
-- Update `/etc/passwd` to set root shell to `/bin/gsh`.
+- [x] Use `ginit` submodule and `Makefile`.
+- [x] Compile `login` -> install to `/bin/login`.
+- [x] Compile `getty` -> install to `/sbin/getty`.
+- [x] Compile `ginit` -> install to `/bin/init`.
+- [x] Update `/etc/passwd` to set root shell to `/bin/bash`.
 
-### 6. Verify
-- Rebuild `geminios_core`.
-- Test boot process:
-    - Init starts.
-    - Gettys spawn.
-    - Login prompt appears.
-    - Authentication works.
-    - Shell works.
+### 6. Verify [COMPLETED]
+- [x] Rebuild `geminios_core`.
+- [x] Decouple `ginit` into its own directory with its own `Makefile`.
+- [x] Create `libgemcore.a` for shared utilities.
+- [x] Update complex and pkgs ports to use the new structure.
 
 
 ### Ginit Service Management (Systemd-style) [IMPLEMENTED]
@@ -87,7 +83,7 @@ A proposed enhancement for `ginit` to manage background services and daemons usi
 - [x] Implement `.gservice` file parser (`src/gservice_parser.cpp`).
 - [x] Implement service manager logic (`src/gservice_manager.cpp`).
 - [x] Integrate service manager into `ginit` supervision loop.
-- [ ] Implement robust IPC for CLI commands (status, enable, disable).
+- [x] Implement robust IPC for CLI commands (status, enable, disable).
 
 **Storage Locations:**
 - System Services: `/etc/ginit/services/system/<service>.gservice`
@@ -111,9 +107,9 @@ service "dummy-app" {
         
         // Dependency chain
         deps {
-            after    = ["network-online.target", "postgresql.service"]
-            wants    = ["redis.service"]
-            requires = ["postgresql.service"]
+            after    = ["network-online.target", "postgresql.gservice"]
+            wants    = ["redis.gservice"]
+            requires = ["postgresql.gservice"]
         }
     }
 

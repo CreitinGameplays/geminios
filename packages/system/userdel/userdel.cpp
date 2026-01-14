@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <unistd.h>
 #include <cstdlib>
-#include "../../../src/user_mgmt.h"
-#include "../../../src/sys_info.h"
+#include "user_mgmt.h"
+#include "sys_info.h"
 
 // Recursive removal helper (simple wrapper around rm -rf logic would be better, but system() is available)
 void remove_home(const std::string& path) {

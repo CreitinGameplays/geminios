@@ -457,7 +457,6 @@
     ],
     "geminios_core": [
         "bin/init",
-        "bin/gsh",
         "bin/login",
         "sbin/getty"
     ],
@@ -509,7 +508,13 @@
     "geminios_complex": [
         "bin/apps/system/gpkg",
         "bin/apps/system/installer",
-        "bin/apps/system/sudo"
+        "bin/apps/system/sudo",
+        "bin/apps/system/adduser",
+        "bin/apps/system/useradd",
+        "bin/apps/system/userdel",
+        "bin/apps/system/usermod",
+        "bin/apps/system/passwd",
+        "bin/apps/system/su"
     ],
     "pciutils": [
         "usr/bin/lspci",

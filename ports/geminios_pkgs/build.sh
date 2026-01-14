@@ -9,7 +9,7 @@ JOBS="${JOBS:-1}"
 compile_sys_pkg() {
     PKG=$1
     echo "Compiling system package: $PKG"
-    g++ -static -O2 -I "$ROOT_DIR/src" -o "$ROOTFS/bin/apps/system/$PKG" "$ROOT_DIR/packages/system/$PKG/$PKG.cpp"
+    g++ -static -O2 -I "$ROOT_DIR/ginit/src" -I "$ROOT_DIR/src" -o "$ROOTFS/bin/apps/system/$PKG" "$ROOT_DIR/packages/system/$PKG/$PKG.cpp"
     strip "$ROOTFS/bin/apps/system/$PKG"
 }
 

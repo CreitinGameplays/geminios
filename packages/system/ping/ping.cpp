@@ -11,8 +11,8 @@
 #include <sys/time.h>
 #include <csignal>
 #include <cmath>
-#include "../../../src/network.h"
-#include "../../../src/signals.h"
+#include "network.h"
+#include "signals.h"
 
 volatile bool g_running = true;
 void sig_handler(int) { g_running = false; g_stop_sig = 1; }

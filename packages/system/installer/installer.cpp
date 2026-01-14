@@ -14,8 +14,8 @@
 #include <cstdlib>
 #include <fstream> // stop forggeting this
 #include <cctype>
-#include "../../../src/sys_info.h"
-#include "../../../src/user_mgmt.h"
+#include "sys_info.h"
+#include "user_mgmt.h"
 #include <sys/wait.h>
 #include <cerrno>
 #include <ctime>
@@ -392,6 +392,7 @@ int main(int argc, char* argv[]) {
     RunCommand("/bin/cp", {"-r", "-p", "/lib64", "/mnt/target/"});
     RunCommand("/bin/cp", {"-r", "-p", "/usr", "/mnt/target/"});
     RunCommand("/bin/cp", {"-r", "-p", "/etc", "/mnt/target/"});
+    RunCommand("/bin/cp", {"-r", "-p", "/root", "/mnt/target/"});
     
     if (!RunCommand("/bin/cp", {"-r", "-p", "/boot", "/mnt/target/"})) {
         std::cerr << C_RED << "Critical Error: Failed to copy /boot (kernel)" << C_RESET << "\n";
@@ -415,16 +416,24 @@ int main(int argc, char* argv[]) {
     User root;
     root.username = "root";
     root.uid = 0; root.gid = 0;
-    root.home = "/root"; root.shell = "/bin/gsh";
+    root.home = "/root"; root.shell = "/bin/bash";
     root.password = UserMgmt::hash_password(cfg.password); // Root passed same as user
     new_users.push_back(root);
+
+    // MessageBus (DBus)
+    User messagebus;
+    messagebus.username = "messagebus";
+    messagebus.uid = 18; messagebus.gid = 18;
+    messagebus.home = "/var/run/dbus"; messagebus.shell = "/bin/false";
+    messagebus.password = "!"; 
+    new_users.push_back(messagebus);
 
     // New User
     User u;
     u.username = cfg.username;
     u.uid = 1000; u.gid = 1000;
     u.home = "/home/" + cfg.username;
-    u.shell = "/bin/gsh";
+    u.shell = "/bin/bash";
     u.password = UserMgmt::hash_password(cfg.password);
     new_users.push_back(u);
 
@@ -434,6 +443,9 @@ int main(int argc, char* argv[]) {
     Group g_root;
     g_root.name = "root"; g_root.password = "x"; g_root.gid = 0; g_root.members = {};
 
+    Group g_messagebus;
+    g_messagebus.name = "messagebus"; g_messagebus.password = "x"; g_messagebus.gid = 18; g_messagebus.members = {};
+
     Group g_sudo;
     g_sudo.name = "sudo"; g_sudo.password = "x"; g_sudo.gid = 27; g_sudo.members = {"root", cfg.username};
 
@@ -441,6 +453,7 @@ int main(int argc, char* argv[]) {
     g_user.name = cfg.username; g_user.password = "x"; g_user.gid = 1000; g_user.members = {cfg.username};
 
     new_groups.push_back(g_root);
+    new_groups.push_back(g_messagebus);
     new_groups.push_back(g_sudo);
     new_groups.push_back(g_user);
 
@@ -478,9 +491,17 @@ int main(int argc, char* argv[]) {
     chmod("/mnt/target/etc/sudoers", 0440);
 
     // Create Home Dir
-    mkdir(("/mnt/target/home/" + cfg.username).c_str(), 0700);
-    if (chown(("/mnt/target/home/" + cfg.username).c_str(), 1000, 1000) != 0) {
+    std::string user_home = "/mnt/target/home/" + cfg.username;
+    mkdir(user_home.c_str(), 0700);
+    
+    // Copy default bashrc from /root to user home
+    RunCommand("/bin/cp", { "/mnt/target/root/.bashrc", user_home + "/.bashrc" });
+
+    if (chown(user_home.c_str(), 1000, 1000) != 0) {
         perror("chown home");
+    }
+    if (chown((user_home + "/.bashrc").c_str(), 1000, 1000) != 0) {
+        perror("chown bashrc");
     }
 
     // 6. Bootloader

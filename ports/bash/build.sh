@@ -7,4 +7,6 @@ cd "$DEP_DIR/bash-$BASH_VER"
     --disable-shared --disable-curses LDFLAGS="-static" --host=x86_64-linux-gnu
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
+mkdir -p "$ROOTFS/bin"
+ln -sf ../usr/bin/bash "$ROOTFS/bin/bash"
 ln -sf bash "$ROOTFS/bin/sh"

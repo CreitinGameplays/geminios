@@ -11,8 +11,8 @@
 #include <algorithm>
 #include <sys/stat.h>
 #include <ctime>
-#include "../../../src/user_mgmt.h"
-#include "../../../src/sys_info.h"
+#include "user_mgmt.h"
+#include "sys_info.h"
 
 // Configuration
 const int SUDO_TIMEOUT_MINUTES = 15;

@@ -80,6 +80,34 @@ std::vector<std::string> get_installed_packages(const std::string& extension = "
 
 // --- Removal Logic ---
 
+bool action_register_file(const std::string& pkg_name, const std::string& file_path) {
+    if (pkg_name.empty() || file_path.empty()) return false;
+    std::string list_path = get_info_dir() + pkg_name + ".list";
+    std::ofstream list_out(list_path, std::ios::app);
+    if (!list_out) {
+        std::cerr << "E: Failed to open " << list_path << " for appending." << std::endl;
+        return false;
+    }
+    // Normalize path to start with /
+    std::string safe_path = (file_path[0] == '/') ? file_path : "/" + file_path;
+    list_out << safe_path << "\n";
+    VLOG("Registered file " << safe_path << " for package " << pkg_name);
+    return true;
+}
+
+bool action_register_undo(const std::string& pkg_name, const std::string& cmd) {
+    if (pkg_name.empty() || cmd.empty()) return false;
+    std::string undo_path = get_info_dir() + pkg_name + ".undo";
+    std::ofstream undo_out(undo_path, std::ios::app);
+    if (!undo_out) {
+        std::cerr << "E: Failed to open " << undo_path << " for appending." << std::endl;
+        return false;
+    }
+    undo_out << cmd << "\n";
+    VLOG("Registered undo command '" << cmd << "' for package " << pkg_name);
+    return true;
+}
+
 bool remove_path(const std::string& abs_path) {
     std::string safe_abs = (abs_path.length() > 0 && abs_path[0] != '/') ? "/" + abs_path : abs_path;
     std::string full_path = g_root_prefix + safe_abs;
@@ -177,8 +205,6 @@ bool remove_path(const std::string& abs_path) {
 bool action_remove_safe(const std::string& pkg_name) {
     std::cout << "Removing " << pkg_name << "..." << std::endl;
     
-    std::vector<std::string> owned_files = read_list_file(pkg_name);
-    
     // prerm
     std::string prerm = get_info_dir() + pkg_name + ".prerm";
     if (access(prerm.c_str(), X_OK) == 0) {
@@ -188,6 +214,26 @@ bool action_remove_safe(const std::string& pkg_name) {
         }
     }
 
+    // Run registered undo commands (in reverse order)
+    std::string undo_path = get_info_dir() + pkg_name + ".undo";
+    std::vector<std::string> undo_cmds;
+    std::ifstream undo_f(undo_path);
+    if (undo_f) {
+        std::string line;
+        while (std::getline(undo_f, line)) {
+            line = trim(line);
+            if (!line.empty()) undo_cmds.push_back(line);
+        }
+        undo_f.close();
+    }
+    if (!undo_cmds.empty()) {
+        VLOG("Executing " << undo_cmds.size() << " registered undo commands...");
+        for (auto it = undo_cmds.rbegin(); it != undo_cmds.rend(); ++it) {
+            run_command(*it);
+        }
+    }
+
+    std::vector<std::string> owned_files = read_list_file(pkg_name);
     // Remove files
     for (auto it = owned_files.rbegin(); it != owned_files.rend(); ++it) {
         remove_path(*it);
@@ -511,40 +557,51 @@ bool action_verify(const std::string& pkg_name) {
 }
 
 int main(int argc, char* argv[]) {
+
     if (argc < 2) {
-        std::cout << "Usage: gpkg-worker [--install <file> | --remove <pkg> | --verify <pkg>] [--root <path>]" << std::endl;
+
+        std::cout << "Usage: gpkg-worker [options]\nOptions:\n  --install <file>\n  --remove <pkg>\n  --verify <pkg>\n  --register-file <path> --pkg <name>\n  --register-undo <cmd> --pkg <name>\n";
+
         return 1;
+
     }
 
-    std::string mode = "";
-    std::string target = "";
+    std::string mode, target, pkg_name;
 
     for (int i = 1; i < argc; ++i) {
+
         std::string arg = argv[i];
-        if (arg == "--install") {
-            mode = "install";
-            if (i + 1 < argc) target = argv[++i];
-        } else if (arg == "--remove") {
-            mode = "remove";
-            if (i + 1 < argc) target = argv[++i];
-        } else if (arg == "--verify") {
-            mode = "verify";
-            if (i + 1 < argc) target = argv[++i];
-        } else if (arg == "--root") {
-            if (i + 1 < argc) g_root_prefix = argv[++i];
-        } else if (arg == "-v" || arg == "--verbose") {
-            g_verbose = true;
-        }
+
+        if (arg == "--install") mode = "install", target = argv[++i];
+
+        else if (arg == "--remove") mode = "remove", target = argv[++i];
+
+        else if (arg == "--verify") mode = "verify", target = argv[++i];
+
+        else if (arg == "--register-file") mode = "register-file", target = argv[++i];
+
+        else if (arg == "--register-undo") mode = "register-undo", target = argv[++i];
+
+        else if (arg == "--pkg") pkg_name = argv[++i];
+
+        else if (arg == "--root") g_root_prefix = argv[++i];
+
+        else if (arg == "-v" || arg == "--verbose") g_verbose = true;
+
     }
-    
-    if (mode == "remove" && !target.empty()) {
-        return action_remove_safe(target) ? 0 : 1;
-    } else if (mode == "install" && !target.empty()) {
-        return action_install(target) ? 0 : 1;
-    } else if (mode == "verify" && !target.empty()) {
-        return action_verify(target) ? 0 : 1;
-    } else {
-        std::cerr << "Invalid arguments or missing target." << std::endl;
-        return 1;
-    }
+
+    if (mode == "remove" && !target.empty()) return action_remove_safe(target) ? 0 : 1;
+
+    if (mode == "install" && !target.empty()) return action_install(target) ? 0 : 1;
+
+    if (mode == "verify" && !target.empty()) return action_verify(target) ? 0 : 1;
+
+    if (mode == "register-file" && !target.empty() && !pkg_name.empty()) return action_register_file(pkg_name, target) ? 0 : 1;
+
+    if (mode == "register-undo" && !target.empty() && !pkg_name.empty()) return action_register_undo(pkg_name, target) ? 0 : 1;
+
+    std::cerr << "Invalid arguments or missing target/pkg.\n";
+
+    return 1;
+
 }

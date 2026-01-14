@@ -4,8 +4,8 @@
 #include <sys/types.h>
 #include <termios.h>
 #include <cstring>
-#include "../../../src/user_mgmt.h"
-#include "../../../src/sys_info.h"
+#include "user_mgmt.h"
+#include "sys_info.h"
 
 // Helper to read password without echo
 std::string get_pass(const std::string& prompt) {

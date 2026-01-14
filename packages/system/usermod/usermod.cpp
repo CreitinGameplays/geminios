@@ -1,6 +1,6 @@
 #include <iostream>
 #include <unistd.h>
-#include "../../../src/user_mgmt.h"
+#include "user_mgmt.h"
 
 int main(int argc, char* argv[]) {
     std::string new_name, new_home;

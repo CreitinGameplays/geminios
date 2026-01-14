@@ -79,3 +79,4 @@ initramfs_build*/
 
 .vscode/
 build_system/ldd.sh
+*SUBMODULE_GUIDE.md*

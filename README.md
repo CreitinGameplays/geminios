@@ -17,7 +17,7 @@ sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev
                  zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
                  python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
                  gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
-                 libxml2-dev libxslt1-dev texinfo intltool 
+                 libxml2-dev libxslt1-dev texinfo intltool valac
 ```
 
 Make sure to make the build scripts executable:
@@ -95,9 +95,20 @@ This ensures that every package build automagically targets GeminiOS without req
 - **The Kernel**: The kernel must be compiled before running the main builder.
   See the [Kernel Compilation](#kernel-compilation) section below.
 
-- **Userspace**: Most development happens in `src/` (core system) and `packages/` (system utilities).
+- **Core System (Ginit)**: The initialization system and core utilities reside in the `ginit/` directory. It is built as part of the `geminios_core` port but can be developed independently using its own `Makefile`.
+
+- **Userspace Packages**: Most other system utilities are in `packages/` (system utilities).
 
 - **Verification**: The build system now uses a manifest-based verification system (`build_system/package_manifests.json`). If a package build fails or artifacts are missing, the builder will report exactly what is missing.
+
+## Ginit (Init System)
+
+Ginit is modularized for easier development. It provides `init`, `login`, and `getty`.
+To build it manually:
+```bash
+cd ginit && make
+```
+For more information, see [ginit/README.md](ginit/README.md).
 
 ## Build System Architecture
 

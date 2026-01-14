@@ -1,7 +1,7 @@
-#include "../../../src/network.h"
-#include "../../../src/debug.h"
-#include "../../../src/signals.h"
-#include "../../../src/sys_info.h"
+#include "network.h"
+#include "debug.h"
+#include "signals.h"
+#include "sys_info.h"
 #include <cstdio>
 #include <iostream>
 #include <vector>
@@ -369,17 +369,19 @@ int compare_versions(const std::string& v1, const std::string& v2) {
 // Check if package is installed and optionally return its version
 bool is_installed(const std::string& pkg, std::string* out_version = nullptr) {
     std::string info_path = INFO_DIR + pkg + ".json";
-    if (access(info_path.c_str(), F_OK) != 0) return false;
-    
-    if (out_version) {
-        std::ifstream f(info_path);
-        if (f) {
-            std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-            return get_json_value(content, "version", *out_version);
+    if (access(info_path.c_str(), F_OK) == 0) {
+        if (out_version) {
+            std::ifstream f(info_path);
+            if (f) {
+                std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                return get_json_value(content, "version", *out_version);
+            }
+            return false;
         }
-        return false;
+        return true;
     }
-    return true;
+    
+    return false;
 }
 
 // Helper to run shell commands and get output
@@ -653,32 +655,32 @@ bool resolve_dependencies(const std::string& pkg, const std::string& op, const s
 
     if (verbose) VLOG(verbose, "Resolving dependencies for: " << pkg << (op.empty() ? "" : (" (" + op + " " + req_version + ")")));
 
-    // Check if already installed
-    if (installed_cache.count(pkg)) {
-        std::string installed_ver;
-        if (is_installed(pkg, &installed_ver)) {
-             if (version_satisfies(installed_ver, op, req_version)) {
-                 VLOG(verbose, pkg << " " << installed_ver << " is installed and satisfies constraints.");
-                 return true;
-             } else {
-                 std::cerr << Color::YELLOW << "W: " << pkg << " " << installed_ver << " is installed but does not meet requirements (" << op << " " << req_version << ")." << Color::RESET << std::endl;
-             }
-        }
-    } else {
-        for (const auto& p_name : get_installed_packages()) {
-            std::ifstream f(INFO_DIR + p_name + ".json");
-            std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-            std::vector<std::string> p_provides;
-            if (get_json_array(content, "provides", p_provides)) {
-                for (const auto& prov : p_provides) {
-                    std::string prov_name = prov;
-                    size_t space = prov.find(' ');
-                    if (space != std::string::npos) prov_name = prov.substr(0, space);
-                    
-                    if (prov_name == pkg) {
-                        VLOG(verbose, pkg << " is provided by installed package " << p_name);
-                        return true;
-                    }
+    // Check if already installed (directly or via smart detection)
+    std::string installed_ver;
+    if (is_installed(pkg, &installed_ver)) {
+         if (version_satisfies(installed_ver, op, req_version)) {
+             VLOG(verbose, pkg << " " << installed_ver << " is installed and satisfies constraints.");
+             return true;
+         } else {
+             std::cerr << Color::YELLOW << "W: " << pkg << " " << installed_ver << " is installed but does not meet requirements (" << op << " " << req_version << ")." << Color::RESET << std::endl;
+         }
+    }
+
+    // Check PROVIDES of installed packages
+    for (const auto& p_name : get_installed_packages()) {
+        std::ifstream f(INFO_DIR + p_name + ".json");
+        if (!f) continue;
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::vector<std::string> p_provides;
+        if (get_json_array(content, "provides", p_provides)) {
+            for (const auto& prov : p_provides) {
+                std::string prov_name = prov;
+                size_t space = prov.find(' ');
+                if (space != std::string::npos) prov_name = prov.substr(0, space);
+                
+                if (prov_name == pkg) {
+                    VLOG(verbose, pkg << " is provided by installed package " << p_name);
+                    return true;
                 }
             }
         }

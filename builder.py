@@ -302,7 +302,28 @@ def sync_kernel():
         print_warning("    Ensure you have compiled the kernel manually as described in README.md")
         return False
 
+def build_ginit(force=False, debug=False):
+    """Special handler for ginit submodule"""
+    print_info("[*] Building Ginit Core...")
+    ginit_dir = os.path.join(ROOT_DIR, "ginit")
+    if not os.path.exists(ginit_dir):
+        print_error("ERROR: ginit directory not found!")
+        return False
+    
+    # Run make inside ginit
+    # We use run_command to ensure it uses the correct environment
+    ret = run_command("make", cwd=ginit_dir, debug=debug)
+    if ret != 0:
+        print_error("ERROR: Failed to build ginit core")
+        return False
+    
+    return True
+
 def build_package(pkg_name, index, total, force=False, debug=False):
+    if pkg_name == "geminios_core":
+        if not build_ginit(force, debug):
+            return False
+
     if not force and is_built(pkg_name):
         print(color(f"[{index}/{total}] Skipping {pkg_name} ", Colors.CYAN) + color("(Verified)", Colors.GREEN))
         return True
@@ -419,7 +440,6 @@ def verify_rootfs_integrity():
         "bin/init",
         "bin/bash",
         "bin/sh",
-        "bin/gsh",
         "bin/login",
         "sbin/getty",
         "boot/kernel",
@@ -768,7 +788,7 @@ def create_iso():
         os.remove(sfs_path)
         
     # Using zstd for speed/compression balance
-    mksquashfs_cmd = f"mksquashfs rootfs {sfs_path} -comp zstd -noappend -wildcards -all-root"
+    mksquashfs_cmd = f"mksquashfs rootfs {sfs_path} -comp zstd -noappend -wildcards -all-root -e staging"
     if run_command(mksquashfs_cmd) != 0:
         print_error(" [FAILED] (mksquashfs)")
         return False

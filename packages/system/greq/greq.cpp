@@ -1,5 +1,5 @@
-#include "../../../src/network.h"
-#include "../../../src/signals.h"
+#include "network.h"
+#include "signals.h"
 #include <iostream>
 #include <fstream>
 #include <vector>
