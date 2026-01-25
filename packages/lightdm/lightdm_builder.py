@@ -453,6 +453,28 @@ Cflags: -I${{includedir}}
         print("  Installing...")
         run_shell(f"{env_vars} && DESTDIR={install_dir} ninja -C build install", cwd=src_dir, log_file=log_file)
         run_shell(f"{env_vars} && DESTDIR={STAGING_DIR} ninja -C build install", cwd=src_dir, log_file=log_file)
+
+        # Fix for elogind installing into absolute path
+        if name == "elogind":
+            # Check if it installed into nested rootfs path (remove leading slash for join)
+            nested_root = os.path.join(install_dir, rootfs_path.lstrip("/"))
+            if os.path.exists(nested_root):
+                print(f"  Fixing nested installation paths for elogind in {install_dir}...")
+                # Move contents to correct place
+                subprocess.run(f"cp -a {nested_root}/* {install_dir}/", shell=True)
+                # Remove the nested directory structure
+                # We need to remove the top-level directory that shouldn't be there (e.g., 'home' or 'mnt')
+                # The first component of rootfs_path relative to root
+                first_dir = rootfs_path.strip("/").split("/")[0]
+                subprocess.run(f"rm -rf {os.path.join(install_dir, first_dir)}", shell=True)
+            
+            # Same for staging
+            nested_staging = os.path.join(STAGING_DIR, rootfs_path.lstrip("/"))
+            if os.path.exists(nested_staging):
+                print(f"  Fixing nested installation paths for elogind in {STAGING_DIR}...")
+                subprocess.run(f"cp -a {nested_staging}/* {STAGING_DIR}/", shell=True)
+                first_dir = rootfs_path.strip("/").split("/")[0]
+                subprocess.run(f"rm -rf {os.path.join(STAGING_DIR, first_dir)}", shell=True)
     
     else:
         # Standard Configure/Make
@@ -502,14 +524,36 @@ Cflags: -I${{includedir}}
             subprocess.run(f"sed -i 's/#greeter-session=example-gtk-gnome/greeter-session=lightdm-gtk-greeter/' {conf_path}", shell=True)
             subprocess.run(f"sed -i 's/#user-session=default/user-session=xfce/' {conf_path}", shell=True)
             subprocess.run(f"sed -i 's/#greeter-user=lightdm/greeter-user=lightdm/' {conf_path}", shell=True)
+            subprocess.run(f"sed -i 's/#log-level=info/log-level=debug/' {conf_path}", shell=True)
 
-        # Patch PAM config for LightDM
-        for pam_service in ["lightdm", "lightdm-autologin", "lightdm-greeter"]:
-            pam_file = os.path.join(install_dir, f"etc/pam.d/{pam_service}")
+        # Configure PAM for LightDM
+        pam_dir = os.path.join(install_dir, "etc/pam.d")
+        os.makedirs(pam_dir, exist_ok=True)
+
+        # 1. lightdm (Main Service) - Use GeminiOS common-* files
+        print(f"  Generating PAM config: {os.path.join(pam_dir, 'lightdm')}")
+        with open(os.path.join(pam_dir, "lightdm"), "w") as f:
+            f.write("#%PAM-1.0\n")
+            f.write("# Load environment from /etc/environment and ~/.pam_environment\n")
+            f.write("auth      required pam_env.so\n\n")
+            f.write("# Use common authentication\n")
+            f.write("auth      include common-auth\n\n")
+            f.write("# Use common account management\n")
+            f.write("account   include common-account\n\n")
+            f.write("# Use common password management\n")
+            f.write("password  include common-password\n\n")
+            f.write("# Use common session management\n")
+            f.write("session   include common-session\n\n")
+            f.write("# LightDM specific session\n")
+            f.write("session optional pam_elogind.so\n")
+
+        # 2. Patch other services (autologin, greeter)
+        for pam_service in ["lightdm-autologin", "lightdm-greeter"]:
+            pam_file = os.path.join(pam_dir, pam_service)
             if os.path.exists(pam_file):
                 print(f"  Patching PAM config: {pam_file}")
-                # Allow empty passwords
-                subprocess.run(f"sed -i -E 's/^(auth|password).*pam_unix.so/& nullok/' {pam_file}", shell=True)
+                # Allow empty passwords and enable debug
+                subprocess.run(f"sed -i -E 's/^(auth|password).*pam_unix.so/& nullok debug/' {pam_file}", shell=True)
                 # Remove systemd module (not present/used)
                 subprocess.run(f"sed -i '/pam_systemd.so/d' {pam_file}", shell=True)
                 # Remove pam_nologin.so (can cause issues if /etc/nologin exists erroneously)
@@ -518,8 +562,36 @@ Cflags: -I${{includedir}}
                 subprocess.run(f"grep -q 'pam_elogind.so' {pam_file} || echo 'session optional pam_elogind.so' >> {pam_file}", shell=True)
 
         # Create persistent directories to be included in the package
-        for d in ["var/lib/lightdm", "var/log/lightdm", "var/run/lightdm", "var/lib/lightdm-data"]:
+        for d in ["var/lib/lightdm", "var/log/lightdm", "var/run/lightdm", "var/lib/lightdm-data", "usr/share/xsessions"]:
             os.makedirs(os.path.join(install_dir, d), exist_ok=True)
+
+        # Create lightdm-session wrapper
+        session_wrapper_path = os.path.join(install_dir, "usr/bin/lightdm-session")
+        print(f"  Generating session wrapper: {session_wrapper_path}")
+        with open(session_wrapper_path, "w") as f:
+            f.write("#!/bin/sh\n")
+            f.write("# LightDM session wrapper\n\n")
+            f.write("# Load profile\n")
+            f.write("[ -f /etc/profile ] && . /etc/profile\n")
+            f.write("[ -f $HOME/.profile ] && . $HOME/.profile\n\n")
+            f.write("# If no session is specified, use xfce as default\n")
+            f.write("if [ -z \"$1\" ]; then\n")
+            f.write("    exec startxfce4\n")
+            f.write("else\n")
+            f.write("    case \"$1\" in\n")
+            f.write("        xfce|xfce4|startxfce4|default)\n")
+            f.write("            exec startxfce4\n")
+            f.write("            ;;\n")
+            f.write("        *)\n")
+            f.write("            if command -v \"$1\" >/dev/null 2>&1; then\n")
+            f.write("                exec \"$@\"\n")
+            f.write("            else\n")
+            f.write("                exec startxfce4\n")
+            f.write("            fi\n")
+            f.write("            ;;\n")
+            f.write("    esac\n")
+            f.write("fi\n")
+        os.chmod(session_wrapper_path, 0o755)
 
     print("  Fixing .pc files in staging...")
     rel_staging_usr = to_sysroot_path(os.path.join(STAGING_DIR, "usr"))
@@ -556,9 +628,14 @@ Cflags: -I${{includedir}}
         postinst_path = os.path.join(scripts_dir, "postinst")
         with open(postinst_path, "w") as f:
             f.write("#!/bin/bash\n")
-            # Set SUID for unix_chkpwd if it exists
-            f.write("if [ -f /sbin/unix_chkpwd ]; then chmod 4755 /sbin/unix_chkpwd; fi\n")
-            f.write("if [ -f /usr/sbin/unix_chkpwd ]; then chmod 4755 /usr/sbin/unix_chkpwd; fi\n")
+            f.write("echo \"Configuring Linux-PAM...\"\n")
+            f.write("# Set SUID for unix_chkpwd - essential for non-root password verification\n")
+            f.write("for path in /sbin/unix_chkpwd /usr/sbin/unix_chkpwd /lib/security/unix_chkpwd /lib64/security/unix_chkpwd; do\n")
+            f.write("    if [ -f \"$path\" ]; then\n")
+            f.write("        echo \"  Setting SUID on $path\"\n")
+            f.write("        chmod 4755 \"$path\"\n")
+            f.write("    fi\n")
+            f.write("done\n")
         os.chmod(postinst_path, 0o755)
     elif name == "polkit":
         postinst_path = os.path.join(scripts_dir, "postinst")

@@ -11,9 +11,12 @@ g++ $CXXFLAGS -I"$ROOT_DIR/ginit/src" -I"$ROOT_DIR/src" -o gpkg "$ROOT_DIR/packa
 strip gpkg
 
 # Additional setup for ginit
+# ginit Makefile now installs binaries to /bin and /sbin
+# and services to /usr/lib/ginit/services
+
+# Ensure /init points to /bin/ginit (PID 1)
 cp "$ROOTFS/bin/ginit" "$ROOTFS/init"
 ln -sf ginit "$ROOTFS/bin/init"
-ln -sf /usr/lib/ginit/services/dbus.gservice "$ROOTFS/etc/ginit/services/system/dbus.gservice"
 
 ln -sf bash "$ROOTFS/bin/sh"
 cp gpkg "$ROOTFS/bin/gpkg"

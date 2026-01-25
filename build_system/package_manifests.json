@@ -458,7 +458,12 @@
     "geminios_core": [
         "bin/init",
         "bin/login",
-        "sbin/getty"
+        "sbin/getty",
+        "usr/lib/ginit/services/dbus.gservice",
+        "usr/lib/ginit/services/udevd.gservice",
+        "usr/lib/ginit/services/udev-trigger.gservice",
+        "usr/lib/ginit/services/udev-settle.gservice",
+        "usr/lib/ginit/services/network.gservice"
     ],
     "geminios_pkgs": [
         "bin/apps/system/gtop",

@@ -173,3 +173,9 @@ Current patches included:
 
 ---
 
+Versioning idea:
+major.minor.patch-(alpha-beta-stable)-(date-and-time in mm/dd/yyyy and h:m 24h-format, must convert to UTC+0 time!!!):
+
+example:
+(jan 25 2026, 01:07 PM) 
+0.0.1-alpha-01252026-1307

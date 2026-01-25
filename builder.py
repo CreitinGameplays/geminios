@@ -456,7 +456,9 @@ def verify_rootfs_integrity():
         "usr/share/mime/magic",
         "bin/apps/system/gpkg-worker",
         "usr/share/glib-2.0/schemas/gschemas.compiled",
-        "usr/share/fonts/TTF/Inter-Regular.otf"
+        "usr/share/fonts/TTF/Inter-Regular.otf",
+        "usr/lib/ginit/services/udevd.gservice",
+        "usr/lib/ginit/services/network.gservice"
     ]
     
     missing = False
@@ -817,7 +819,7 @@ def create_iso():
 set default=0
 
 menuentry "GeminiOS Live" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0
     initrd /boot/initramfs.cpio.lz4
 }
 """
