@@ -1,5 +1,5 @@
 # --- Build Output & ISO ---
-GeminiOS.iso
+GeminiOS*.iso
 rootfs/
 isodir/
 filelist.txt

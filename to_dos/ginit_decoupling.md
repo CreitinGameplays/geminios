@@ -62,3 +62,5 @@ Extract the GeminiOS Core (`ginit`, `login`, `getty`, and shared libraries) into
 - [ ] (Optional) Push to a remote repository.
 - [ ] Add `ginit` as a submodule to the main `geminios` repository.
 - [ ] Remove the old `src/` directory from the main repository.
+
+all done

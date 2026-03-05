@@ -173,7 +173,7 @@ Current patches included:
 
 ---
 
-Versioning idea:
+Versioning:
 major.minor.patch-(alpha-beta-stable)-(date-and-time in mm/dd/yyyy and h:m 24h-format, must convert to UTC+0 time!!!):
 
 example:

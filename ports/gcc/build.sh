@@ -34,25 +34,40 @@ install -Dm755 "$HOST_GXX" "$ROOTFS/usr/bin/g++"
 install -Dm755 "$HOST_CPP" "$ROOTFS/usr/bin/cpp"
 ln -sf gcc "$ROOTFS/usr/bin/cc"
 
-# 3. Install Internal Components (cc1, cc1plus)
-# We replicate the internal path structure (e.g. /usr/libexec/gcc/x86_64-linux-gnu/14/)
+# 3. Install Internal Components (cc1, cc1plus, collect2, etc.)
+HOST_CC1=$(gcc -print-prog-name=cc1)
 HOST_CC1_DIR=$(dirname "$HOST_CC1")
-# Determine relative path from root
-# Assuming HOST_CC1 is like /usr/libexec/...
-if [[ "$HOST_CC1" == /usr/* ]]; then
-    REL_DIR=${HOST_CC1_DIR#/usr/}
-    TARGET_DIR="$ROOTFS/usr/$REL_DIR"
-else
-    # Fallback or weird location
-    REL_DIR=${HOST_CC1_DIR#/}
-    TARGET_DIR="$ROOTFS/$REL_DIR"
-fi
+REL_EXEC_DIR=${HOST_CC1_DIR#/usr/}
+TARGET_EXEC_DIR="$ROOTFS/usr/$REL_EXEC_DIR"
 
-mkdir -p "$TARGET_DIR"
-install -Dm755 "$HOST_CC1" "$TARGET_DIR/cc1"
-install -Dm755 "$HOST_CC1PLUS" "$TARGET_DIR/cc1plus"
+mkdir -p "$TARGET_EXEC_DIR"
+echo "Installing internal executables to $TARGET_EXEC_DIR..."
+for comp in cc1 cc1plus collect2 lto1 lto-wrapper liblto_plugin.so g++-mapper-server; do
+    comp_path=$(gcc -print-prog-name=$comp)
+    if [ -f "$comp_path" ]; then
+        echo "  Copying $comp..."
+        install -Dm755 "$comp_path" "$TARGET_EXEC_DIR/$(basename "$comp_path")"
+    fi
+done
 
-# 4. Install Internal Headers
+# 4. Install GCC Internal Libraries and Objects (crtbegin.o, libgcc.a, etc.)
+HOST_LIBGCC=$(gcc -print-file-name=libgcc.a)
+HOST_LIBGCC_DIR=$(dirname "$HOST_LIBGCC")
+REL_LIB_DIR=${HOST_LIBGCC_DIR#/usr/}
+TARGET_LIB_DIR="$ROOTFS/usr/$REL_LIB_DIR"
+
+mkdir -p "$TARGET_LIB_DIR"
+echo "Installing internal libs/objects to $TARGET_LIB_DIR..."
+# Copy everything from the host's GCC lib directory to ensure completeness
+# This includes crtbegin.o, libgcc.a, libstdc++.so, etc.
+cp -a "$HOST_LIBGCC_DIR"/* "$TARGET_LIB_DIR/"
+
+# 5. Link for binutils (ar, nm, ranlib) and LTO support
+echo "Creating LTO plugin symlinks..."
+mkdir -p "$ROOTFS/usr/lib/bfd-plugins"
+ln -sf "/usr/$REL_LIB_DIR/liblto_plugin.so" "$ROOTFS/usr/lib/bfd-plugins/liblto_plugin.so"
+
+# 6. Install Internal Headers
 # Used for compiling (stdarg.h, etc.)
 HOST_INCLUDE_DIR=$(gcc -print-file-name=include)
 HOST_INCLUDE_FIXED_DIR=$(gcc -print-file-name=include-fixed)

@@ -454,28 +454,6 @@ Cflags: -I${{includedir}}
         run_shell(f"{env_vars} && DESTDIR={install_dir} ninja -C build install", cwd=src_dir, log_file=log_file)
         run_shell(f"{env_vars} && DESTDIR={STAGING_DIR} ninja -C build install", cwd=src_dir, log_file=log_file)
 
-        # Fix for elogind installing into absolute path
-        if name == "elogind":
-            # Check if it installed into nested rootfs path (remove leading slash for join)
-            nested_root = os.path.join(install_dir, rootfs_path.lstrip("/"))
-            if os.path.exists(nested_root):
-                print(f"  Fixing nested installation paths for elogind in {install_dir}...")
-                # Move contents to correct place
-                subprocess.run(f"cp -a {nested_root}/* {install_dir}/", shell=True)
-                # Remove the nested directory structure
-                # We need to remove the top-level directory that shouldn't be there (e.g., 'home' or 'mnt')
-                # The first component of rootfs_path relative to root
-                first_dir = rootfs_path.strip("/").split("/")[0]
-                subprocess.run(f"rm -rf {os.path.join(install_dir, first_dir)}", shell=True)
-            
-            # Same for staging
-            nested_staging = os.path.join(STAGING_DIR, rootfs_path.lstrip("/"))
-            if os.path.exists(nested_staging):
-                print(f"  Fixing nested installation paths for elogind in {STAGING_DIR}...")
-                subprocess.run(f"cp -a {nested_staging}/* {STAGING_DIR}/", shell=True)
-                first_dir = rootfs_path.strip("/").split("/")[0]
-                subprocess.run(f"rm -rf {os.path.join(STAGING_DIR, first_dir)}", shell=True)
-    
     else:
         # Standard Configure/Make
         configure_flags = "--prefix=/usr --sysconfdir=/etc --localstatedir=/var --disable-static"
@@ -511,6 +489,18 @@ Cflags: -I${{includedir}}
         run_shell(f"make DESTDIR={STAGING_DIR} install", cwd=src_dir, log_file=log_file)
         subprocess.run(f"find {STAGING_DIR} -name '*.la' -delete", shell=True)
     
+    # Fix for packages installing into absolute path containing ROOTFS
+    # This must run BEFORE Configure LightDM/PAM steps as they might depend on correct file locations
+    for target in [install_dir, STAGING_DIR]:
+        nested_root = os.path.join(target, rootfs_path.lstrip("/"))
+        if os.path.exists(nested_root):
+            print(f"  Fixing nested installation paths in {target}...")
+            # Move contents to correct place
+            subprocess.run(f"cp -a {nested_root}/* {target}/", shell=True)
+            # Remove the nested directory structure
+            first_dir = rootfs_path.strip("/").split("/")[0]
+            subprocess.run(f"rm -rf {os.path.join(target, first_dir)}", shell=True)
+
     # Common Post-Install Steps
     # Remove /usr/share/info/dir to avoid conflicts between packages
     subprocess.run(f"rm -f {install_dir}/usr/share/info/dir", shell=True)
@@ -574,19 +564,32 @@ Cflags: -I${{includedir}}
             f.write("# Load profile\n")
             f.write("[ -f /etc/profile ] && . /etc/profile\n")
             f.write("[ -f $HOME/.profile ] && . $HOME/.profile\n\n")
+            f.write("# Ensure a D-Bus session bus is running\n")
+            f.write("if [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then\n")
+            f.write("    if command -v dbus-run-session >/dev/null 2>&1; then\n")
+            f.write("        export DBUS_RUN_SESSION=\"dbus-run-session --\"\n")
+            f.write("    fi\n")
+            f.write("fi\n\n")
+            f.write("# Set XDG variables if not set\n")
+            f.write("export XDG_CURRENT_DESKTOP=XFCE\n")
+            f.write("export XDG_MENU_PREFIX=xfce-\n\n")
+            f.write("# Update D-Bus environment\n")
+            f.write("if [ -n \"$DBUS_RUN_SESSION\" ] || [ -n \"$DBUS_SESSION_BUS_ADDRESS\" ]; then\n")
+            f.write("    dbus-update-activation-environment --all >/dev/null 2>&1\n")
+            f.write("fi\n\n")
             f.write("# If no session is specified, use xfce as default\n")
             f.write("if [ -z \"$1\" ]; then\n")
-            f.write("    exec startxfce4\n")
+            f.write("    exec $DBUS_RUN_SESSION startxfce4\n")
             f.write("else\n")
             f.write("    case \"$1\" in\n")
             f.write("        xfce|xfce4|startxfce4|default)\n")
-            f.write("            exec startxfce4\n")
+            f.write("            exec $DBUS_RUN_SESSION startxfce4\n")
             f.write("            ;;\n")
             f.write("        *)\n")
             f.write("            if command -v \"$1\" >/dev/null 2>&1; then\n")
-            f.write("                exec \"$@\"\n")
+            f.write("                exec $DBUS_RUN_SESSION \"$@\"\n")
             f.write("            else\n")
-            f.write("                exec startxfce4\n")
+            f.write("                exec $DBUS_RUN_SESSION startxfce4\n")
             f.write("            fi\n")
             f.write("            ;;\n")
             f.write("    esac\n")

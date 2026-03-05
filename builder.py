@@ -5,6 +5,7 @@ import sys
 import time
 import json
 import shutil
+from datetime import datetime, timezone
 
 # Terminal Colors
 class Colors:
@@ -57,6 +58,7 @@ def print_status(msg):
 
 # Configuration
 ROOT_DIR = os.getcwd()
+VERSION_FILE = os.path.join(ROOT_DIR, "VERSION")
 BUILD_SYSTEM_DIR = os.path.join(ROOT_DIR, "build_system")
 PORTS_DIR = os.path.join(ROOT_DIR, "ports")
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
@@ -210,6 +212,21 @@ PACKAGES = [
     "geminios_complex" # gpkg, ping, installer, etc.
 ]
 
+def get_geminios_version():
+    """Generates auto-version according to README"""
+    base_version = "0.0.1-alpha"
+    if os.path.exists(VERSION_FILE):
+        with open(VERSION_FILE, "r") as f:
+            base_version = f.read().strip()
+    
+    # date-and-time in mm/dd/yyyy and h:m 24h-format, must convert to UTC+0 time!!!
+    # example: 0.0.1-alpha-01252026-1307
+    now = datetime.now(timezone.utc)
+    date_str = now.strftime("%m%d%Y")
+    time_str = now.strftime("%H%M")
+    
+    return f"{base_version}-{date_str}-{time_str}"
+
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
     """Runs a shell command and captures output to log"""
     # Use target environment only if requested
@@ -281,7 +298,7 @@ def clean_system():
             print_info(f"[*] Removing {d}...")
             subprocess.run(f"rm -rf {path}", shell=True, executable="/usr/bin/bash")
     
-    # Remove ISO
+    # Remove ISOs
     if os.path.exists("GeminiOS.iso"):
         os.remove("GeminiOS.iso")
     
@@ -377,40 +394,98 @@ def build_package(pkg_name, index, total, force=False, debug=False):
             print_warning("----------------------------")
         return False
 
+def copy_dev_environment():
+    """Copies host C/C++ development environment (headers and libraries) to rootfs"""
+    print_section("\n=== Installing C/C++ Development Environment ===")
+    
+    # 1. Resolve and Copy Headers
+    print_info("[*] Copying standard headers from host...")
+    
+    # Get include paths from host g++
+    res = subprocess.run("g++ -v -E -x c++ - < /dev/null 2>&1", shell=True, capture_output=True, text=True, executable="/usr/bin/bash")
+    include_paths = []
+    in_include_section = False
+    for line in res.stdout.splitlines():
+        if "#include <...> search starts here:" in line:
+            in_include_section = True
+            continue
+        if "End of search list." in line:
+            in_include_section = False
+            continue
+        if in_include_section:
+            path = line.strip()
+            if os.path.exists(path):
+                include_paths.append(path)
+
+    # Standard include locations too, just in case
+    include_paths.extend(["/usr/include", "/usr/include/x86_64-linux-gnu"])
+    
+    # Deduplicate while preserving order
+    seen = set()
+    include_paths = [x for x in include_paths if not (x in seen or seen.add(x))]
+
+    for path in include_paths:
+        dest = os.path.join(ROOT_DIR, "rootfs", path.lstrip("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        print_info(f"  Copying {path} -> {dest}")
+        subprocess.run(f"cp -an {path}/. {dest}/ 2>/dev/null || true", shell=True, executable="/usr/bin/bash")
+
+    # 2. Resolve and Copy Development Libraries (Static, Shared, and Objects)
+    print_info("[*] Copying C/C++ development libraries and objects from host...")
+    
+    lib_search_paths = [
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib64",
+        "/lib/x86_64-linux-gnu",
+        "/lib64"
+    ]
+    
+    # Dynamically find GCC lib dir
+    gcc_lib_file = subprocess.run("gcc -print-libgcc-file-name", shell=True, capture_output=True, text=True, executable="/usr/bin/bash").stdout.strip()
+    if gcc_lib_file:
+        lib_search_paths.append(os.path.dirname(gcc_lib_file))
+    
+    # Target patterns to ensure we have everything needed for development
+    target_patterns = [
+        "*.so*", "*.a", "*.o"
+    ]
+    
+    for lib_dir in lib_search_paths:
+        if not os.path.exists(lib_dir): continue
+        print_info(f"  Scanning {lib_dir} for libraries...")
+        for pattern in target_patterns:
+            find_cmd = f"find {lib_dir} -maxdepth 1 -name '{pattern}'"
+            found_items = subprocess.run(find_cmd, shell=True, capture_output=True, text=True, executable="/usr/bin/bash").stdout.splitlines()
+            for item_path in found_items:
+                item_name = os.path.basename(item_path)
+                
+                # Determine where it should go in rootfs
+                # We try to preserve the original path structure for development files
+                dest = os.path.join(ROOT_DIR, "rootfs", item_path.lstrip("/"))
+                
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                if not os.path.exists(dest):
+                    if os.path.islink(item_path):
+                         subprocess.run(f"cp -P {item_path} {dest}", shell=True, executable="/usr/bin/bash")
+                    else:
+                         # Use rsync or cp -a to preserve as much as possible
+                         subprocess.run(f"cp -a {item_path} {dest}", shell=True, executable="/usr/bin/bash")
+                
+    print_success("  ✓ Development environment installed.")
+
 def prepare_rootfs():
     print_section("\n=== Preparing Rootfs Structure ===")
     dirs = [
         "bin", "boot", "proc", "sys", "dev", "etc", "tmp", "mnt", "run", "sbin", "lib64",
         "var/repo", "var/log", "var/tmp",
-        "usr/bin", "usr/share", "usr/local", "usr/lib64",
+        "usr/bin", "usr/share", "usr/local", "usr/lib64", "usr/include",
         "bin/apps/system"
     ]
     for d in dirs:
         os.makedirs(os.path.join(ROOT_DIR, "rootfs", d), exist_ok=True)
 
-    # Copy Host libstdc++ and libgcc
-    print_info("[*] Copying host libstdc++ and libgcc...")
-    host_lib_paths = [
-        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
-        "/usr/lib64/libstdc++.so.6",
-        "/usr/lib64/libgcc_s.so.1",
-        "/lib64/libstdc++.so.6",
-        "/lib64/libgcc_s.so.1"
-    ]
-    
-    found_libs = {"libstdc++.so.6": False, "libgcc_s.so.1": False}
-    for lib_path in host_lib_paths:
-        lib_name = os.path.basename(lib_path)
-        if os.path.exists(lib_path) and not found_libs[lib_name]:
-            dest = os.path.join(ROOT_DIR, "rootfs/usr/lib64", lib_name)
-            shutil.copy2(lib_path, dest)
-            print_success(f"  ✓ Copied {lib_path} to {dest}")
-            found_libs[lib_name] = True
-            
-    for lib, found in found_libs.items():
-        if not found:
-            print_warning(f"  [WARNING] Could not find host {lib}!")
+    # Install Dev Environment
+    copy_dev_environment()
 
     # Standardize library paths
     # /lib -> lib64 and /usr/lib -> lib64
@@ -552,7 +627,37 @@ def finalize_rootfs():
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
         f.write("1")
 
-    # 5. Final Integrity Check
+    # 5. Versioning
+    version = get_geminios_version()
+    print_info(f"[*] Setting system version: {version}")
+    with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-version"), "w") as f:
+        f.write(version + "\n")
+    
+    with open(os.path.join(ROOT_DIR, "rootfs/etc/os-release"), "w") as f:
+        f.write(f'NAME="GeminiOS"\n')
+        f.write(f'VERSION="{version}"\n')
+        f.write(f'ID=geminios\n')
+        f.write(f'PRETTY_NAME="GeminiOS {version}"\n')
+        f.write(f'VERSION_ID="{version}"\n')
+
+    # 6. D-Bus Machine ID
+    print_info("[*] Generating D-Bus machine-id...")
+    machine_id_path = os.path.join(ROOT_DIR, "rootfs/etc/machine-id")
+    dbus_uuid_path = os.path.join(ROOT_DIR, "rootfs/var/lib/dbus/machine-id")
+    os.makedirs(os.path.dirname(dbus_uuid_path), exist_ok=True)
+    
+    if not os.path.exists(machine_id_path):
+        # Try using host dbus-uuidgen but directed to a temp file, or just use python
+        import uuid
+        m_id = uuid.uuid4().hex
+        with open(machine_id_path, "w") as f:
+            f.write(m_id + "\n")
+        # Link var/lib/dbus/machine-id to /etc/machine-id
+        if os.path.exists(dbus_uuid_path): os.remove(dbus_uuid_path)
+        os.symlink("/etc/machine-id", dbus_uuid_path)
+        print_success(f"  ✓ Generated machine-id: {m_id}")
+
+    # 7. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)
@@ -756,7 +861,7 @@ mount --move /run /new_root/run
 umount /mnt/cdrom
 
 # Switch root
-echo \"Switching to real root...\"
+echo "Switching to real root..."
 exec switch_root /new_root /bin/init
 """
     with open(os.path.join(work_dir, "init"), "w") as f:
@@ -789,8 +894,9 @@ def create_iso():
     if os.path.exists(sfs_path):
         os.remove(sfs_path)
         
-    # Using zstd for speed/compression balance
-    mksquashfs_cmd = f"mksquashfs rootfs {sfs_path} -comp zstd -noappend -wildcards -all-root -e staging"
+    # Using zstd with level 1 for maximum speed/compression balance during development
+    # Disabling xattrs also gives a bit of speedup
+    mksquashfs_cmd = f"mksquashfs rootfs {sfs_path} -comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root -e staging"
     if run_command(mksquashfs_cmd) != 0:
         print_error(" [FAILED] (mksquashfs)")
         return False
@@ -827,13 +933,20 @@ menuentry "GeminiOS Live" {
         f.write(grub_conf)
 
     # 5. Build ISO
-    print_info("[*] Building GeminiOS.iso...")
-    iso_cmd = "grub-mkrescue -o GeminiOS.iso isodir"
+    version = get_geminios_version()
+    iso_name = f"GeminiOS-{version}.iso"
+    print_info(f"[*] Building {iso_name}...")
+    iso_cmd = f"grub-mkrescue -o {iso_name} isodir"
     if run_command(iso_cmd) != 0:
         print_error(" [FAILED] (grub-mkrescue)")
         return False
 
-    print_success("[!] ISO built successfully: GeminiOS.iso")
+    # Create symlink for convenience
+    if os.path.lexists("GeminiOS.iso"):
+        os.remove("GeminiOS.iso")
+    os.symlink(iso_name, "GeminiOS.iso")
+
+    print_success(f"[!] ISO built successfully: {iso_name}")
     return True
 
 def main():
