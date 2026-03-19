@@ -54,6 +54,10 @@
         "usr/lib64/libssl.so.3",
         "usr/lib64/pkgconfig/openssl.pc"
     ],
+    "ca-certificates": [
+        "etc/ssl/certs/ca-certificates.crt",
+        "etc/ssl/cert.pem"
+    ],
     "zstd": [
         "usr/lib64/libzstd.so",
         "usr/lib64/pkgconfig/libzstd.pc"
@@ -479,6 +483,17 @@
         "bin/mkdir",
         "bin/cat",
         "bin/pwd"
+    ],
+    "curl": [
+        "usr/bin/curl",
+        "usr/bin/curl-config",
+        "usr/lib64/libcurl.so",
+        "usr/lib64/pkgconfig/libcurl.pc"
+    ],
+    "git": [
+        "usr/bin/git",
+        "usr/libexec/git-core/git-http-fetch",
+        "usr/libexec/git-core/git-remote-http"
     ],
     "tar": [
         "usr/bin/tar"

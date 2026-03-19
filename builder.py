@@ -5,6 +5,7 @@ import sys
 import time
 import json
 import shutil
+import glob
 from datetime import datetime, timezone
 
 # Terminal Colors
@@ -81,9 +82,11 @@ PACKAGES = [
     "libxcrypt",
     "zlib",
     "openssl",
+    "ca-certificates",
     "libffi",
     "ncurses",
     "expat",
+    "curl",
     "zstd",
     "pkg-config",
     "bison",
@@ -206,11 +209,42 @@ PACKAGES = [
     # Development Tools
     "binutils",
     "gcc",
+    "git",
     # GeminiOS Specifics
     "geminios_core", # init, signals, user_mgmt
     "geminios_pkgs", # ls, pwd, cat, etc.
     "geminios_complex" # gpkg, ping, installer, etc.
 ]
+
+PACKAGE_DEPENDENCIES = {
+    "ca-certificates": [],
+    "curl": ["zlib", "openssl", "ca-certificates"],
+    "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
+}
+
+def resolve_requested_packages(requested_packages):
+    """Resolve requested packages and their dependencies in build order."""
+    needed = set()
+    visiting = set()
+
+    def visit(pkg_name):
+        if pkg_name in needed:
+            return
+        if pkg_name in visiting:
+            raise ValueError(f"Circular dependency detected at '{pkg_name}'")
+        if pkg_name not in PACKAGES:
+            raise ValueError(f"Unknown package '{pkg_name}'")
+
+        visiting.add(pkg_name)
+        for dep_name in PACKAGE_DEPENDENCIES.get(pkg_name, []):
+            visit(dep_name)
+        visiting.remove(pkg_name)
+        needed.add(pkg_name)
+
+    for pkg_name in requested_packages:
+        visit(pkg_name)
+
+    return [pkg_name for pkg_name in PACKAGES if pkg_name in needed]
 
 def get_geminios_version():
     """Generates auto-version according to README"""
@@ -428,7 +462,11 @@ def copy_dev_environment():
         dest = os.path.join(ROOT_DIR, "rootfs", path.lstrip("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         print_info(f"  Copying {path} -> {dest}")
-        subprocess.run(f"cp -an {path}/. {dest}/ 2>/dev/null || true", shell=True, executable="/usr/bin/bash")
+        subprocess.run(
+            f"cp -a --no-preserve=ownership -n {path}/. {dest}/ 2>/dev/null || true",
+            shell=True,
+            executable="/usr/bin/bash",
+        )
 
     # 2. Resolve and Copy Development Libraries (Static, Shared, and Objects)
     print_info("[*] Copying C/C++ development libraries and objects from host...")
@@ -468,10 +506,42 @@ def copy_dev_environment():
                     if os.path.islink(item_path):
                          subprocess.run(f"cp -P {item_path} {dest}", shell=True, executable="/usr/bin/bash")
                     else:
-                         # Use rsync or cp -a to preserve as much as possible
-                         subprocess.run(f"cp -a {item_path} {dest}", shell=True, executable="/usr/bin/bash")
+                         subprocess.run(
+                             f"cp -a --no-preserve=ownership {item_path} {dest}",
+                             shell=True,
+                             executable="/usr/bin/bash",
+                         )
                 
     print_success("  ✓ Development environment installed.")
+
+def normalize_dev_tree(path):
+    """Recreate an existing dev tree as a writable user-owned copy if needed."""
+    if not os.path.exists(path) or os.access(path, os.W_OK):
+        return
+
+    backup_path = f"{path}.root-owned-backup"
+    suffix = 1
+    while os.path.exists(backup_path):
+        backup_path = f"{path}.root-owned-backup-{suffix}"
+        suffix += 1
+
+    print_warning(f"[*] Normalizing unwritable dev tree: {path}")
+    os.rename(path, backup_path)
+    os.makedirs(path, exist_ok=True)
+    shutil.copytree(backup_path, path, dirs_exist_ok=True, symlinks=True)
+
+def normalize_dev_environment():
+    """Fix previously copied host dev trees that preserved root ownership."""
+    candidate_paths = [
+        os.path.join(ROOT_DIR, "rootfs", "usr", "include"),
+        os.path.join(ROOT_DIR, "rootfs", "usr", "local", "include"),
+    ]
+    candidate_paths.extend(
+        glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib64", "gcc", "*", "*", "include"))
+    )
+
+    for candidate in candidate_paths:
+        normalize_dev_tree(candidate)
 
 def prepare_rootfs():
     print_section("\n=== Preparing Rootfs Structure ===")
@@ -483,6 +553,8 @@ def prepare_rootfs():
     ]
     for d in dirs:
         os.makedirs(os.path.join(ROOT_DIR, "rootfs", d), exist_ok=True)
+
+    normalize_dev_environment()
 
     # Install Dev Environment
     copy_dev_environment()
@@ -501,7 +573,11 @@ def prepare_rootfs():
                 for item in os.listdir(full_link_path):
                     s = os.path.join(full_link_path, item)
                     d = os.path.join(ROOT_DIR, "rootfs", "lib64", item)
-                    subprocess.run(f"cp -an {s} {d}", shell=True, executable="/usr/bin/bash")
+                    subprocess.run(
+                        f"cp -a --no-preserve=ownership -n {s} {d}",
+                        shell=True,
+                        executable="/usr/bin/bash",
+                    )
                 subprocess.run(f"rm -rf {full_link_path}", shell=True, executable="/usr/bin/bash")
             os.symlink(target, full_link_path)
             print_info(f"[*] Linked {link_path} to {target}")
@@ -662,6 +738,49 @@ def finalize_rootfs():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)
 
+def get_elf_needed(binary_path):
+    """Return DT_NEEDED entries for an ELF binary/library."""
+    result = subprocess.run(
+        ["readelf", "-d", binary_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    needed = []
+    for line in result.stdout.splitlines():
+        if "(NEEDED)" not in line:
+            continue
+        start = line.find("[")
+        end = line.find("]", start + 1)
+        if start != -1 and end != -1:
+            needed.append(line[start + 1:end])
+    return needed
+
+def get_elf_interpreter(binary_path):
+    """Return the PT_INTERP path for an ELF binary, if present."""
+    result = subprocess.run(
+        ["readelf", "-l", binary_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in result.stdout.splitlines():
+        if "Requesting program interpreter:" not in line:
+            continue
+        start = line.find("[")
+        end = line.find("]", start + 1)
+        if start != -1 and end != -1:
+            return line[start + 1:end]
+    return None
+
+def find_rootfs_library(rootfs_dir, lib_filename):
+    """Find a library within the target rootfs."""
+    for search_path in ["lib64", "usr/lib64", "lib", "usr/lib"]:
+        candidate = os.path.join(rootfs_dir, search_path, lib_filename)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
 def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
     """Copies a binary and all its shared library dependencies to dest_dir"""
     if not os.path.exists(binary_path):
@@ -673,56 +792,50 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
         dest_bin = os.path.join(dest_dir, os.path.basename(binary_path))
         shutil.copy2(binary_path, dest_bin)
         os.chmod(dest_bin, 0o755)
-    # Resolve dependencies
-    result = subprocess.run(f"ldd {binary_path}", shell=True, capture_output=True, text=True, executable="/usr/bin/bash")
-    interpreter_names = ["ld-linux-x86-64.so.2"]
-    for line in result.stdout.splitlines():
-        lib_path = ""
-        if "=>" in line:
-            parts = line.split("=>")
-            lib_path_info = parts[1].strip()
-            if "(" in lib_path_info:
-                lib_path = lib_path_info.split("(")[0].strip()
-            else:
-                lib_path = lib_path_info
-        elif line.strip().startswith("/"):
-            lib_path_info = line.strip()
-            if "(" in lib_path_info:
-                lib_path = lib_path_info.split("(")[0].strip()
-            else:
-                lib_path = lib_path_info
-        if not lib_path: continue
-        lib_filename = os.path.basename(lib_path)
-    
-        # Search in common lib locations in rootfs
-        found = False
-        for search_path in ["lib64", "usr/lib64", "lib", "usr/lib"]:
-            candidate = os.path.join(rootfs_dir, search_path, lib_filename)
-            if os.path.exists(candidate):
-                # Always copy to /lib64 in initramfs work_dir
-                dest_lib_dir = os.path.join(dest_dir, "lib64")
-                os.makedirs(dest_lib_dir, exist_ok=True)
-                real_lib = os.path.realpath(candidate)
-                shutil.copy2(real_lib, os.path.join(dest_lib_dir, os.path.basename(real_lib)))
-                if real_lib != candidate:
-                    link_name = os.path.join(dest_lib_dir, lib_filename)
-                    if os.path.exists(link_name): os.remove(link_name)
-                    os.symlink(os.path.basename(real_lib), link_name)
-                found = True
-                break
 
-        if not found and "vdso" not in line:
-            print_warning(f"WARNING: Could not find library {lib_filename} in rootfs for {binary_path}")
-    # Extra check for interpreter
-    for interp in interpreter_names:
-        if not os.path.exists(os.path.join(dest_dir, "lib64", interp)):
-             for search_path in ["lib64", "usr/lib64", "lib", "usr/lib"]:
-                 src_interp = os.path.join(rootfs_dir, search_path, interp)
-                 if os.path.exists(src_interp):
-                     dest_lib_dir = os.path.join(dest_dir, "lib64")
-                     os.makedirs(dest_lib_dir, exist_ok=True)
-                     shutil.copy2(src_interp, os.path.join(dest_lib_dir, interp))
-                     break
+    dest_lib_dir = os.path.join(dest_dir, "lib64")
+    os.makedirs(dest_lib_dir, exist_ok=True)
+
+    interpreter_name = "ld-linux-x86-64.so.2"
+    interp_path = get_elf_interpreter(binary_path)
+    if interp_path:
+        interpreter_name = os.path.basename(interp_path)
+
+    to_process = [binary_path]
+    processed = set()
+    copied = set()
+
+    while to_process:
+        current = to_process.pop()
+        if current in processed:
+            continue
+        processed.add(current)
+
+        for lib_filename in get_elf_needed(current):
+            candidate = find_rootfs_library(rootfs_dir, lib_filename)
+            if not candidate:
+                print_warning(f"WARNING: Could not find library {lib_filename} in rootfs for {binary_path}")
+                continue
+
+            real_lib = os.path.realpath(candidate)
+            real_basename = os.path.basename(real_lib)
+            dest_real = os.path.join(dest_lib_dir, real_basename)
+            if real_basename not in copied:
+                shutil.copy2(real_lib, dest_real)
+                copied.add(real_basename)
+                to_process.append(real_lib)
+
+            if candidate != real_lib:
+                link_name = os.path.join(dest_lib_dir, lib_filename)
+                if os.path.lexists(link_name):
+                    os.remove(link_name)
+                os.symlink(real_basename, link_name)
+
+    if not os.path.exists(os.path.join(dest_lib_dir, interpreter_name)):
+        src_interp = find_rootfs_library(rootfs_dir, interpreter_name)
+        if src_interp:
+            shutil.copy2(src_interp, os.path.join(dest_lib_dir, interpreter_name))
+
     return True
 
 def create_minimal_initramfs():
@@ -975,31 +1088,43 @@ def main():
     
     force_rebuild = "--force" in sys.argv
     debug_mode = "--debug" in sys.argv
+    forced_packages = set()
     
     # Filter out flags to get requested packages
     requested_packages = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
     
     packages_to_build = []
     if requested_packages:
-        # Build only requested packages that exist in the PACKAGES list
+        valid_requested_packages = []
         for pkg in requested_packages:
             if pkg in PACKAGES:
-                packages_to_build.append(pkg)
+                valid_requested_packages.append(pkg)
             else:
                 print_warning(f"WARNING: Package '{pkg}' not found in PACKAGES list.")
-        
-        if not packages_to_build:
+
+        if not valid_requested_packages:
             print_error("ERROR: No valid packages specified to build.")
+            sys.exit(1)
+
+        try:
+            packages_to_build = resolve_requested_packages(valid_requested_packages)
+            if force_rebuild:
+                forced_packages = set(valid_requested_packages)
+        except ValueError as exc:
+            print_error(f"ERROR: {exc}")
             sys.exit(1)
     else:
         # Build everything
         packages_to_build = PACKAGES
+        if force_rebuild:
+            forced_packages = set(PACKAGES)
 
     print_section("=== GeminiOS Ports Builder ===")
     
     total_pkgs = len(packages_to_build)
     for i, pkg in enumerate(packages_to_build, 1):
-        if not build_package(pkg, i, total_pkgs, force=force_rebuild, debug=debug_mode):
+        force_pkg = pkg in forced_packages
+        if not build_package(pkg, i, total_pkgs, force=force_pkg, debug=debug_mode):
             print_error(f"\nFATAL: Build failed at package '{pkg}'")
             sys.exit(1)
             
