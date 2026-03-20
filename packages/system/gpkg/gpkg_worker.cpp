@@ -39,6 +39,24 @@ int run_command(const std::string& cmd) {
     return system(cmd.c_str());
 }
 
+void refresh_linker_cache_if_available() {
+    if (access("/sbin/ldconfig", X_OK) == 0) {
+        run_command("/sbin/ldconfig");
+        return;
+    }
+    if (access("/usr/sbin/ldconfig", X_OK) == 0) {
+        run_command("/usr/sbin/ldconfig");
+        return;
+    }
+    if (access("/bin/ldconfig", X_OK) == 0) {
+        run_command("/bin/ldconfig");
+        return;
+    }
+    if (access("/usr/bin/ldconfig", X_OK) == 0) {
+        run_command("/usr/bin/ldconfig");
+    }
+}
+
 bool mkdir_p(const std::string& path) {
     std::string cmd = "mkdir -p " + path;
     return run_command(cmd) == 0;
@@ -247,6 +265,7 @@ bool action_remove_safe(const std::string& pkg_name) {
 
     // Cleanup metadata
     run_command("rm -f " + get_info_dir() + pkg_name + ".*");
+    refresh_linker_cache_if_available();
     
     std::cout << "✓ Removed " << pkg_name << std::endl;
     return true;
@@ -505,6 +524,8 @@ bool action_install(const std::string& pkg_file) {
             }
         }
     }
+
+    refresh_linker_cache_if_available();
 
     std::cout << "✓ Installed " << pkg_name << " (" << new_version << ")" << std::endl;
     
