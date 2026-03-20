@@ -20,6 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
+    DEFAULT_SYSTEM_PROVIDES_FILE,
     choose_first_matching_stanza,
     ensure_directory,
     hash_file,
@@ -27,6 +28,7 @@ from common import (  # noqa: E402
     matches_any,
     normalize_dependency_field,
     parse_control_stanzas,
+    read_pattern_file,
     read_json,
     read_seed_packages,
     run,
@@ -48,6 +50,7 @@ DEFAULT_CONFIG = {
     "REPORT_FILE": "/var/lib/gpkg-publisher/state/last-run.json",
     "SEED_FILE": "/etc/gpkg-publisher/packages.txt",
     "OVERRIDES_FILE": "/etc/gpkg-publisher/overrides.json",
+    "SYSTEM_PROVIDES_FILE": str(DEFAULT_SYSTEM_PROVIDES_FILE),
     "SECTION_ALLOWLIST": "",
     "SECTION_BLOCKLIST": "debug,doc,devel,kernel,libdevel,metapackages,oldlibs",
     "PRIORITY_BLOCKLIST": "required,important",
@@ -81,12 +84,14 @@ class AptResolver:
         apt_arch: str,
         overrides: dict[str, Any],
         blocklist_patterns: list[str],
+        system_provided_patterns: list[str],
         allow_essential: bool,
         verbose: bool,
     ) -> None:
         self.apt_arch = apt_arch
         self.overrides = overrides
         self.blocklist_patterns = blocklist_patterns
+        self.system_provided_patterns = system_provided_patterns
         self.allow_essential = allow_essential
         self.verbose = verbose
         self.package_cache: dict[str, ResolvedPackage | None] = {}
@@ -109,6 +114,8 @@ class AptResolver:
         if package_name in self.failures:
             return False
         if package_name in self.active:
+            return True
+        if matches_any(package_name, self.system_provided_patterns):
             return True
         if matches_any(package_name, self.blocklist_patterns):
             self.failures[package_name] = "blocked by pattern"
@@ -235,6 +242,7 @@ def discover_all_packages(
     *,
     apt_arch: str,
     blocklist_patterns: list[str],
+    system_provided_patterns: list[str],
     allow_essential: bool,
     section_allowlist: list[str],
     section_blocklist: list[str],
@@ -248,6 +256,8 @@ def discover_all_packages(
     for fields in parse_control_stanzas(dumpavail):
         package_name = fields.get("Package", "").strip()
         if not package_name or package_name in seen:
+            continue
+        if matches_any(package_name, system_provided_patterns):
             continue
         if matches_any(package_name, blocklist_patterns):
             continue
@@ -336,6 +346,7 @@ def build_fingerprint(
     *,
     deb_sha256: str,
     overrides: dict[str, Any],
+    system_provided_patterns: list[str],
     zstd_level: int,
     include_maintainer_scripts: bool,
 ) -> str:
@@ -349,7 +360,7 @@ def build_fingerprint(
         "package_override": package_override,
         "dependency_choices": overrides.get("dependency_choices", {}),
         "skip_dependency_patterns": overrides.get("skip_dependency_patterns", []),
-        "provided_by_system_patterns": overrides.get("provided_by_system_patterns", []),
+        "provided_by_system_patterns": system_provided_patterns,
         "skip_packages": overrides.get("skip_packages", []),
         "skip_patterns": overrides.get("skip_patterns", []),
     }
@@ -426,6 +437,11 @@ def main() -> int:
 
     config = load_config(Path(args.config))
     overrides = read_json(Path(config["OVERRIDES_FILE"]), {}) if config["OVERRIDES_FILE"] else {}
+    system_provides_file = Path(config["SYSTEM_PROVIDES_FILE"]).expanduser()
+    system_provided_patterns = read_pattern_file(system_provides_file)
+    extra_system_patterns = overrides.get("provided_by_system_patterns", [])
+    system_provided_patterns = list(dict.fromkeys(system_provided_patterns + extra_system_patterns))
+    overrides["provided_by_system_patterns"] = system_provided_patterns
     blocklist_patterns = split_patterns(config["BLOCKLIST_PATTERNS"])
 
     repo_root = Path(config["REPO_ROOT"]).expanduser()
@@ -458,6 +474,7 @@ def main() -> int:
         seeds = discover_all_packages(
             apt_arch=config["APT_ARCH"],
             blocklist_patterns=blocklist_patterns,
+            system_provided_patterns=system_provided_patterns,
             allow_essential=allow_essential,
             section_allowlist=section_allowlist,
             section_blocklist=section_blocklist,
@@ -479,6 +496,7 @@ def main() -> int:
         apt_arch=config["APT_ARCH"],
         overrides=overrides,
         blocklist_patterns=blocklist_patterns,
+        system_provided_patterns=system_provided_patterns,
         allow_essential=allow_essential,
         verbose=args.verbose,
     )
@@ -511,6 +529,7 @@ def main() -> int:
                 package,
                 deb_sha256=deb_sha256,
                 overrides=overrides,
+                system_provided_patterns=system_provided_patterns,
                 zstd_level=zstd_level,
                 include_maintainer_scripts=include_maintainer_scripts,
             )

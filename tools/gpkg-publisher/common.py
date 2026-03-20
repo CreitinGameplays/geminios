@@ -13,6 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SYSTEM_PROVIDES_FILE = REPO_ROOT / "build_system" / "gpkg_system_provides.txt"
 
 ARCH_MAP = {
     "all": "x86_64",
@@ -364,6 +366,29 @@ def read_seed_packages(path: Path) -> list[str]:
             continue
         packages.append(line)
     return packages
+
+
+def normalize_system_provide_entry(raw_value: str) -> str:
+    value = raw_value.strip()
+    if not value or value.startswith("#"):
+        return ""
+    if any(char in value for char in "*?[]"):
+        return value
+    value = value.split("[", 1)[0].strip()
+    value = value.split("<", 1)[0].strip()
+    value = value.split("(", 1)[0].strip()
+    return value
+
+
+def read_pattern_file(path: Path) -> list[str]:
+    patterns: list[str] = []
+    if not path.exists():
+        return patterns
+    for raw_line in path.read_text().splitlines():
+        normalized = normalize_system_provide_entry(raw_line)
+        if normalized:
+            patterns.append(normalized)
+    return unique_items(patterns)
 
 
 def build_gpkg(

@@ -128,6 +128,7 @@ TEMP_DIR=/var/lib/gpkg-publisher/tmp
 STATE_FILE=/var/lib/gpkg-publisher/state/state.json
 REPORT_FILE=/var/lib/gpkg-publisher/state/last-run.json
 OVERRIDES_FILE=/etc/gpkg-publisher/overrides.json
+SYSTEM_PROVIDES_FILE=/opt/geminios/build_system/gpkg_system_provides.txt
 RCLONE_DEST=r2:your-bucket/geminios
 RCLONE_CONFIG=/etc/gpkg-publisher/rclone.conf
 SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
@@ -314,6 +315,8 @@ Supported top-level keys:
 - `dependency_choices`: choose one side of a Debian alternative dependency.
 - `package_overrides`: package-specific behavior.
 
+The publisher already merges the base defaults from `SYSTEM_PROVIDES_FILE` into `provided_by_system_patterns`, so you usually only need to add site-specific extras in `overrides.json`.
+
 Supported `package_overrides.<name>` keys:
 
 - `skip`
@@ -340,7 +343,7 @@ Example dependency choice:
 }
 ```
 
-Example base-system dependency suppression:
+Example extra base-system dependency suppression:
 
 ```json
 {
