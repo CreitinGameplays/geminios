@@ -427,6 +427,28 @@ sudo systemctl start gpkg-publisher.service
 sudo journalctl -u gpkg-publisher.service -f
 ```
 
+## Remote Cleanup
+
+If older publishes left behind `%3a`-encoded object names or remote `.gpkg.build.json` sidecars, clean them with:
+
+```bash
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/cleanup_remote.py \
+  --config /etc/gpkg-publisher/config.env \
+  --dry-run
+```
+
+If the dry run looks correct, run it again without `--dry-run`:
+
+```bash
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/cleanup_remote.py \
+  --config /etc/gpkg-publisher/config.env
+```
+
+By default it removes:
+
+- remote `*.gpkg.build.json` sidecars
+- legacy remote object names that still contain `%3a`
+
 ## Common Problems
 
 ### `RCLONE_CONFIG ... permission denied`
