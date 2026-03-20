@@ -106,6 +106,8 @@ PACKAGES = [
     "gettext",
     "perl",
     "texinfo",
+    "linux-pam",
+    "libcap",
     "util-macros",
     "elfutils",
     "pcre2",
@@ -163,6 +165,7 @@ PACKAGES = [
     "font-util",
     "system-fonts",
     "eudev",
+    "elogind",
     # Wayland Foundation
     "wayland-protocols",
     "wayland",
@@ -228,6 +231,8 @@ PACKAGE_DEPENDENCIES = {
     "ca-certificates": [],
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
+    "linux-pam": ["libxcrypt", "meson", "ninja", "pkg-config"],
+    "elogind": ["dbus", "eudev", "linux-pam", "libcap", "gperf", "meson", "ninja", "pkg-config"],
     "wayland-protocols": ["python", "meson", "ninja", "pkg-config"],
     "wayland": ["expat", "libffi", "pkg-config", "meson", "ninja", "wayland-protocols"],
     "libxkbcommon": [
@@ -258,6 +263,7 @@ PACKAGE_DEPENDENCIES = {
         "hicolor-icon-theme",
         "adwaita-icon-theme",
     ],
+    "geminios_core": ["dbus", "eudev", "linux-pam", "elogind"],
 }
 
 def resolve_requested_packages(requested_packages):
@@ -354,11 +360,6 @@ def is_built(pkg_name):
                 missing_artifacts.append(artifact)
         
         if not missing_artifacts:
-            if pkg_name == "geminios_core":
-                login_path = os.path.join(ROOT_DIR, "rootfs", "bin", "login")
-                login_needed = set(get_elf_needed(login_path))
-                if "libpam.so.0" in login_needed or "libpam_misc.so.0" in login_needed:
-                    return False
             return True
         else:
             # If manifest exists but files are missing, it's definitely NOT built correctly.
@@ -408,6 +409,7 @@ def build_ginit(force=False, debug=False):
         ret = run_command(
             "make clean",
             cwd=ginit_dir,
+            use_target_env=True,
             debug=debug,
         )
         if ret != 0:
@@ -419,6 +421,7 @@ def build_ginit(force=False, debug=False):
     ret = run_command(
         "make",
         cwd=ginit_dir,
+        use_target_env=True,
         debug=debug,
     )
     if ret != 0:
@@ -667,6 +670,7 @@ def verify_rootfs_integrity():
         "usr/share/glib-2.0/schemas/gschemas.compiled",
         "usr/share/fonts/TTF/Inter-Regular.otf",
         "usr/lib/ginit/services/udevd.gservice",
+        "usr/lib/ginit/services/elogind.gservice",
         "usr/lib/ginit/services/network.gservice"
     ]
     
@@ -681,13 +685,17 @@ def verify_rootfs_integrity():
         print_error("FATAL: Rootfs integrity check failed. Some critical files are missing.")
         return False
 
-    login_path = os.path.join(ROOT_DIR, "rootfs", "bin", "login")
-    login_needed = set(get_elf_needed(login_path))
-    unexpected_login_libs = {"libpam.so.0", "libpam_misc.so.0"} & login_needed
-    if unexpected_login_libs:
-        libs = ", ".join(sorted(unexpected_login_libs))
-        print_error(f"  [FAILED] GeminiOS login depends on unexpected PAM libraries: {libs}")
-        return False
+    required_runtime_libs = [
+        "usr/lib64/libpam.so.0",
+        "usr/lib64/libpam_misc.so.0",
+        "usr/lib64/libelogind.so.0",
+        "usr/lib64/libsystemd.so.0",
+    ]
+    for rel_path in required_runtime_libs:
+        path = os.path.join(ROOT_DIR, "rootfs", rel_path)
+        if not os.path.exists(path):
+            print_error(f"  [MISSING] {rel_path}")
+            return False
 
     # Verify Python functionality
     print_info("[*] Verifying Python runtime...")

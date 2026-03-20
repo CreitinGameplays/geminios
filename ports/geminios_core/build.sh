@@ -40,12 +40,16 @@ cdrom:x:24:
 sudo:x:27:root
 audio:x:29:
 video:x:44:
+power:x:98:
+storage:x:99:
 users:x:100:
 input:x:101:
 render:x:102:
 sgx:x:103:
 tape:x:26:
 kvm:x:78:
+systemd-journal:x:190:
+adm:x:191:
 messagebus:x:18:
 EOF
 
@@ -89,32 +93,118 @@ cat > "$ROOTFS/root/.bashrc" <<EOF
 export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
 EOF
 
-mkdir -p "$ROOTFS/etc/pam.d"
+mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
 
-# Common PAM configuration
+cat > "$ROOTFS/etc/environment" <<EOF
+PATH=/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+LANG=C.UTF-8
+EOF
+
+cat > "$ROOTFS/etc/security/limits.conf" <<EOF
+# GeminiOS PAM limits defaults
+*               soft    nofile          1024
+*               hard    nofile          1048576
+root            soft    nofile          1024
+root            hard    nofile          1048576
+EOF
+
+cat > "$ROOTFS/etc/pam.d/system-auth" <<EOF
+auth        required      pam_unix.so
+EOF
+
+cat > "$ROOTFS/etc/pam.d/system-account" <<EOF
+account     required      pam_unix.so
+EOF
+
+cat > "$ROOTFS/etc/pam.d/system-session" <<EOF
+session     required      pam_env.so readenv=1
+session     required      pam_limits.so
+session     required      pam_unix.so
+session     optional      pam_loginuid.so
+session     optional      pam_keyinit.so force revoke
+session     optional      pam_elogind.so
+EOF
+
+cat > "$ROOTFS/etc/pam.d/system-password" <<EOF
+password    required      pam_unix.so yescrypt shadow try_first_pass
+EOF
+
 cat > "$ROOTFS/etc/pam.d/common-auth" <<EOF
-auth    required    pam_unix.so nullok
+auth        include       system-auth
 EOF
 
 cat > "$ROOTFS/etc/pam.d/common-account" <<EOF
-account required    pam_unix.so
+account     include       system-account
 EOF
 
 cat > "$ROOTFS/etc/pam.d/common-session" <<EOF
-session required    pam_unix.so
+session     include       system-session
 EOF
 
 cat > "$ROOTFS/etc/pam.d/common-password" <<EOF
-password required   pam_unix.so nullok md5 shadow
+password    include       system-password
 EOF
 
-# LightDM PAM configuration
+cat > "$ROOTFS/etc/pam.d/login" <<EOF
+auth        include       system-auth
+account     include       system-account
+password    include       system-password
+session     include       system-session
+session     optional      pam_lastlog.so silent
+EOF
+
+cat > "$ROOTFS/etc/pam.d/login-autologin" <<EOF
+auth        sufficient    pam_permit.so
+account     include       system-account
+session     include       system-session
+password    include       system-password
+EOF
+
 cat > "$ROOTFS/etc/pam.d/lightdm" <<EOF
-#%PAM-1.0
-auth    include common-auth
-account include common-account
-password include common-password
-session include common-session
+auth        include       system-auth
+account     include       system-account
+password    include       system-password
+session     include       system-session
+EOF
+
+cat > "$ROOTFS/etc/pam.d/lightdm-autologin" <<EOF
+auth        sufficient    pam_permit.so
+account     include       system-account
+session     include       system-session
+EOF
+
+cat > "$ROOTFS/etc/pam.d/lightdm-greeter" <<EOF
+auth        sufficient    pam_permit.so
+account     include       system-account
+session     include       system-session
+EOF
+
+cat > "$ROOTFS/etc/pam.d/elogind-user" <<EOF
+account     include       system-account
+session     required      pam_env.so
+session     required      pam_limits.so
+session     required      pam_unix.so
+session     optional      pam_loginuid.so
+session     optional      pam_keyinit.so force revoke
+session     optional      pam_elogind.so
+auth        required      pam_deny.so
+password    required      pam_deny.so
+EOF
+
+cat > "$ROOTFS/etc/pam.d/other" <<EOF
+auth        required      pam_warn.so
+auth        required      pam_deny.so
+account     required      pam_warn.so
+account     required      pam_deny.so
+password    required      pam_warn.so
+password    required      pam_deny.so
+session     required      pam_warn.so
+session     required      pam_deny.so
+EOF
+
+cat > "$ROOTFS/etc/elogind/logind.conf.d/10-geminios.conf" <<EOF
+[Login]
+KillUserProcesses=no
 EOF
 
 # Merge LightDM & PAM from staging (Comprehensive Merge)
@@ -148,6 +238,20 @@ cat > "$ROOTFS/etc/ld.so.conf" <<EOF
 include /etc/ld.so.conf.d/*.conf
 EOF
 mkdir -p "$ROOTFS/etc/ld.so.conf.d"
+
+mkdir -p "$ROOTFS/usr/libexec/geminios"
+cat > "$ROOTFS/usr/libexec/geminios/elogind-launch" <<'EOF'
+#!/bin/sh
+for candidate in /usr/lib/elogind/elogind /usr/libexec/elogind/elogind /usr/lib64/elogind/elogind; do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+
+echo "E: elogind daemon not found in expected locations." >&2
+exit 1
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/elogind-launch"
 
 # Compatibility shim for Debian desktop packages linked against GTK Wayland
 # helpers when GeminiOS is still running an X11 session stack.
@@ -193,6 +297,8 @@ chmod 755 "$ROOTFS/bin/startxfce4"
 # Prepare runtime/session paths used by Wayland-capable applications.
 mkdir -p "$ROOTFS/run/user"
 chmod 755 "$ROOTFS/run/user"
+mkdir -p "$ROOTFS/run/systemd" "$ROOTFS/run/systemd/inhibit" "$ROOTFS/run/systemd/seats"
+mkdir -p "$ROOTFS/run/systemd/sessions" "$ROOTFS/run/systemd/users" "$ROOTFS/var/lib/elogind"
 mkdir -p "$ROOTFS/usr/share/wayland-sessions"
 
 # Fix /var/run -> /run

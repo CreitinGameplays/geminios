@@ -27,3 +27,14 @@ sed
 sysvinit-utils
 x11-common
 x-terminal-emulator
+libpam0g
+libpam-modules
+libpam-modules-bin
+libpam-runtime
+libpam-elogind
+elogind
+logind
+libelogind0
+libsystemd0
+libcap2
+libcap2-bin

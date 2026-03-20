@@ -14,6 +14,20 @@
     "libxcrypt": [
         "lib64/libcrypt.so.1"
     ],
+    "linux-pam": [
+        "usr/lib64/libpam.so.0",
+        "usr/lib64/libpam_misc.so.0",
+        "usr/lib64/security/pam_unix.so",
+        "usr/lib64/security/pam_env.so",
+        "usr/lib64/security/pam_limits.so",
+        "usr/lib64/security/pam_loginuid.so",
+        "usr/sbin/unix_chkpwd"
+    ],
+    "libcap": [
+        "usr/lib64/libcap.so",
+        "usr/include/sys/capability.h",
+        "usr/bin/getcap"
+    ],
     "python": [
         "usr/bin/python3.11",
         "usr/include/python3.11/Python.h",
@@ -313,6 +327,15 @@
         "usr/lib64/libudev.so",
         "usr/lib64/pkgconfig/libudev.pc"
     ],
+    "elogind": [
+        "usr/bin/loginctl",
+        "usr/lib64/libelogind.so",
+        "usr/lib64/libsystemd.so.0",
+        "usr/lib64/pkgconfig/libelogind.pc",
+        "usr/lib64/pkgconfig/libsystemd.pc",
+        "usr/include/systemd",
+        "etc/elogind/logind.conf"
+    ],
     "wayland-protocols": [
         "usr/share/wayland-protocols",
         "usr/share/pkgconfig/wayland-protocols.pc"
@@ -478,6 +501,7 @@
         "bin/login",
         "sbin/getty",
         "usr/lib/ginit/services/dbus.gservice",
+        "usr/lib/ginit/services/elogind.gservice",
         "usr/lib/ginit/services/udevd.gservice",
         "usr/lib/ginit/services/udev-trigger.gservice",
         "usr/lib/ginit/services/udev-settle.gservice",

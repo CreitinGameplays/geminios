@@ -39,8 +39,8 @@ make install DESTDIR="$ROOTFS"
 # GeminiOS ships its own login implementation from ginit.
 rm -f "$ROOTFS/bin/login"
 
-# GeminiOS ships its own privilege/user-management tools and does not provide
-# native PAM yet, so remove PAM-bound util-linux account tools as a safeguard.
+# GeminiOS ships its own login/getty flow from ginit, so keep util-linux
+# account-management frontends out of the image for now.
 rm -f "$ROOTFS/bin/su" \
       "$ROOTFS/sbin/runuser" \
       "$ROOTFS/usr/bin/chfn" \
