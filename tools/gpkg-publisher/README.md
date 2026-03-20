@@ -15,6 +15,7 @@ It is designed to scale repository size quickly without turning the VPS into a s
 ## What This Tool Does
 
 - Uses the host APT metadata to resolve package closures.
+- Can discover packages automatically from the local APT cache instead of relying only on a hand-written seed list.
 - Reuses Debian binary payloads instead of compiling from source.
 - Converts each `.deb` into a `.gpkg` that matches the current GeminiOS v2 layout.
 - Writes a repo tree that `gpkg` can consume at `<base-url>/x86_64/Packages.json.zst`.
@@ -109,7 +110,7 @@ r2:your-bucket/geminios/x86_64/pool/...
 ## Initial Setup
 
 1. Copy `config.env.example` to `/etc/gpkg-publisher/config.env`.
-2. Copy `packages.txt.example` to `/etc/gpkg-publisher/packages.txt` and edit it.
+2. Copy `packages.txt.example` to `/etc/gpkg-publisher/packages.txt` if you want seed mode.
 3. Copy `overrides.example.json` to `/etc/gpkg-publisher/overrides.json` and trim it to what you need.
 4. Create the working directories:
 
@@ -138,11 +139,57 @@ This prints:
 
 Fix failures in `overrides.json` or reduce the seed list until the result is acceptable.
 
+## Automatic Full Discovery Mode
+
+If you want the VPS to pull package names automatically instead of maintaining `packages.txt`, switch the config to:
+
+```text
+DISCOVERY_MODE=all
+SECTION_ALLOWLIST=
+SECTION_BLOCKLIST=debug,doc,devel,kernel,libdevel,metapackages,oldlibs
+PRIORITY_BLOCKLIST=required,important
+PACKAGE_LIMIT=0
+```
+
+What that does:
+
+- `DISCOVERY_MODE=all` reads package names from `apt-cache dumpavail`.
+- `SECTION_ALLOWLIST` lets you restrict discovery to a subset like `utils,net,python,xfce`.
+- `SECTION_BLOCKLIST` removes noisy or risky sections.
+- `PRIORITY_BLOCKLIST` keeps the importer away from core host packages by default.
+- `PACKAGE_LIMIT` is useful for controlled ramp-up. Set `200` first, then grow.
+
+The safest way to start is not literally "everything". Start with a broad but bounded set:
+
+```text
+DISCOVERY_MODE=all
+SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
+PACKAGE_LIMIT=500
+```
+
+Then run:
+
+```bash
+python3 tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env \
+  --dry-run
+```
+
+When that looks sane, remove the limit or raise it gradually.
+
 ## First Real Run
 
 ```bash
 python3 tools/gpkg-publisher/publish.py \
   --config /etc/gpkg-publisher/config.env
+```
+
+You can also force full discovery without editing config:
+
+```bash
+python3 tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env \
+  --all-packages
 ```
 
 The script will:
@@ -189,6 +236,14 @@ Avoid starting with:
 - compiler toolchains
 
 The goal is fast breadth, not full base-system parity on day one.
+
+If you really want "as much of Debian as possible", do it in phases:
+
+1. `DISCOVERY_MODE=all` with `PACKAGE_LIMIT=200`
+2. widen to `PACKAGE_LIMIT=1000`
+3. remove the limit only after you inspect `last-run.json` and the repo contents
+
+That prevents your first run from becoming an unbounded failure pile.
 
 ## Overrides File
 
@@ -290,6 +345,41 @@ Manual run:
 sudo systemctl start gpkg-publisher.service
 sudo journalctl -u gpkg-publisher.service -f
 ```
+
+## Right-Now VPS Setup
+
+If you want the shortest path on the VPS right now, do this:
+
+```bash
+sudo apt update
+sudo apt install -y git python3 dpkg-dev zstd rclone
+sudo git clone https://github.com/CreitinGameplays/geminios.git /opt/geminios
+sudo mkdir -p /etc/gpkg-publisher
+sudo mkdir -p /var/lib/gpkg-publisher/cache/debs
+sudo mkdir -p /var/lib/gpkg-publisher/repo/x86_64
+sudo mkdir -p /var/lib/gpkg-publisher/state
+sudo cp /opt/geminios/tools/gpkg-publisher/config.env.example /etc/gpkg-publisher/config.env
+sudo cp /opt/geminios/tools/gpkg-publisher/overrides.example.json /etc/gpkg-publisher/overrides.json
+```
+
+Then edit `/etc/gpkg-publisher/config.env` to at least set:
+
+```text
+DISCOVERY_MODE=all
+RCLONE_DEST=r2:your-bucket/geminios
+SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
+PACKAGE_LIMIT=500
+```
+
+Then:
+
+```bash
+cd /opt/geminios
+python3 tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env --dry-run
+python3 tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env
+```
+
+Once that succeeds, install the timer and let it run unattended.
 
 ## Operational Notes
 

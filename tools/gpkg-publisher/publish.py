@@ -37,12 +37,17 @@ from import_deb import convert_deb_to_gpkg  # noqa: E402
 DEFAULT_CONFIG = {
     "ARCH": "x86_64",
     "APT_ARCH": "amd64",
+    "DISCOVERY_MODE": "seeds",
     "REPO_ROOT": "/var/lib/gpkg-publisher/repo",
     "DOWNLOAD_DIR": "/var/lib/gpkg-publisher/cache/debs",
     "STATE_FILE": "/var/lib/gpkg-publisher/state/state.json",
     "REPORT_FILE": "/var/lib/gpkg-publisher/state/last-run.json",
     "SEED_FILE": "/etc/gpkg-publisher/packages.txt",
     "OVERRIDES_FILE": "/etc/gpkg-publisher/overrides.json",
+    "SECTION_ALLOWLIST": "",
+    "SECTION_BLOCKLIST": "debug,doc,devel,kernel,libdevel,metapackages,oldlibs",
+    "PRIORITY_BLOCKLIST": "required,important",
+    "PACKAGE_LIMIT": "0",
     "ZSTD_LEVEL": "10",
     "INDEX_ZSTD_LEVEL": "19",
     "UPLOAD_ENABLED": "1",
@@ -219,6 +224,50 @@ def split_patterns(raw_value: str) -> list[str]:
     return [item.strip() for item in raw_value.split(",") if item.strip()]
 
 
+def discover_all_packages(
+    *,
+    apt_arch: str,
+    blocklist_patterns: list[str],
+    allow_essential: bool,
+    section_allowlist: list[str],
+    section_blocklist: list[str],
+    priority_blocklist: list[str],
+    verbose: bool,
+) -> list[str]:
+    discovered: list[str] = []
+    seen: set[str] = set()
+    dumpavail = run(["apt-cache", "dumpavail"], capture=True, verbose=verbose).stdout
+
+    for fields in parse_control_stanzas(dumpavail):
+        package_name = fields.get("Package", "").strip()
+        if not package_name or package_name in seen:
+            continue
+        if matches_any(package_name, blocklist_patterns):
+            continue
+
+        package_arch = fields.get("Architecture", "").strip()
+        if package_arch not in {"", "all", apt_arch}:
+            continue
+
+        if fields.get("Essential", "no").lower() == "yes" and not allow_essential:
+            continue
+
+        section = fields.get("Section", "misc").split("/", 1)[0].strip().lower()
+        if section_allowlist and section not in section_allowlist:
+            continue
+        if section in section_blocklist:
+            continue
+
+        priority = fields.get("Priority", "").strip().lower()
+        if priority in priority_blocklist:
+            continue
+
+        seen.add(package_name)
+        discovered.append(package_name)
+
+    return sorted(discovered)
+
+
 def download_deb(package: ResolvedPackage, download_dir: Path, *, verbose: bool) -> Path:
     ensure_directory(download_dir)
     expected_path = download_dir / package.deb_filename
@@ -302,6 +351,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Resolve Debian packages, convert them to .gpkg, index a repo, and optionally upload it.")
     parser.add_argument("--config", default=str(SCRIPT_DIR / "config.env"), help="Path to the publisher env file")
     parser.add_argument("--package", action="append", default=[], help="Additional seed package to resolve")
+    parser.add_argument("--all-packages", action="store_true", help="Ignore the seed file and discover packages from the local APT cache")
     parser.add_argument("--skip-upload", action="store_true", help="Do everything except the final upload")
     parser.add_argument("--force-import", action="store_true", help="Rebuild every gpkg even if state says it is up to date")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and print the plan without downloading or publishing")
@@ -323,15 +373,36 @@ def main() -> int:
     upload_enabled = parse_bool(config["UPLOAD_ENABLED"]) and not args.skip_upload
     zstd_level = int(config["ZSTD_LEVEL"])
     index_zstd_level = int(config["INDEX_ZSTD_LEVEL"])
+    package_limit = int(config["PACKAGE_LIMIT"])
+    section_allowlist = [item.lower() for item in split_patterns(config["SECTION_ALLOWLIST"])]
+    section_blocklist = [item.lower() for item in split_patterns(config["SECTION_BLOCKLIST"])]
+    priority_blocklist = [item.lower() for item in split_patterns(config["PRIORITY_BLOCKLIST"])]
 
     ensure_directory(repo_arch_dir)
     ensure_directory(download_dir)
     ensure_directory(state_file.parent)
     ensure_directory(report_file.parent)
 
-    seeds = read_seed_packages(seed_file)
+    discovery_mode = config["DISCOVERY_MODE"].strip().lower()
+    use_all_packages = args.all_packages or discovery_mode == "all"
+
+    if use_all_packages:
+        seeds = discover_all_packages(
+            apt_arch=config["APT_ARCH"],
+            blocklist_patterns=blocklist_patterns,
+            allow_essential=allow_essential,
+            section_allowlist=section_allowlist,
+            section_blocklist=section_blocklist,
+            priority_blocklist=priority_blocklist,
+            verbose=args.verbose,
+        )
+    else:
+        seeds = read_seed_packages(seed_file)
+
     seeds.extend(args.package)
     seeds = list(dict.fromkeys(seeds))
+    if package_limit > 0:
+        seeds = seeds[:package_limit]
     if not seeds:
         print("error: no seed packages were provided", file=sys.stderr)
         return 1
@@ -347,6 +418,7 @@ def main() -> int:
 
     report: dict[str, Any] = {
         "started_at": now_utc(),
+        "discovery_mode": "all" if use_all_packages else "seeds",
         "seed_packages": seeds,
         "resolved_count": len(packages),
         "resolved_packages": [package.name for package in packages],
