@@ -54,92 +54,126 @@ sudo apt install -y python3 dpkg-dev zstd rclone
 
 `apt`, `apt-cache`, `apt-get`, and `dpkg-deb` are expected to be available on the host already.
 
-## Recommended Layout
+## Quick Start
 
-Use a split layout so the repo content, config, and code are easy to reason about:
+This is the shortest clean setup path on a Debian 13 VPS.
 
-```text
-/opt/geminios/                          # this repository checkout
-/etc/gpkg-publisher/
-  config.env
-  packages.txt
-  overrides.json
-/var/lib/gpkg-publisher/
-  cache/debs/
-  repo/x86_64/
-  tmp/
-  state/state.json
-  state/last-run.json
-```
-
-## Cloudflare R2 Setup
-
-The simplest upload backend is `rclone`.
-
-Configure an R2 remote:
+### 1. Install dependencies
 
 ```bash
-rclone config
+sudo apt update
+sudo apt install -y git python3 dpkg-dev zstd rclone jq
 ```
 
-Typical values:
-
-- type: `s3`
-- provider: `Cloudflare`
-- access key / secret key: your R2 credentials
-- endpoint: your account endpoint, for example `https://<accountid>.r2.cloudflarestorage.com`
-
-Then test it:
+### 2. Create the service user and directories
 
 ```bash
-rclone ls r2:your-bucket
-```
+sudo useradd --system --home /var/lib/gpkg-publisher --shell /usr/sbin/nologin gpkg-publisher || true
 
-Set `RCLONE_DEST` to the bucket path that should contain the published repo root, for example:
-
-```bash
-RCLONE_DEST=r2:your-bucket/geminios
-```
-
-That produces:
-
-```text
-r2:your-bucket/geminios/x86_64/Packages.json.zst
-r2:your-bucket/geminios/x86_64/pool/...
-```
-
-## Initial Setup
-
-1. Copy `config.env.example` to `/etc/gpkg-publisher/config.env`.
-2. Copy `packages.txt.example` to `/etc/gpkg-publisher/packages.txt` if you want seed mode.
-3. Copy `overrides.example.json` to `/etc/gpkg-publisher/overrides.json` and trim it to what you need.
-4. Create the working directories:
-
-```bash
 sudo mkdir -p /etc/gpkg-publisher
 sudo mkdir -p /var/lib/gpkg-publisher/cache/debs
 sudo mkdir -p /var/lib/gpkg-publisher/repo/x86_64
 sudo mkdir -p /var/lib/gpkg-publisher/tmp
 sudo mkdir -p /var/lib/gpkg-publisher/state
+
+sudo chown -R gpkg-publisher:gpkg-publisher /var/lib/gpkg-publisher
+sudo chmod 755 /var/lib/gpkg-publisher
+sudo chmod 755 /var/lib/gpkg-publisher/cache
+sudo chmod 755 /var/lib/gpkg-publisher/cache/debs
 ```
 
-## First Dry Run
-
-Run the resolver without downloading or publishing:
+### 3. Clone the repo and install the config files
 
 ```bash
-python3 tools/gpkg-publisher/publish.py \
+sudo git clone https://github.com/CreitinGameplays/geminios.git /opt/geminios
+
+sudo cp /opt/geminios/tools/gpkg-publisher/config.env.example /etc/gpkg-publisher/config.env
+sudo cp /opt/geminios/tools/gpkg-publisher/overrides.example.json /etc/gpkg-publisher/overrides.json
+sudo cp /opt/geminios/tools/gpkg-publisher/packages.txt.example /etc/gpkg-publisher/packages.txt
+```
+
+### 4. Configure `rclone` for Cloudflare R2
+
+Do this as the `gpkg-publisher` user, not as `root`:
+
+```bash
+sudo -u gpkg-publisher -H rclone config
+sudo -u gpkg-publisher -H rclone config file
+```
+
+Typical R2 values:
+
+- type: `s3`
+- provider: `Cloudflare`
+- endpoint: `https://<accountid>.r2.cloudflarestorage.com`
+- access key / secret key: your R2 credentials
+
+If you want the service to use a fixed config path, copy it into `/etc/gpkg-publisher`:
+
+```bash
+sudo cp /var/lib/gpkg-publisher/.config/rclone/rclone.conf /etc/gpkg-publisher/rclone.conf
+sudo chown root:gpkg-publisher /etc/gpkg-publisher/rclone.conf
+sudo chmod 640 /etc/gpkg-publisher/rclone.conf
+```
+
+### 5. Edit `/etc/gpkg-publisher/config.env`
+
+For aggressive automatic discovery, start with:
+
+```text
+DISCOVERY_MODE=all
+REPO_ROOT=/var/lib/gpkg-publisher/repo
+DOWNLOAD_DIR=/var/lib/gpkg-publisher/cache/debs
+TEMP_DIR=/var/lib/gpkg-publisher/tmp
+STATE_FILE=/var/lib/gpkg-publisher/state/state.json
+REPORT_FILE=/var/lib/gpkg-publisher/state/last-run.json
+OVERRIDES_FILE=/etc/gpkg-publisher/overrides.json
+RCLONE_DEST=r2:your-bucket/geminios
+RCLONE_CONFIG=/etc/gpkg-publisher/rclone.conf
+SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
+PACKAGE_LIMIT=500
+```
+
+If you want seed mode instead, set `DISCOVERY_MODE=seeds` and edit `/etc/gpkg-publisher/packages.txt`.
+
+### 6. Run a dry run first
+
+```bash
+cd /opt/geminios
+sudo -u gpkg-publisher -H python3 tools/gpkg-publisher/publish.py \
   --config /etc/gpkg-publisher/config.env \
   --dry-run
 ```
 
 This prints:
 
-- the seed packages
+- the package discovery mode
 - how many packages resolved
 - which packages failed policy or dependency resolution
 
-Fix failures in `overrides.json` or reduce the seed list until the result is acceptable.
+Adjust `BLOCKLIST_PATTERNS`, `SECTION_ALLOWLIST`, `PACKAGE_LIMIT`, or `overrides.json` until the output looks sane.
+
+### 7. Run the real publish
+
+```bash
+cd /opt/geminios
+sudo -u gpkg-publisher -H python3 tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env
+```
+
+That will populate:
+
+```text
+/var/lib/gpkg-publisher/repo/x86_64/Packages.json.zst
+/var/lib/gpkg-publisher/repo/x86_64/pool/<section>/*.gpkg
+```
+
+If upload is enabled, the same tree is copied to `RCLONE_DEST`, for example:
+
+```text
+r2:your-bucket/geminios/x86_64/Packages.json.zst
+r2:your-bucket/geminios/x86_64/pool/...
+```
 
 ## Automatic Full Discovery Mode
 
@@ -216,7 +250,25 @@ If all of the following are unchanged, the package is reused:
 - zstd level
 - maintainer script policy
 
+It also writes a small sidecar file next to each generated `.gpkg`, so a rerun can recover reuse even if the state file was incomplete.
+
 Use `--force-import` when you want a full rebuild.
+
+### Useful rerun commands
+
+Retry everything except upload:
+
+```bash
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env \
+  --skip-upload
+```
+
+Check how much state is already recorded:
+
+```bash
+sudo jq '.packages | length' /var/lib/gpkg-publisher/state/state.json
+```
 
 ## Seed List Strategy
 
@@ -258,6 +310,7 @@ Supported top-level keys:
 - `skip_packages`: extra package names or globs to skip.
 - `skip_patterns`: extra name globs to treat as blocked.
 - `skip_dependency_patterns`: dependency names to ignore during normalization.
+- `provided_by_system_patterns`: dependency names or globs that should be dropped entirely because GeminiOS already ships the runtime or base-system equivalent.
 - `dependency_choices`: choose one side of a Debian alternative dependency.
 - `package_overrides`: package-specific behavior.
 
@@ -286,6 +339,27 @@ Example dependency choice:
   }
 }
 ```
+
+Example base-system dependency suppression:
+
+```json
+{
+  "provided_by_system_patterns": [
+    "debianutils",
+    "init-system-helpers",
+    "libc6",
+    "libcrypt1",
+    "libgcc-s1",
+    "libstdc++6",
+    "lsb-base",
+    "perl-base",
+    "python3-minimal",
+    "sysvinit-utils"
+  ]
+}
+```
+
+Use that only for things GeminiOS already provides globally. This is the main lever for packages that fail only because they depend on Debian base runtime packages.
 
 Package-specific choices use the format:
 
@@ -350,59 +424,75 @@ sudo systemctl start gpkg-publisher.service
 sudo journalctl -u gpkg-publisher.service -f
 ```
 
-## Right-Now VPS Setup
+## Common Problems
 
-If you want the shortest path on the VPS right now, do this:
+### `RCLONE_CONFIG ... permission denied`
+
+The file exists but the user running `publish.py` cannot read it.
+
+Fix:
 
 ```bash
-sudo apt update
-sudo apt install -y git python3 dpkg-dev zstd rclone
-sudo git clone https://github.com/CreitinGameplays/geminios.git /opt/geminios
-sudo mkdir -p /etc/gpkg-publisher
-sudo mkdir -p /var/lib/gpkg-publisher/cache/debs
-sudo mkdir -p /var/lib/gpkg-publisher/repo/x86_64
-sudo mkdir -p /var/lib/gpkg-publisher/state
-sudo cp /opt/geminios/tools/gpkg-publisher/config.env.example /etc/gpkg-publisher/config.env
-sudo cp /opt/geminios/tools/gpkg-publisher/overrides.example.json /etc/gpkg-publisher/overrides.json
+sudo chown root:gpkg-publisher /etc/gpkg-publisher/rclone.conf
+sudo chmod 640 /etc/gpkg-publisher/rclone.conf
 ```
 
-Then edit `/etc/gpkg-publisher/config.env` to at least set:
+### `_apt` sandbox warnings during download
+
+You are usually running the publisher as the wrong user or the cache directory permissions are too tight.
+
+Fix:
+
+```bash
+sudo chown -R gpkg-publisher:gpkg-publisher /var/lib/gpkg-publisher
+sudo chmod 755 /var/lib/gpkg-publisher
+sudo chmod 755 /var/lib/gpkg-publisher/cache
+sudo chmod 755 /var/lib/gpkg-publisher/cache/debs
+```
+
+Then run as:
+
+```bash
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env
+```
+
+### `No space left on device`
+
+Set `TEMP_DIR` to a location with real disk space and make sure it exists:
+
+```bash
+sudo mkdir -p /var/lib/gpkg-publisher/tmp
+sudo chown -R gpkg-publisher:gpkg-publisher /var/lib/gpkg-publisher/tmp
+```
+
+### Too many packages fail dependency resolution
+
+Your filters are too strict for `DISCOVERY_MODE=all`.
+
+Start by loosening:
 
 ```text
-DISCOVERY_MODE=all
-RCLONE_DEST=r2:your-bucket/geminios
-RCLONE_CONFIG=/etc/gpkg-publisher/rclone.conf
 SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
 PACKAGE_LIMIT=500
 ```
 
-Then:
+If you want maximum repository growth, you may also need to trim `BLOCKLIST_PATTERNS`.
 
-```bash
-cd /opt/geminios
-python3 tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env --dry-run
-python3 tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env
-```
+If failures look like this:
 
-Once that succeeds, install the timer and let it run unattended.
+- `dependency libc6 could not be resolved`
+- `dependency libgcc-s1 could not be resolved`
+- `dependency python3-minimal could not be resolved`
+- `dependency init-system-helpers could not be resolved`
 
-## Running User
+then the fix is usually not "import more Essential packages". The better fix is to add those names to `provided_by_system_patterns` in `overrides.json`, assuming GeminiOS already ships the equivalent runtime.
 
-Do not use `sudo python3 ...` for normal runs.
+If failures look like this:
 
-The supplied service is designed to run as `gpkg-publisher`, not `root`. Running as `root` causes two common problems:
+- `package is marked Essential: yes`
+- `matched the configured blocklist`
 
-- `rclone` looks for `/root/.config/rclone/rclone.conf`, which is usually not where you configured your remote.
-- APT may print `_apt` sandbox warnings when downloading into directories that do not match the expected ownership pattern.
-
-Preferred setup:
-
-```bash
-sudo chown -R gpkg-publisher:gpkg-publisher /var/lib/gpkg-publisher
-sudo chown -R gpkg-publisher:gpkg-publisher /etc/gpkg-publisher
-sudo -u gpkg-publisher -H rclone config
-sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env --dry-run
-```
+then those are expected policy skips. Usually leave them skipped. Only relax them if you deliberately want to import core base-system packages and accept the risk.
 
 ## Operational Notes
 

@@ -65,6 +65,7 @@ PORTS_DIR = os.path.join(ROOT_DIR, "ports")
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
+DEFAULT_GPKG_REPO = os.environ.get("GPKG_DEFAULT_REPO", "https://repo.creitingameplays.com").rstrip("/")
 
 # Load Manifests
 try:
@@ -730,7 +731,28 @@ def finalize_rootfs():
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
         f.write("1")
 
-    # 5. Versioning
+    # 5. Seed default gpkg repositories from the image build, not from gpkg itself.
+    print_info("[*] Seeding gpkg repository configuration...")
+    gpkg_dir = os.path.join(ROOT_DIR, "rootfs/etc/gpkg")
+    gpkg_sources_dir = os.path.join(gpkg_dir, "sources.list.d")
+    os.makedirs(gpkg_sources_dir, exist_ok=True)
+
+    sources_list_path = os.path.join(gpkg_dir, "sources.list")
+    if not os.path.exists(sources_list_path):
+        with open(sources_list_path, "w") as f:
+            f.write("")
+
+    for entry in os.listdir(gpkg_sources_dir):
+        if entry.endswith(".list"):
+            os.remove(os.path.join(gpkg_sources_dir, entry))
+
+    repo_list_name = f"repo_{int(time.time())}.list"
+    repo_list_path = os.path.join(gpkg_sources_dir, repo_list_name)
+    with open(repo_list_path, "w") as f:
+        f.write(DEFAULT_GPKG_REPO + "\n")
+    print_success(f"  ✓ Added default gpkg repo: {DEFAULT_GPKG_REPO}")
+
+    # 6. Versioning
     version = get_geminios_version()
     print_info(f"[*] Setting system version: {version}")
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-version"), "w") as f:
@@ -743,7 +765,7 @@ def finalize_rootfs():
         f.write(f'PRETTY_NAME="GeminiOS {version}"\n')
         f.write(f'VERSION_ID="{version}"\n')
 
-    # 6. D-Bus Machine ID
+    # 7. D-Bus Machine ID
     print_info("[*] Generating D-Bus machine-id...")
     machine_id_path = os.path.join(ROOT_DIR, "rootfs/etc/machine-id")
     dbus_uuid_path = os.path.join(ROOT_DIR, "rootfs/var/lib/dbus/machine-id")
@@ -760,15 +782,15 @@ def finalize_rootfs():
         os.symlink("/etc/machine-id", dbus_uuid_path)
         print_success(f"  ✓ Generated machine-id: {m_id}")
 
-    # 7. Remove known-unused host runtime libraries that can leak in from the
+    # 8. Remove known-unused host runtime libraries that can leak in from the
     # development overlay. Keep this targeted to avoid breaking dlopen()-based
     # packages or future native ports.
     prune_unused_host_runtime_libs()
 
-    # 8. Restore multiarch compatibility symlinks for the in-OS toolchain.
+    # 9. Restore multiarch compatibility symlinks for the in-OS toolchain.
     ensure_multiarch_dev_compat()
 
-    # 9. Final Integrity Check
+    # 10. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)

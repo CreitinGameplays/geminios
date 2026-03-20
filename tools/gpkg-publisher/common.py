@@ -275,22 +275,31 @@ def normalize_dependency_field(
     dependency_choices: dict[str, str],
     dependency_exists: Callable[[str], bool],
     skip_patterns: list[str],
+    drop_patterns: list[str] | None = None,
 ) -> list[str]:
+    drop_patterns = drop_patterns or []
     dependencies: list[str] = []
     for group in split_top_level(value, ","):
         alternatives = split_top_level(group, "|")
         override_key = f"{package_name}::{group}"
         choice = dependency_choices.get(override_key) or dependency_choices.get(group)
         selected: str | None = None
+        dropped_as_system_dependency = False
 
         if choice:
             parsed = normalize_relation_atom(choice, apt_arch)
             if parsed:
-                selected = parsed["normalized"]
+                if matches_any(parsed["name"], drop_patterns):
+                    dropped_as_system_dependency = True
+                else:
+                    selected = parsed["normalized"]
         else:
             for alternative in alternatives:
                 parsed = normalize_relation_atom(alternative, apt_arch)
                 if not parsed:
+                    continue
+                if matches_any(parsed["name"], drop_patterns):
+                    dropped_as_system_dependency = True
                     continue
                 if matches_any(parsed["name"], skip_patterns):
                     continue
@@ -298,12 +307,21 @@ def normalize_dependency_field(
                     selected = parsed["normalized"]
                     break
 
+        if selected is None and dropped_as_system_dependency:
+            continue
+
         if selected is None:
             for alternative in alternatives:
                 parsed = normalize_relation_atom(alternative, apt_arch)
                 if parsed:
+                    if matches_any(parsed["name"], drop_patterns):
+                        dropped_as_system_dependency = True
+                        continue
                     selected = parsed["normalized"]
                     break
+
+        if selected is None and dropped_as_system_dependency:
+            continue
 
         if selected:
             dependencies.append(selected)

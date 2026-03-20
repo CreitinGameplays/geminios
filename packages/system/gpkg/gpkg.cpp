@@ -18,6 +18,7 @@
 #include <regex>
 #include <set>
 #include <map>
+#include <cctype>
 #include <openssl/sha.h>
 #include <iomanip>
 
@@ -185,6 +186,7 @@ struct PackageMetadata {
     std::string description;
     std::string filename;
     std::string sha512;
+    std::string source_url;
     std::vector<std::string> depends;
     std::vector<std::string> conflicts;
     std::vector<std::string> provides;
@@ -200,6 +202,254 @@ std::string trim(const std::string& str) {
     if (std::string::npos == first) return str;
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
+}
+
+std::string join_strings(const std::vector<std::string>& items, const std::string& separator = ", ") {
+    std::stringstream ss;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) ss << separator;
+        ss << items[i];
+    }
+    return ss.str();
+}
+
+unsigned int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return static_cast<unsigned int>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<unsigned int>(10 + (c - 'a'));
+    if (c >= 'A' && c <= 'F') return static_cast<unsigned int>(10 + (c - 'A'));
+    return 0;
+}
+
+void append_utf8_codepoint(std::string& out, unsigned int codepoint) {
+    if (codepoint <= 0x7F) {
+        out += static_cast<char>(codepoint);
+    } else if (codepoint <= 0x7FF) {
+        out += static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F));
+        out += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint <= 0xFFFF) {
+        out += static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F));
+        out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07));
+        out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (codepoint & 0x3F));
+    }
+}
+
+std::string json_unescape(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+
+    for (size_t i = 0; i < input.size(); ++i) {
+        char c = input[i];
+        if (c != '\\' || i + 1 >= input.size()) {
+            output += c;
+            continue;
+        }
+
+        char esc = input[++i];
+        switch (esc) {
+            case '"': output += '"'; break;
+            case '\\': output += '\\'; break;
+            case '/': output += '/'; break;
+            case 'b': output += '\b'; break;
+            case 'f': output += '\f'; break;
+            case 'n': output += '\n'; break;
+            case 'r': output += '\r'; break;
+            case 't': output += '\t'; break;
+            case 'u': {
+                if (i + 4 >= input.size()) {
+                    output += "\\u";
+                    break;
+                }
+
+                bool valid = true;
+                unsigned int codepoint = 0;
+                for (size_t j = 0; j < 4; ++j) {
+                    char hex = input[i + 1 + j];
+                    if (!std::isxdigit(static_cast<unsigned char>(hex))) {
+                        valid = false;
+                        break;
+                    }
+                    codepoint = (codepoint << 4) | hex_digit_value(hex);
+                }
+
+                if (!valid) {
+                    output += "\\u";
+                    break;
+                }
+
+                append_utf8_codepoint(output, codepoint);
+                i += 4;
+                break;
+            }
+            default:
+                output += esc;
+                break;
+        }
+    }
+
+    return output;
+}
+
+std::string normalize_whitespace(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    bool previous_was_space = false;
+
+    for (char c : input) {
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            if (!output.empty() && !previous_was_space) {
+                output += ' ';
+            }
+            previous_was_space = true;
+        } else {
+            output += c;
+            previous_was_space = false;
+        }
+    }
+
+    return trim(output);
+}
+
+std::string description_summary(const std::string& description, size_t max_len = 140) {
+    std::stringstream ss(description);
+    std::string line;
+    while (std::getline(ss, line)) {
+        line = normalize_whitespace(line);
+        if (!line.empty()) {
+            if (line.size() > max_len) {
+                return line.substr(0, max_len - 3) + "...";
+            }
+            return line;
+        }
+    }
+
+    std::string condensed = normalize_whitespace(description);
+    if (condensed.size() > max_len) {
+        return condensed.substr(0, max_len - 3) + "...";
+    }
+    return condensed;
+}
+
+void print_wrapped_block(const std::string& prefix, const std::string& text, size_t width = 96) {
+    std::istringstream words(text);
+    std::string word;
+    std::string line = prefix;
+    size_t line_length = prefix.size();
+    const size_t prefix_length = prefix.size();
+
+    while (words >> word) {
+        const size_t extra = (line_length > prefix_length ? 1 : 0) + word.size();
+        if (line_length + extra > width && line_length > prefix_length) {
+            std::cout << line << std::endl;
+            line = prefix + word;
+            line_length = prefix_length + word.size();
+            continue;
+        }
+
+        if (line_length > prefix_length) {
+            line += ' ';
+            line_length++;
+        }
+        line += word;
+        line_length += word.size();
+    }
+
+    if (line_length > prefix_length) {
+        std::cout << line << std::endl;
+    } else {
+        std::cout << prefix << std::endl;
+    }
+}
+
+void print_description_block(const std::string& label, const std::string& text) {
+    std::cout << "  " << label << ":" << std::endl;
+
+    std::stringstream ss(text);
+    std::string line;
+    std::string paragraph;
+    bool printed_any = false;
+
+    auto flush_paragraph = [&]() {
+        std::string normalized = normalize_whitespace(paragraph);
+        if (!normalized.empty()) {
+            print_wrapped_block("    ", normalized);
+            printed_any = true;
+        }
+        paragraph.clear();
+    };
+
+    while (std::getline(ss, line)) {
+        line = trim(line);
+        if (line == ".") line.clear();
+        if (line.empty()) {
+            flush_paragraph();
+            continue;
+        }
+        if (!paragraph.empty()) paragraph += ' ';
+        paragraph += line;
+    }
+
+    flush_paragraph();
+
+    if (!printed_any) {
+        std::cout << "    (none)" << std::endl;
+    }
+}
+
+std::string normalize_repo_base_url(const std::string& raw_url) {
+    std::string url = trim(raw_url);
+    const std::string index_suffix = "/" + std::string(OS_ARCH) + "/Packages.json.zst";
+    const std::string arch_suffix = "/" + std::string(OS_ARCH);
+
+    if (url.size() >= index_suffix.size() &&
+        url.compare(url.size() - index_suffix.size(), index_suffix.size(), index_suffix) == 0) {
+        url = url.substr(0, url.size() - index_suffix.size());
+    }
+
+    while (url.size() > 1 && url.back() == '/') url.pop_back();
+
+    if (url.size() >= arch_suffix.size() &&
+        url.compare(url.size() - arch_suffix.size(), arch_suffix.size(), arch_suffix) == 0) {
+        url = url.substr(0, url.size() - arch_suffix.size());
+    }
+
+    while (url.size() > 1 && url.back() == '/') url.pop_back();
+    return url;
+}
+
+std::string build_repo_index_url(const std::string& base_url) {
+    std::string normalized = normalize_repo_base_url(base_url);
+    return normalized + "/" + std::string(OS_ARCH) + "/Packages.json.zst";
+}
+
+std::string build_repo_package_url(const std::string& base_url, const std::string& filename) {
+    std::string normalized = normalize_repo_base_url(base_url);
+    return normalized + "/" + std::string(OS_ARCH) + "/" + filename;
+}
+
+std::string json_escape(const std::string& input) {
+    std::string escaped;
+    for (char c : input) {
+        switch (c) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
+}
+
+std::string inject_repo_url(const std::string& obj, const std::string& repo_url) {
+    size_t end = obj.rfind('}');
+    if (end == std::string::npos) return obj;
+    return obj.substr(0, end) + ",\"repo_url\":\"" + json_escape(normalize_repo_base_url(repo_url)) + "\"}";
 }
 
 // Extract the next JSON object from content starting at pos. Returns object bounds or empty string.
@@ -271,7 +521,7 @@ bool get_json_value(const std::string& obj, const std::string& key, std::string&
     
     if (v_end == std::string::npos) return false;
     
-    out_val = obj.substr(v_start + 1, v_end - v_start - 1);
+    out_val = json_unescape(obj.substr(v_start + 1, v_end - v_start - 1));
     return true;
 }
 
@@ -287,20 +537,20 @@ bool get_json_array(const std::string& obj, const std::string& key, std::vector<
     
     if (arr_start == std::string::npos || arr_end == std::string::npos) return false;
     
-    std::string raw = obj.substr(arr_start + 1, arr_end - arr_start - 1);
-    std::string current;
-    bool in_quote = false;
-    for (char c : raw) {
-        if (c == '"') in_quote = !in_quote;
-        else if (c == ',' && !in_quote) {
-            if (!current.empty()) out_arr.push_back(current);
-            current = "";
+    size_t pos = arr_start + 1;
+    while (pos < arr_end) {
+        size_t value_start = obj.find('"', pos);
+        if (value_start == std::string::npos || value_start >= arr_end) break;
+
+        size_t value_end = obj.find('"', value_start + 1);
+        while (value_end != std::string::npos && obj[value_end - 1] == '\\') {
+            value_end = obj.find('"', value_end + 1);
         }
-        else if (in_quote || (c != ' ' && c != '\t' && c != '\n')) {
-             current += c;
-        }
+
+        if (value_end == std::string::npos || value_end > arr_end) break;
+        out_arr.push_back(json_unescape(obj.substr(value_start + 1, value_end - value_start - 1)));
+        pos = value_end + 1;
     }
-    if (!current.empty()) out_arr.push_back(current);
     return true;
 }
 
@@ -502,13 +752,19 @@ bool check_file_collisions(const std::string& pkg_name, const std::vector<std::s
 
 std::vector<std::string> get_repo_urls() {
     std::vector<std::string> urls;
+    std::set<std::string> seen_urls;
     
     // Default repo from sys_info if sources.list missing? 
     // Let's assume we always have a sources.list
     std::ifstream f(SOURCES_LIST_PATH);
     std::string line;
     while (std::getline(f, line)) {
-        if (!line.empty() && line[0] != '#') urls.push_back(line);
+        line = trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        std::string normalized = normalize_repo_base_url(line);
+        if (!normalized.empty() && seen_urls.insert(normalized).second) {
+            urls.push_back(normalized);
+        }
     }
 
     // Also scan sources.list.d/
@@ -519,18 +775,48 @@ std::vector<std::string> get_repo_urls() {
             if (strstr(entry->d_name, ".list")) {
                 std::ifstream sf(SOURCES_DIR + entry->d_name);
                 while (std::getline(sf, line)) {
-                    if (!line.empty() && line[0] != '#') urls.push_back(line);
+                    line = trim(line);
+                    if (line.empty() || line[0] == '#') continue;
+                    std::string normalized = normalize_repo_base_url(line);
+                    if (!normalized.empty() && seen_urls.insert(normalized).second) {
+                        urls.push_back(normalized);
+                    }
                 }
             }
         }
         closedir(dir);
     }
-    
-    if (urls.empty()) {
-        urls.push_back("https://cdn.rx580iloveyou.qzz.io/geminios/"); // Fallback
-    }
 
     return urls;
+}
+
+bool ensure_repo_urls(const std::vector<std::string>& urls) {
+    if (!urls.empty()) return true;
+    std::cerr << Color::RED
+              << "E: No repositories configured. Add one with 'gpkg add-repo <url>' "
+              << "or create " << SOURCES_DIR << "*.list"
+              << Color::RESET << std::endl;
+    return false;
+}
+
+bool ensure_repo_index_available() {
+    if (access((REPO_CACHE_PATH + "Packages.json").c_str(), F_OK) == 0) return true;
+    std::cerr << Color::RED
+              << "E: No package index available. Run 'gpkg update' first."
+              << Color::RESET << std::endl;
+    return false;
+}
+
+bool resolve_download_url(const PackageMetadata& meta, std::string& out_url) {
+    if (!meta.source_url.empty()) {
+        out_url = build_repo_package_url(meta.source_url, meta.filename);
+        return true;
+    }
+
+    auto urls = get_repo_urls();
+    if (!ensure_repo_urls(urls)) return false;
+    out_url = build_repo_package_url(urls[0], meta.filename);
+    return true;
 }
 
 
@@ -544,6 +830,7 @@ bool get_repo_package_info(const std::string& pkg_name, PackageMetadata& out_met
             get_json_value(obj, "description", out_meta.description);
             get_json_value(obj, "filename", out_meta.filename);
             get_json_value(obj, "sha512", out_meta.sha512);
+            get_json_value(obj, "repo_url", out_meta.source_url);
             get_json_array(obj, "depends", out_meta.depends);
             get_json_array(obj, "conflicts", out_meta.conflicts);
             get_json_array(obj, "provides", out_meta.provides);
@@ -788,6 +1075,20 @@ bool verify_hash(const std::string& file, const std::string& expected_hash) {
     return true;
 }
 
+int handle_list_repos() {
+    auto urls = get_repo_urls();
+    if (urls.empty()) {
+        std::cout << "No repositories configured." << std::endl;
+        return 0;
+    }
+
+    std::cout << "Configured repositories:" << std::endl;
+    for (size_t i = 0; i < urls.size(); ++i) {
+        std::cout << "  " << (i + 1) << ". " << normalize_repo_base_url(urls[i]) << std::endl;
+    }
+    return 0;
+}
+
 bool save_package_metadata(const std::string& pkg_name, const std::string& tmp_path, const std::string& tar_path, bool strip_data, bool verbose) {
     if (verbose) std::cout << "[DEBUG] Saving metadata for " << pkg_name << " to " << INFO_DIR << std::endl;
     run_command("mkdir -p " + INFO_DIR, verbose);
@@ -898,7 +1199,9 @@ void print_help() {
               << "  upgrade         Upgrade all installed packages\n"
               << "  update          Update local package indices\n"
               << "  search <query>  Search for packages\n"
+              << "  show <pkg>      Show package metadata and source repository\n"
               << "  add-repo <url>  Add a third-party repository\n"
+              << "  list-repos      Show configured repositories\n"
               << "  clean           Clear package cache\n";
 }
 
@@ -906,31 +1209,82 @@ void print_help() {
 
 int handle_update(bool verbose) {
     auto urls = get_repo_urls();
+    if (!ensure_repo_urls(urls)) return 1;
     VLOG(verbose, "Found " << urls.size() << " repository URLs.");
     std::cout << Color::BLUE << "Updating package indices..." << Color::RESET << std::endl;
     run_command("mkdir -p " + REPO_CACHE_PATH, verbose);
-    
-    for (const auto& url : urls) {
-        std::string full_url = url;
-        if (full_url.back() != '/') full_url += "/";
-        full_url += std::string(OS_ARCH) + "/Packages.json.zst";
+
+    std::string merged_tmp = REPO_CACHE_PATH + "Packages.json.tmp";
+    std::ofstream merged(merged_tmp);
+    if (!merged) {
+        std::cerr << Color::RED << "E: Failed to open merged index file for writing." << Color::RESET << std::endl;
+        return 1;
+    }
+
+    merged << "[\n";
+    bool first_object = true;
+    int success_count = 0;
+    int total_packages = 0;
+
+    for (size_t i = 0; i < urls.size(); ++i) {
+        const auto& url = urls[i];
+        std::string full_url = build_repo_index_url(url);
+        std::string dest_zst = REPO_CACHE_PATH + "repo_index_" + std::to_string(i) + ".json.zst";
+        std::string dest_json = REPO_CACHE_PATH + "repo_index_" + std::to_string(i) + ".json";
 
         VLOG(verbose, "Fetching index from: " << full_url);
         std::cout << "Get: " << full_url << std::endl;
-        std::string dest = REPO_CACHE_PATH + "Packages.json.zst";
-        
-        if (DownloadFile(full_url, dest, verbose)) {
-            VLOG(verbose, "Decompressing index to: " << REPO_CACHE_PATH + "Packages.json");
-            run_command("zstd -df " + dest + " -o " + REPO_CACHE_PATH + "Packages.json", verbose);
-            std::cout << Color::GREEN << "✓ Updated index from " << url << Color::RESET << std::endl;
-        } else {
+
+        if (!DownloadFile(full_url, dest_zst, verbose)) {
             std::cerr << Color::YELLOW << "W: Failed to fetch index from " << url << Color::RESET << std::endl;
+            continue;
         }
+
+        if (run_command("zstd -df " + dest_zst + " -o " + dest_json, verbose) != 0) {
+            std::cerr << Color::YELLOW << "W: Failed to decompress index from " << url << Color::RESET << std::endl;
+            remove(dest_zst.c_str());
+            continue;
+        }
+
+        int repo_package_count = 0;
+        foreach_json_object(dest_json, [&](const std::string& obj) {
+            if (!first_object) merged << ",\n";
+            merged << inject_repo_url(obj, url);
+            first_object = false;
+            repo_package_count++;
+            total_packages++;
+            return true;
+        });
+
+        remove(dest_zst.c_str());
+        remove(dest_json.c_str());
+
+        success_count++;
+        std::cout << Color::GREEN << "✓ Updated index from " << url
+                  << " (" << repo_package_count << " packages)" << Color::RESET << std::endl;
     }
+
+    merged << "\n]\n";
+    merged.close();
+
+    if (success_count == 0) {
+        remove(merged_tmp.c_str());
+        std::cerr << Color::RED << "E: Failed to update any package indices." << Color::RESET << std::endl;
+        return 1;
+    }
+
+    if (rename(merged_tmp.c_str(), (REPO_CACHE_PATH + "Packages.json").c_str()) != 0) {
+        std::cerr << Color::RED << "E: Failed to replace merged package index." << Color::RESET << std::endl;
+        return 1;
+    }
+
+    std::cout << Color::GREEN << "✓ Merged " << total_packages << " packages from "
+              << success_count << " repositories." << Color::RESET << std::endl;
     return 0;
 }
 
 int handle_upgrade(const std::set<std::string>& installed_cache, bool verbose) {
+    if (!ensure_repo_index_available()) return 1;
     std::cout << "Reading package lists..." << std::endl;
     VLOG(verbose, "Checking " << installed_cache.size() << " installed packages for updates.");
     
@@ -958,9 +1312,8 @@ int handle_upgrade(const std::set<std::string>& installed_cache, bool verbose) {
     if (!ask_confirmation("Do you want to continue?")) return 0;
     
     for (const auto& meta : updates) {
-        std::string url = get_repo_urls()[0]; // Simplification
-        if (url.back() != '/') url += "/";
-        url += std::string(OS_ARCH) + "/" + meta.filename;
+        std::string url;
+        if (!resolve_download_url(meta, url)) return 1;
         
         std::string local_path = REPO_CACHE_PATH + meta.name + EXTENSION;
         VLOG(verbose, "Downloading upgrade for " << meta.name << " from " << url);
@@ -976,6 +1329,7 @@ int handle_install(int argc, char* argv[], const std::set<std::string>& installe
     std::vector<PackageMetadata> install_queue;
     std::vector<std::string> local_files;
     std::set<std::string> visited;
+    bool needs_repo_index = false;
     
     std::cout << "Resolving dependencies..." << std::endl;
     for (int i = 2; i < argc; ++i) {
@@ -984,7 +1338,22 @@ int handle_install(int argc, char* argv[], const std::set<std::string>& installe
         
         if (arg.length() > 5 && arg.substr(arg.length() - 5) == ".gpkg" && access(arg.c_str(), F_OK) == 0) {
             local_files.push_back(arg);
-        } else if (!resolve_dependencies(arg, "", "", install_queue, visited, (std::set<std::string>&)installed_cache, verbose)) {
+        } else {
+            needs_repo_index = true;
+        }
+    }
+
+    if (needs_repo_index && !ensure_repo_index_available()) {
+        return 1;
+    }
+
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = trim(argv[i]);
+        if (arg == "-v" || arg == "--verbose") continue;
+        if (arg.length() > 5 && arg.substr(arg.length() - 5) == ".gpkg" && access(arg.c_str(), F_OK) == 0) {
+            continue;
+        }
+        if (!resolve_dependencies(arg, "", "", install_queue, visited, (std::set<std::string>&)installed_cache, verbose)) {
             std::cerr << Color::RED << "E: Failed to resolve dependencies for " << arg << Color::RESET << std::endl;
             return 1;
         }
@@ -1007,9 +1376,8 @@ int handle_install(int argc, char* argv[], const std::set<std::string>& installe
     std::cout << Color::CYAN << "[*] Downloading packages..." << Color::RESET << std::endl;
     for (size_t i = 0; i < install_queue.size(); ++i) {
         const auto& meta = install_queue[i];
-        std::string url = get_repo_urls()[0];
-        if (url.back() != '/') url += "/";
-        url += std::string(OS_ARCH) + "/" + meta.filename;
+        std::string url;
+        if (!resolve_download_url(meta, url)) return 1;
         std::string local_path = REPO_CACHE_PATH + meta.name + EXTENSION;
         
         if (access(local_path.c_str(), F_OK) != 0) {
@@ -1161,42 +1529,98 @@ int handle_remove(int argc, char* argv[], bool verbose, bool purge) {
 }
 
 int handle_search(const std::string& query, bool verbose) {
+    if (!ensure_repo_index_available()) return 1;
     VLOG(verbose, "Searching for '" << query << "' in " << REPO_CACHE_PATH << "Packages.json");
-    bool found = false;
+    std::map<std::string, PackageMetadata> matches;
     foreach_json_object(REPO_CACHE_PATH + "Packages.json", [&](const std::string& obj) {
-        std::string name, desc, version;
-        get_json_value(obj, "package", name);
-        get_json_value(obj, "description", desc);
-        get_json_value(obj, "version", version);
+        PackageMetadata meta;
+        get_json_value(obj, "package", meta.name);
+        get_json_value(obj, "description", meta.description);
+        get_json_value(obj, "version", meta.version);
+        get_json_value(obj, "repo_url", meta.source_url);
         
-        if (name.find(query) != std::string::npos || desc.find(query) != std::string::npos) {
-            std::string installed_ver;
-            std::string status_str = "";
-            
-            if (is_installed(name, &installed_ver)) {
-                if (compare_versions(installed_ver, version) == 0) {
-                     status_str = Color::BLUE + " [installed]" + Color::RESET;
-                } else {
-                     status_str = Color::BLUE + " [installed: " + installed_ver + "]" + Color::RESET;
-                }
+        if (meta.name.find(query) != std::string::npos || meta.description.find(query) != std::string::npos) {
+            auto it = matches.find(meta.name);
+            if (it == matches.end() || compare_versions(meta.version, it->second.version) > 0) {
+                matches[meta.name] = meta;
             }
-
-            std::cout << Color::GREEN << name << Color::RESET << " (" << version << ")" << status_str << " - " << desc << std::endl;
-            found = true;
         }
         return true;
     });
-    if (!found) std::cout << "No matches found for '" << query << "'" << std::endl;
+
+    if (matches.empty()) {
+        std::cout << "No matches found for '" << query << "'" << std::endl;
+        return 0;
+    }
+
+    for (const auto& entry : matches) {
+        const auto& meta = entry.second;
+        std::string installed_ver;
+        std::string status_str = "";
+        std::string repo_str = meta.source_url.empty() ? "" : (Color::CYAN + " [repo: " + meta.source_url + "]" + Color::RESET);
+        
+        if (is_installed(meta.name, &installed_ver)) {
+            if (compare_versions(installed_ver, meta.version) == 0) {
+                 status_str = Color::BLUE + " [installed]" + Color::RESET;
+            } else {
+                 status_str = Color::BLUE + " [installed: " + installed_ver + "]" + Color::RESET;
+            }
+        }
+
+        std::cout << Color::GREEN << meta.name << Color::RESET
+                  << " (" << meta.version << ")"
+                  << status_str
+                  << repo_str
+                  << " - "
+                  << description_summary(meta.description)
+                  << std::endl;
+    }
+    return 0;
+}
+
+int handle_show(const std::string& pkg_name, bool verbose) {
+    if (!ensure_repo_index_available()) return 1;
+    VLOG(verbose, "Showing package metadata for '" << pkg_name << "'");
+    PackageMetadata meta;
+    if (!get_repo_package_info(pkg_name, meta)) {
+        std::cerr << Color::RED << "E: Package '" << pkg_name << "' was not found in the local index. Run 'gpkg update' first." << Color::RESET << std::endl;
+        return 1;
+    }
+
+    std::cout << Color::GREEN << meta.name << Color::RESET << std::endl;
+    std::cout << "  Version:     " << meta.version << std::endl;
+    std::cout << "  Repository:  " << (meta.source_url.empty() ? "(unknown)" : meta.source_url) << std::endl;
+    std::cout << "  Filename:    " << meta.filename << std::endl;
+    if (!meta.description.empty()) print_description_block("Description", meta.description);
+    if (!meta.depends.empty()) print_wrapped_block("  Depends:     ", join_strings(meta.depends));
+    if (!meta.conflicts.empty()) print_wrapped_block("  Conflicts:   ", join_strings(meta.conflicts));
+    if (!meta.provides.empty()) print_wrapped_block("  Provides:    ", join_strings(meta.provides));
+
+    std::string installed_ver;
+    if (is_installed(meta.name, &installed_ver)) {
+        std::cout << "  Installed:   yes (" << installed_ver << ")" << std::endl;
+    } else {
+        std::cout << "  Installed:   no" << std::endl;
+    }
     return 0;
 }
 
 int handle_add_repo(const std::string& url, bool verbose) {
-    if (url.find("http://") != 0 && url.find("https://") != 0) {
+    std::string normalized = normalize_repo_base_url(url);
+    if (normalized.find("http://") != 0 && normalized.find("https://") != 0) {
         std::cerr << "E: Invalid repository URL. Must start with http:// or https://" << std::endl;
         return 1;
     }
-    std::string check_url = url + (url.back() == '/' ? "" : "/") + std::string(OS_ARCH) + "/Packages.json.zst";
-    std::cout << "Validating repository " << url << "..." << std::endl;
+
+    for (const auto& existing : get_repo_urls()) {
+        if (normalize_repo_base_url(existing) == normalized) {
+            std::cout << Color::YELLOW << "W: Repository already configured: " << normalized << Color::RESET << std::endl;
+            return 0;
+        }
+    }
+
+    std::string check_url = build_repo_index_url(normalized);
+    std::cout << "Validating repository " << normalized << "..." << std::endl;
     std::string tmp_index = "/tmp/gpkg_validation_index.zst";
     if (DownloadFile(check_url, tmp_index, verbose)) {
         run_command("zstd -df " + tmp_index + " -o /tmp/gpkg_validation.json", verbose);
@@ -1210,7 +1634,7 @@ int handle_add_repo(const std::string& url, bool verbose) {
         std::string name = "repo_" + std::to_string(time(NULL)) + ".list";
         run_command("mkdir -p " + SOURCES_DIR, verbose);
         std::ofstream f(SOURCES_DIR + name);
-        if (f) f << url << std::endl;
+        if (f) f << normalized << std::endl;
         else std::cerr << "E: Failed to write to " << SOURCES_DIR << name << std::endl;
     } else {
         std::cerr << Color::RED << "E: Validation failed." << Color::RESET << std::endl;
@@ -1222,6 +1646,7 @@ int handle_add_repo(const std::string& url, bool verbose) {
 int handle_clean(bool verbose) {
     std::cout << "Cleaning package cache..." << std::endl;
     run_command("rm -f " + REPO_CACHE_PATH + "*" + EXTENSION, verbose);
+    run_command("rm -f " + REPO_CACHE_PATH + "Packages.json", verbose);
     run_command("rm -f " + REPO_CACHE_PATH + "*.zst", verbose);
     return 0;
 }
@@ -1266,8 +1691,10 @@ int main(int argc, char* argv[]) {
     if (action == "install" && argc > 2) return handle_install(argc, argv, installed_cache, verbose);
     if (action == "remove" && argc > 2) return handle_remove(argc, argv, verbose, purge);
     if (action == "search" && argc > 2) return handle_search(argv[2], verbose);
+    if (action == "show" && argc > 2) return handle_show(argv[2], verbose);
     if (action == "clean") return handle_clean(verbose);
     if (action == "add-repo" && argc > 2) return handle_add_repo(argv[2], verbose);
+    if (action == "list-repos") return handle_list_repos();
 
     print_help();
     return 0;

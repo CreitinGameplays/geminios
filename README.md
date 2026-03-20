@@ -101,6 +101,60 @@ This ensures that every package build automagically targets GeminiOS without req
 
 - **Verification**: The build system now uses a manifest-based verification system (`build_system/package_manifests.json`). If a package build fails or artifacts are missing, the builder will report exactly what is missing.
 
+## Using External GPKG Repositories
+
+If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:
+
+```text
+https://repo.creitingameplays.com
+```
+
+`gpkg add-repo` now normalizes URLs, so it also accepts inputs ending in `/x86_64` or `/x86_64/Packages.json.zst`.
+
+Typical flow inside GeminiOS:
+
+```bash
+sudo gpkg add-repo https://repo.creitingameplays.com
+gpkg list-repos
+sudo gpkg update
+gpkg show nano
+gpkg search nano
+sudo gpkg install nano
+```
+
+What each step verifies:
+- `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable.
+- `gpkg list-repos`: Confirms the repo was written into `/etc/gpkg/sources.list.d/`.
+- `gpkg update`: Downloads and merges package indices from all configured repositories.
+- `gpkg show <pkg>`: Displays the package metadata, source repository, and dependency list.
+- `gpkg search <query>`: Searches the merged local cache and now shows which repository each result came from.
+- `gpkg install <pkg>`: Downloads the package from the repository that provided that package, not just the first configured repo.
+
+Manual configuration is also supported by writing one repository URL per line into:
+
+```text
+/etc/gpkg/sources.list
+/etc/gpkg/sources.list.d/*.list
+```
+
+Important:
+- The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
+- The repository layout must contain `x86_64/Packages.json.zst` and package files referenced by that index underneath the same base URL.
+- `gpkg update` now merges multiple repositories into one local cache instead of overwriting the previous index.
+- `gpkg` no longer contains a hardcoded fallback repository URL. The default repo is seeded into the image at build time under `/etc/gpkg/sources.list.d/`.
+
+By default, `builder.py` writes a repo file like:
+
+```text
+/etc/gpkg/sources.list.d/repo_<timestamp>.list
+```
+
+using `https://repo.creitingameplays.com`. You can override that at build time with:
+
+```bash
+GPKG_DEFAULT_REPO=https://your-repo.example.com python3 builder.py geminios_core geminios_complex --force
+```
+
 ## Ginit (Init System)
 
 Ginit is modularized for easier development. It provides `init`, `login`, and `getty`.

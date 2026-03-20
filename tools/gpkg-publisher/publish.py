@@ -184,6 +184,7 @@ class AptResolver:
         dependency_choices = self.overrides.get("dependency_choices", {})
         skip_patterns = list(self.blocklist_patterns)
         skip_patterns.extend(self.overrides.get("skip_dependency_patterns", []))
+        drop_patterns = self.overrides.get("provided_by_system_patterns", [])
         depends = normalize_dependency_field(
             ", ".join(
                 value
@@ -195,6 +196,7 @@ class AptResolver:
             dependency_choices=dependency_choices,
             dependency_exists=self.candidate_exists,
             skip_patterns=skip_patterns,
+            drop_patterns=drop_patterns,
         )
 
         package_override = self.overrides.get("package_overrides", {}).get(package_name, {})
@@ -347,6 +349,7 @@ def build_fingerprint(
         "package_override": package_override,
         "dependency_choices": overrides.get("dependency_choices", {}),
         "skip_dependency_patterns": overrides.get("skip_dependency_patterns", []),
+        "provided_by_system_patterns": overrides.get("provided_by_system_patterns", []),
         "skip_packages": overrides.get("skip_packages", []),
         "skip_patterns": overrides.get("skip_patterns", []),
     }

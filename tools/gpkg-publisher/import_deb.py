@@ -83,6 +83,7 @@ def convert_deb_to_gpkg(
     skip_patterns = list(DEFAULT_BLOCKLIST)
     skip_patterns.extend(overrides.get("skip_packages", []))
     skip_patterns.extend(overrides.get("skip_patterns", []))
+    drop_patterns = overrides.get("provided_by_system_patterns", [])
 
     if temp_root is not None:
         ensure_directory(temp_root)
@@ -146,6 +147,7 @@ def convert_deb_to_gpkg(
                 dependency_choices=dependency_choices,
                 dependency_exists=lambda name: package_exists_via_apt(name, verbose=verbose),
                 skip_patterns=skip_patterns,
+                drop_patterns=drop_patterns,
             )
         else:
             depends = list(forced_depends)
