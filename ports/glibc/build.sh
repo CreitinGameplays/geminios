@@ -17,8 +17,37 @@ if [ ! -f "Makefile" ]; then
 fi
 
 make -j$JOBS
+
+# Glibc does not delete stale headers under bits/, so a reused rootfs can end
+# up with a mixed header set from different glibc releases. Reset the glibc-
+# managed bits trees before install to keep the headers self-consistent.
+echo "Resetting glibc bits headers..."
+rm -rf "$ROOTFS/usr/include/bits" "$ROOTFS/usr/include/x86_64-linux-gnu/bits"
+mkdir -p "$ROOTFS/usr/include" "$ROOTFS/usr/include/x86_64-linux-gnu"
+
 # Install to rootfs
 make install DESTDIR="$ROOTFS"
+
+# Sanity-check the staged pthread headers. This catches mixed installs early
+# instead of surfacing later as opaque C++ std::mutex build errors.
+THREAD_BITS_HEADER="$ROOTFS/usr/include/x86_64-linux-gnu/bits/thread-shared-types.h"
+PTHREAD_HEADER="$ROOTFS/usr/include/pthread.h"
+EXPECTED_COND_INIT_OLD='#define PTHREAD_COND_INITIALIZER { { {0}, {0}, {0, 0}, {0, 0}, 0, 0, {0, 0} } }'
+EXPECTED_COND_INIT_NEW='#define PTHREAD_COND_INITIALIZER { { {0}, {0}, {0, 0}, 0, 0, {0, 0}, 0, 0 } }'
+
+if [ -f "$THREAD_BITS_HEADER" ] && [ -f "$PTHREAD_HEADER" ]; then
+    actual_cond_init="$(grep '^#define PTHREAD_COND_INITIALIZER ' "$PTHREAD_HEADER" || true)"
+    if grep -q "__unused_initialized_1" "$THREAD_BITS_HEADER"; then
+        expected_cond_init="$EXPECTED_COND_INIT_NEW"
+    else
+        expected_cond_init="$EXPECTED_COND_INIT_OLD"
+    fi
+
+    if [ "$actual_cond_init" != "$expected_cond_init" ]; then
+        echo "Normalizing pthread condition initializer to match installed bits headers..."
+        sed -i "s|^#define PTHREAD_COND_INITIALIZER .*|$expected_cond_init|" "$PTHREAD_HEADER"
+    fi
+fi
 
 # 2. Ensure critical static libraries are in the expected location
 cp -v libc_nonshared.a "$ROOTFS/usr/lib64/" || true

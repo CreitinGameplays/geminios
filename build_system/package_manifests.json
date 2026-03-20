@@ -26,7 +26,7 @@
     "libcap": [
         "usr/lib64/libcap.so",
         "usr/include/sys/capability.h",
-        "usr/bin/getcap"
+        "usr/sbin/getcap"
     ],
     "python": [
         "usr/bin/python3.11",
@@ -467,6 +467,10 @@
     ],
     "mako": [
         "usr/lib/python3.11/site-packages/mako"
+    ],
+    "jinja2": [
+        "usr/lib64/python3.11/site-packages/jinja2",
+        "usr/lib64/python3.11/site-packages/Jinja2-3.1.4-py3.11.egg-info"
     ],
     "meson": [
         "usr/bin/meson"

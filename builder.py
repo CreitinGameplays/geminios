@@ -100,6 +100,7 @@ PACKAGES = [
     "setuptools",
     "markupsafe",
     "mako",
+    "jinja2",
     "meson",
     "ninja",
     "gperf",
@@ -232,7 +233,8 @@ PACKAGE_DEPENDENCIES = {
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
     "linux-pam": ["libxcrypt", "meson", "ninja", "pkg-config"],
-    "elogind": ["dbus", "eudev", "linux-pam", "libcap", "gperf", "meson", "ninja", "pkg-config"],
+    "jinja2": ["python", "setuptools", "markupsafe"],
+    "elogind": ["dbus", "eudev", "linux-pam", "libcap", "jinja2", "gperf", "meson", "ninja", "pkg-config"],
     "wayland-protocols": ["python", "meson", "ninja", "pkg-config"],
     "wayland": ["expat", "libffi", "pkg-config", "meson", "ninja", "wayland-protocols"],
     "libxkbcommon": [
