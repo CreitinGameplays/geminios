@@ -356,6 +356,14 @@ def safe_filename_component(value: str) -> str:
     return value.replace(":", "%3a").replace("/", "_").replace(" ", "_")
 
 
+def safe_repo_filename_component(value: str) -> str:
+    return value.replace("/", "_").replace(" ", "_")
+
+
+def legacy_repo_filename_component(value: str) -> str:
+    return safe_filename_component(value)
+
+
 def read_seed_packages(path: Path) -> list[str]:
     packages: list[str] = []
     if not path.exists():

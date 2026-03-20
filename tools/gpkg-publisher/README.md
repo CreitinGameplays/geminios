@@ -468,6 +468,26 @@ sudo mkdir -p /var/lib/gpkg-publisher/tmp
 sudo chown -R gpkg-publisher:gpkg-publisher /var/lib/gpkg-publisher/tmp
 ```
 
+### Package URL returns `404`, especially for versions with `:`
+
+Older publisher runs generated repo object names like `1%3a2.0-1.gpkg`. Cloudflare R2 public URLs decode that path segment, so the object key and the public URL stop matching.
+
+Fix:
+
+1. Update the repo checkout to the newer publisher code.
+2. Rerun the publisher once.
+
+```bash
+cd /opt/geminios
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env \
+  --skip-upload
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env
+```
+
+The publisher now migrates legacy `%3a` repo filenames to literal `:` names before rebuilding `Packages.json.zst`, so it can usually repair the repo without rebuilding everything.
+
 ### Too many packages fail dependency resolution
 
 Your filters are too strict for `DISCOVERY_MODE=all`.

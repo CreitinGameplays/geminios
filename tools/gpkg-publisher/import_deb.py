@@ -19,6 +19,7 @@ from common import (  # noqa: E402
     DEFAULT_SYSTEM_PROVIDES_FILE,
     build_gpkg,
     ensure_directory,
+    legacy_repo_filename_component,
     load_env_file,
     matches_any,
     normalize_architecture,
@@ -28,7 +29,7 @@ from common import (  # noqa: E402
     read_pattern_file,
     read_json,
     run,
-    safe_filename_component,
+    safe_repo_filename_component,
     sanitize_section,
 )
 
@@ -219,6 +220,7 @@ def get_output_path_for_fields(
     repo_arch_dir: Path,
     overrides: dict[str, Any],
     apt_arch: str,
+    legacy_filename: bool = False,
 ) -> Path:
     original_name = fields["Package"]
     package_override = overrides.get("package_overrides", {}).get(original_name, {})
@@ -228,7 +230,10 @@ def get_output_path_for_fields(
         "architecture",
         normalize_architecture(fields.get("Architecture", apt_arch)),
     )
-    version_for_filename = safe_filename_component(fields["Version"])
+    if legacy_filename:
+        version_for_filename = legacy_repo_filename_component(fields["Version"])
+    else:
+        version_for_filename = safe_repo_filename_component(fields["Version"])
     output_dir = repo_arch_dir / "pool" / section
     ensure_directory(output_dir)
     return output_dir / f"{gpkg_name}_{version_for_filename}_{gpkg_arch}.gpkg"

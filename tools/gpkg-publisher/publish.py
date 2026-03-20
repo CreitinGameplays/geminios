@@ -390,6 +390,54 @@ def write_sidecar(output_path: Path, payload: dict[str, Any]) -> None:
     write_json(build_sidecar_path(output_path), payload)
 
 
+def translate_legacy_repo_filename(name: str) -> str:
+    return name.replace("%3a", ":").replace("%3A", ":")
+
+
+def migrate_legacy_repo_filenames(repo_arch_dir: Path, *, verbose: bool) -> dict[str, str]:
+    migrations: dict[str, str] = {}
+
+    for legacy_path in sorted(repo_arch_dir.rglob("*.gpkg")):
+        target_name = translate_legacy_repo_filename(legacy_path.name)
+        if target_name == legacy_path.name:
+            continue
+
+        target_path = legacy_path.with_name(target_name)
+        legacy_sidecar = build_sidecar_path(legacy_path)
+        target_sidecar = build_sidecar_path(target_path)
+
+        if target_path.exists():
+            if hash_file(target_path) != hash_file(legacy_path):
+                raise RuntimeError(
+                    f"Cannot migrate {legacy_path} to {target_path}: target already exists with different contents"
+                )
+            legacy_path.unlink()
+        else:
+            if verbose:
+                print(f"Migrating repo filename {legacy_path.name} -> {target_path.name}")
+            legacy_path.rename(target_path)
+
+        if legacy_sidecar.exists():
+            if target_sidecar.exists():
+                legacy_sidecar.unlink()
+            else:
+                legacy_sidecar.rename(target_sidecar)
+
+        migrations[str(legacy_path)] = str(target_path)
+
+    return migrations
+
+
+def apply_path_migrations_to_state(package_state: dict[str, Any], migrations: dict[str, str]) -> bool:
+    changed = False
+    for payload in package_state.values():
+        output_path = payload.get("output_path")
+        if output_path in migrations:
+            payload["output_path"] = migrations[output_path]
+            changed = True
+    return changed
+
+
 def load_existing_gpkg_metadata(package_path: Path, *, temp_root: Path) -> dict[str, Any]:
     ensure_directory(temp_root)
     with tempfile.TemporaryDirectory(prefix="gpkg-reuse-", dir=str(temp_root)) as temp_dir_name:
@@ -520,6 +568,15 @@ def main() -> int:
 
     state = read_json(state_file, {"packages": {}})
     package_state = state.setdefault("packages", {})
+    path_migrations = migrate_legacy_repo_filenames(repo_arch_dir, verbose=args.verbose)
+    if path_migrations:
+        if apply_path_migrations_to_state(package_state, path_migrations):
+            persist_progress(
+                state_file=state_file,
+                report_file=report_file,
+                state=state,
+                report=report,
+            )
 
     for package in packages:
         try:
@@ -539,6 +596,13 @@ def main() -> int:
                 overrides=overrides,
                 apt_arch=config["APT_ARCH"],
             )
+            legacy_output_path = get_output_path_for_fields(
+                package.fields,
+                repo_arch_dir=repo_arch_dir,
+                overrides=overrides,
+                apt_arch=config["APT_ARCH"],
+                legacy_filename=True,
+            )
 
             cached = package_state.get(package.name, {})
             output_path_value = cached.get("output_path")
@@ -548,6 +612,8 @@ def main() -> int:
                 sidecar_candidates.append(output_path)
             if expected_output_path not in sidecar_candidates:
                 sidecar_candidates.append(expected_output_path)
+            if legacy_output_path not in sidecar_candidates:
+                sidecar_candidates.append(legacy_output_path)
 
             if (
                 not args.force_import
