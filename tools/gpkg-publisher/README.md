@@ -313,6 +313,7 @@ Supported top-level keys:
 - `skip_dependency_patterns`: dependency names to ignore during normalization.
 - `provided_by_system_patterns`: dependency names or globs that should be dropped entirely because GeminiOS already ships the runtime or base-system equivalent.
 - `dependency_choices`: choose one side of a Debian alternative dependency.
+- `provider_choices`: choose a concrete package for a Debian virtual package when multiple providers exist.
 - `package_overrides`: package-specific behavior.
 
 The publisher already merges the base defaults from `SYSTEM_PROVIDES_FILE` into `provided_by_system_patterns`, so you usually only need to add site-specific extras in `overrides.json`.
@@ -343,6 +344,19 @@ Example dependency choice:
 }
 ```
 
+Example virtual-package provider choice:
+
+```json
+{
+  "dependency_choices": {
+    "lightdm::libpam-systemd | logind": "logind"
+  },
+  "provider_choices": {
+    "logind": "libpam-elogind"
+  }
+}
+```
+
 Example extra base-system dependency suppression:
 
 ```json
@@ -363,6 +377,8 @@ Example extra base-system dependency suppression:
 ```
 
 Use that only for things GeminiOS already provides globally. This is the main lever for packages that fail only because they depend on Debian base runtime packages.
+
+The resolver will automatically follow a virtual package to a provider when there is exactly one viable provider. If multiple providers exist, use `provider_choices` to make the selection explicit.
 
 Package-specific choices use the format:
 

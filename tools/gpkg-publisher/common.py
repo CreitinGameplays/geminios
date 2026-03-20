@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -98,6 +99,76 @@ def load_env_file(path: Path) -> dict[str, str]:
             value = value[1:-1]
         env[key] = value
     return env
+
+
+@functools.lru_cache(maxsize=4096)
+def apt_candidate_version(package_name: str, *, verbose: bool) -> str | None:
+    try:
+        output = run(["apt-cache", "policy", package_name], capture=True, verbose=verbose).stdout
+    except RuntimeError:
+        return None
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Candidate:"):
+            candidate = stripped.split(":", 1)[1].strip()
+            if candidate not in {"", "(none)"}:
+                return candidate
+            return None
+    return None
+
+
+@functools.lru_cache(maxsize=4096)
+def apt_reverse_providers(package_name: str, *, apt_arch: str, verbose: bool) -> tuple[str, ...]:
+    try:
+        output = run(["apt-cache", "showpkg", package_name], capture=True, verbose=verbose).stdout
+    except RuntimeError:
+        return ()
+
+    providers: list[str] = []
+    in_reverse_provides = False
+    for raw_line in output.splitlines():
+        stripped = raw_line.strip()
+        if stripped == "Reverse Provides:":
+            in_reverse_provides = True
+            continue
+        if not in_reverse_provides:
+            continue
+        if not stripped:
+            break
+        token = stripped.split()[0]
+        name, sep, arch = token.partition(":")
+        if sep and arch and arch != apt_arch:
+            continue
+        if name not in providers:
+            providers.append(name)
+    return tuple(providers)
+
+
+def build_provider_resolver(
+    *,
+    apt_arch: str,
+    overrides: dict[str, Any],
+    provider_exists: Callable[[str], bool],
+    verbose: bool,
+) -> Callable[[str], str | None]:
+    provider_choices = overrides.get("provider_choices", {})
+
+    @functools.lru_cache(maxsize=4096)
+    def resolve(package_name: str) -> str | None:
+        explicit = provider_choices.get(package_name)
+        if explicit:
+            return explicit
+
+        candidates = [
+            provider
+            for provider in apt_reverse_providers(package_name, apt_arch=apt_arch, verbose=verbose)
+            if provider != package_name and provider_exists(provider)
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    return resolve
 
 
 def ensure_directory(path: Path) -> None:
@@ -250,7 +321,12 @@ def normalize_relation_atom(atom: str, apt_arch: str) -> dict[str, str] | None:
     op = match.group("op")
     version = match.group("version")
     normalized = name if not op else f"{name} ({op} {version.strip()})"
-    return {"name": name, "normalized": normalized}
+    return {
+        "name": name,
+        "normalized": normalized,
+        "op": op or "",
+        "version": version.strip() if version else "",
+    }
 
 
 def unique_items(values: list[str]) -> list[str]:
@@ -277,9 +353,21 @@ def normalize_dependency_field(
     dependency_exists: Callable[[str], bool],
     skip_patterns: list[str],
     drop_patterns: list[str] | None = None,
+    provider_resolver: Callable[[str], str | None] | None = None,
 ) -> list[str]:
     drop_patterns = drop_patterns or []
     dependencies: list[str] = []
+
+    def resolve_provider(parsed: dict[str, str]) -> tuple[str, str]:
+        if provider_resolver is None:
+            return parsed["name"], parsed["normalized"]
+        provider = provider_resolver(parsed["name"])
+        if not provider or provider == parsed["name"]:
+            return parsed["name"], parsed["normalized"]
+        if parsed["op"]:
+            return provider, f"{provider} ({parsed['op']} {parsed['version']})"
+        return provider, provider
+
     for group in split_top_level(value, ","):
         alternatives = split_top_level(group, "|")
         override_key = f"{package_name}::{group}"
@@ -290,22 +378,24 @@ def normalize_dependency_field(
         if choice:
             parsed = normalize_relation_atom(choice, apt_arch)
             if parsed:
-                if matches_any(parsed["name"], drop_patterns):
+                provider_name, provider_normalized = resolve_provider(parsed)
+                if matches_any(parsed["name"], drop_patterns) or matches_any(provider_name, drop_patterns):
                     dropped_as_system_dependency = True
                 else:
-                    selected = parsed["normalized"]
+                    selected = provider_normalized
         else:
             for alternative in alternatives:
                 parsed = normalize_relation_atom(alternative, apt_arch)
                 if not parsed:
                     continue
-                if matches_any(parsed["name"], drop_patterns):
+                provider_name, provider_normalized = resolve_provider(parsed)
+                if matches_any(parsed["name"], drop_patterns) or matches_any(provider_name, drop_patterns):
                     dropped_as_system_dependency = True
                     continue
-                if matches_any(parsed["name"], skip_patterns):
+                if matches_any(parsed["name"], skip_patterns) or matches_any(provider_name, skip_patterns):
                     continue
-                if dependency_exists(parsed["name"]):
-                    selected = parsed["normalized"]
+                if dependency_exists(provider_name):
+                    selected = provider_normalized
                     break
 
         if selected is None and dropped_as_system_dependency:
@@ -315,10 +405,11 @@ def normalize_dependency_field(
             for alternative in alternatives:
                 parsed = normalize_relation_atom(alternative, apt_arch)
                 if parsed:
-                    if matches_any(parsed["name"], drop_patterns):
+                    provider_name, provider_normalized = resolve_provider(parsed)
+                    if matches_any(parsed["name"], drop_patterns) or matches_any(provider_name, drop_patterns):
                         dropped_as_system_dependency = True
                         continue
-                    selected = parsed["normalized"]
+                    selected = provider_normalized
                     break
 
         if selected is None and dropped_as_system_dependency:

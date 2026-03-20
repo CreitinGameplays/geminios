@@ -21,6 +21,8 @@ if str(SCRIPT_DIR) not in sys.path:
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
     DEFAULT_SYSTEM_PROVIDES_FILE,
+    apt_candidate_version,
+    build_provider_resolver,
     choose_first_matching_stanza,
     ensure_directory,
     hash_file,
@@ -99,9 +101,22 @@ class AptResolver:
         self.order: list[ResolvedPackage] = []
         self.failures: dict[str, str] = {}
         self.active: set[str] = set()
+        self.provider_resolver = build_provider_resolver(
+            apt_arch=self.apt_arch,
+            overrides=self.overrides,
+            provider_exists=self._provider_target_exists,
+            verbose=self.verbose,
+        )
 
     def candidate_exists(self, package_name: str) -> bool:
-        return self._load_package(package_name) is not None
+        if matches_any(package_name, self.system_provided_patterns):
+            return True
+        if self._apt_candidate_version(package_name) is not None:
+            return True
+        provider_name = self.provider_resolver(package_name)
+        if provider_name is None:
+            return False
+        return self._provider_target_exists(provider_name)
 
     def resolve_all(self, packages: list[str]) -> tuple[list[ResolvedPackage], dict[str, str]]:
         for package_name in packages:
@@ -120,6 +135,14 @@ class AptResolver:
         if matches_any(package_name, self.blocklist_patterns):
             self.failures[package_name] = "blocked by pattern"
             return False
+        provider_name = self.provider_resolver(package_name)
+        if provider_name and provider_name != package_name:
+            if not self._resolve_one(provider_name, parent=package_name):
+                self.failures[package_name] = f"provider {provider_name} could not be resolved"
+                return False
+            if provider_name in self.resolved:
+                self.resolved[package_name] = self.resolved[provider_name]
+            return True
 
         package = self._load_package(package_name)
         if package is None:
@@ -147,23 +170,8 @@ class AptResolver:
             self.package_cache[package_name] = None
             return None
 
-        try:
-            policy_output = run(
-                ["apt-cache", "policy", package_name],
-                capture=True,
-                verbose=self.verbose,
-            ).stdout
-        except RuntimeError:
-            self.package_cache[package_name] = None
-            return None
-
-        candidate = None
-        for line in policy_output.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("Candidate:"):
-                candidate = stripped.split(":", 1)[1].strip()
-                break
-        if candidate in {None, "", "(none)"}:
+        candidate = self._apt_candidate_version(package_name)
+        if candidate is None:
             self.package_cache[package_name] = None
             return None
 
@@ -204,6 +212,7 @@ class AptResolver:
             dependency_exists=self.candidate_exists,
             skip_patterns=skip_patterns,
             drop_patterns=drop_patterns,
+            provider_resolver=self.provider_resolver,
         )
 
         package_override = self.overrides.get("package_overrides", {}).get(package_name, {})
@@ -219,6 +228,12 @@ class AptResolver:
         )
         self.package_cache[package_name] = resolved
         return resolved
+
+    def _apt_candidate_version(self, package_name: str) -> str | None:
+        return apt_candidate_version(package_name, verbose=self.verbose)
+
+    def _provider_target_exists(self, package_name: str) -> bool:
+        return matches_any(package_name, self.system_provided_patterns) or self._apt_candidate_version(package_name) is not None
 
 
 def parse_bool(value: str) -> bool:

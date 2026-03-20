@@ -2,8 +2,14 @@
 # One entry per line. Versioned entries may use Debian-style syntax, e.g.:
 # libc6 (>= 2.39)
 
+adduser
+base-files
+base-passwd
 debianutils
+dbus
+dbus-system-bus
 default-dbus-session-bus
+default-dbus-system-bus
 dbus-session-bus
 dpkg
 init-system-helpers
@@ -16,6 +22,8 @@ lsb-base
 perl-base
 python3
 python3-minimal
+passwd
+sed
 sysvinit-utils
 x11-common
 x-terminal-emulator

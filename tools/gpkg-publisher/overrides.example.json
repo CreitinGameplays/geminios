@@ -24,7 +24,11 @@
   ],
   "dependency_choices": {
     "debconf | debconf-2.0": "debconf",
-    "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend"
+    "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend",
+    "lightdm::libpam-systemd | logind": "logind"
+  },
+  "provider_choices": {
+    "logind": "libpam-elogind"
   },
   "package_overrides": {
     "nano": {

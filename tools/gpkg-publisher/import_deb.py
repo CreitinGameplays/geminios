@@ -17,6 +17,8 @@ if str(SCRIPT_DIR) not in sys.path:
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
     DEFAULT_SYSTEM_PROVIDES_FILE,
+    apt_candidate_version,
+    build_provider_resolver,
     build_gpkg,
     ensure_directory,
     legacy_repo_filename_component,
@@ -55,16 +57,7 @@ def deb_description(fields: dict[str, str]) -> str:
 
 @functools.lru_cache(maxsize=4096)
 def package_exists_via_apt(package_name: str, *, verbose: bool) -> bool:
-    try:
-        output = run(["apt-cache", "policy", package_name], capture=True, verbose=verbose).stdout
-    except RuntimeError:
-        return False
-    for line in output.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("Candidate:"):
-            candidate = stripped.split(":", 1)[1].strip()
-            return candidate not in {"", "(none)"}
-    return False
+    return apt_candidate_version(package_name, verbose=verbose) is not None
 
 
 def convert_deb_to_gpkg(
@@ -87,6 +80,12 @@ def convert_deb_to_gpkg(
     skip_patterns.extend(overrides.get("skip_packages", []))
     skip_patterns.extend(overrides.get("skip_patterns", []))
     drop_patterns = overrides.get("provided_by_system_patterns", [])
+    provider_resolver = build_provider_resolver(
+        apt_arch=apt_arch,
+        overrides=overrides,
+        provider_exists=lambda name: matches_any(name, drop_patterns) or package_exists_via_apt(name, verbose=verbose),
+        verbose=verbose,
+    )
 
     if temp_root is not None:
         ensure_directory(temp_root)
@@ -151,6 +150,7 @@ def convert_deb_to_gpkg(
                 dependency_exists=lambda name: package_exists_via_apt(name, verbose=verbose),
                 skip_patterns=skip_patterns,
                 drop_patterns=drop_patterns,
+                provider_resolver=provider_resolver,
             )
         else:
             depends = list(forced_depends)
