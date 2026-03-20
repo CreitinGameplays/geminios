@@ -313,6 +313,18 @@
         "usr/lib64/libudev.so",
         "usr/lib64/pkgconfig/libudev.pc"
     ],
+    "wayland-protocols": [
+        "usr/share/wayland-protocols",
+        "usr/share/pkgconfig/wayland-protocols.pc"
+    ],
+    "wayland": [
+        "usr/bin/wayland-scanner",
+        "usr/lib64/libwayland-client.so",
+        "usr/lib64/libwayland-cursor.so",
+        "usr/lib64/libwayland-egl.so",
+        "usr/lib64/libwayland-server.so",
+        "usr/lib64/pkgconfig/wayland-client.pc"
+    ],
     "libdrm": [
         "usr/lib64/libdrm.so",
         "usr/lib64/pkgconfig/libdrm.pc"

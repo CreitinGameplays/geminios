@@ -156,6 +156,11 @@ include /etc/ld.so.conf.d/*.conf
 EOF
 mkdir -p "$ROOTFS/etc/ld.so.conf.d"
 
+# Prepare runtime/session paths used by Wayland-capable applications.
+mkdir -p "$ROOTFS/run/user"
+chmod 755 "$ROOTFS/run/user"
+mkdir -p "$ROOTFS/usr/share/wayland-sessions"
+
 # Fix /var/run -> /run
 rm -rf "$ROOTFS/var/run"
 ln -sf /run "$ROOTFS/var/run"

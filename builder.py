@@ -163,6 +163,9 @@ PACKAGES = [
     "font-util",
     "system-fonts",
     "eudev",
+    # Wayland Foundation
+    "wayland-protocols",
+    "wayland",
     "libdrm",
     "libglvnd",
     "mesa",
@@ -225,6 +228,7 @@ PACKAGE_DEPENDENCIES = {
     "ca-certificates": [],
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
+    "wayland": ["wayland-protocols"],
 }
 
 def resolve_requested_packages(requested_packages):
@@ -417,8 +421,9 @@ def build_package(pkg_name, index, total, force=False, debug=False):
         print(color(" [SKIPPED]", Colors.YELLOW) + " (No build script)")
         return True
 
-    # Use target environment for everything after glibc and kernel_headers
-    use_target_env = pkg_name not in ["kernel_headers", "glibc"]
+    # A few packages need a true native host toolchain/bootstrap environment.
+    host_toolchain_packages = {"kernel_headers", "glibc", "wayland"}
+    use_target_env = pkg_name not in host_toolchain_packages
     ret = run_command(build_script, cwd=pkg_dir, log_file=log_file, use_target_env=use_target_env, debug=debug)
     
     duration = time.time() - start_time

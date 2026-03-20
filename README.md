@@ -101,6 +101,25 @@ This ensures that every package build automagically targets GeminiOS without req
 
 - **Verification**: The build system now uses a manifest-based verification system (`build_system/package_manifests.json`). If a package build fails or artifacts are missing, the builder will report exactly what is missing.
 
+## Display Stack Status
+
+GeminiOS currently boots and runs a regular X11 desktop session. The base image now includes the Wayland protocol/runtime foundation as part of the graphics stack:
+
+- `wayland` and `wayland-protocols`
+- Wayland-enabled `libxkbcommon`
+- Wayland-enabled GTK 3
+- Mesa built with both `x11` and `wayland` platforms
+
+That solves the class of runtime failures caused by packages expecting GTK/Wayland client symbols to exist.
+
+What it does **not** mean yet:
+
+- GeminiOS does not ship a Wayland compositor in-tree yet.
+- The default desktop/session flow is still X11.
+- Packages that require a real Wayland compositor/session manager still need that compositor to be added separately.
+
+So the current state is: **Wayland-capable userspace foundation, but not a full native Wayland desktop session yet.**
+
 ## Using External GPKG Repositories
 
 If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:
