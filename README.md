@@ -97,6 +97,8 @@ This ensures that every package build automagically targets GeminiOS without req
 
 - **Core System (Ginit)**: The initialization system and core utilities reside in the `ginit/` directory. It is built as part of the `geminios_core` port but can be developed independently using its own `Makefile`.
 
+- **Package Manager (GPKG)**: The package manager now lives in the top-level `gpkg/` directory, with its own `src/`, `README`, and `Makefile`. It is integrated into the OS through the `geminios_complex` port, but can also be built independently.
+
 - **Userspace Packages**: Most other system utilities are in `packages/` (system utilities).
 
 - **Verification**: The build system now uses a manifest-based verification system (`build_system/package_manifests.json`). If a package build fails or artifacts are missing, the builder will report exactly what is missing.
@@ -191,6 +193,20 @@ To build it manually:
 cd ginit && make
 ```
 For more information, see [ginit/README.md](https://github.com/CreitinGameplays/ginit/blob/master/README.md).
+
+## GPKG (Package Manager)
+
+To build the package manager standalone:
+
+```bash
+cd gpkg && make
+```
+
+To install it into a rootfs:
+
+```bash
+cd gpkg && make install DESTDIR=/path/to/rootfs
+```
 
 ## Build System Architecture
 
