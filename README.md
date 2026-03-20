@@ -122,6 +122,8 @@ What it does **not** mean yet:
 
 So the current state is: **Wayland-capable userspace foundation, but not a full native Wayland desktop session yet.**
 
+The implementation roadmap for closing that gap is tracked in [GNOME_WAYLAND_SUPPORT.md](/home/creitin/Documents/geminios/to_dos/GNOME_WAYLAND_SUPPORT.md).
+
 ## Using External GPKG Repositories
 
 If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:

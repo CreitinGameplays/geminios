@@ -429,7 +429,9 @@
     ],
     "gtk3": [
         "usr/lib64/libgtk-3.so",
-        "usr/lib64/pkgconfig/gtk+-3.0.pc"
+        "usr/lib64/pkgconfig/gtk+-3.0.pc",
+        "usr/lib64/pkgconfig/gdk-wayland-3.0.pc",
+        "usr/lib64/pkgconfig/gtk+-wayland-3.0.pc"
     ],
     "grub": [
         "usr/sbin/grub-install"

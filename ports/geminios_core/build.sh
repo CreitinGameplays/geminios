@@ -149,18 +149,61 @@ include /etc/ld.so.conf.d/*.conf
 EOF
 mkdir -p "$ROOTFS/etc/ld.so.conf.d"
 
+# Compatibility shim for Debian desktop packages linked against GTK Wayland
+# helpers when GeminiOS is still running an X11 session stack.
+mkdir -p "$ROOTFS/usr/lib64"
+gcc -shared -fPIC "$ROOT_DIR/build_system/gdk_wayland_compat.c" \
+    -o "$ROOTFS/usr/lib64/libgdk-wayland-compat.so"
+
+cat > "$ROOTFS/bin/startxfce4" <<'EOF'
+#!/bin/sh
+REAL_STARTXFCE4="/usr/bin/startxfce4"
+
+if [ ! -x "$REAL_STARTXFCE4" ]; then
+    echo "E: $REAL_STARTXFCE4 was not found." >&2
+    exit 1
+fi
+
+export GDK_BACKEND="${GDK_BACKEND:-x11}"
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-x11}"
+
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+fi
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+
+if [ ! -f /usr/lib64/pkgconfig/gdk-wayland-3.0.pc ] && [ -r /usr/lib64/libgdk-wayland-compat.so ]; then
+    export LD_PRELOAD="/usr/lib64/libgdk-wayland-compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-run-session >/dev/null 2>&1; then
+    exec dbus-run-session -- "$REAL_STARTXFCE4" "$@"
+fi
+
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-launch >/dev/null 2>&1; then
+    eval "$(dbus-launch --sh-syntax)"
+    export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
+fi
+
+exec "$REAL_STARTXFCE4" "$@"
+EOF
+chmod 755 "$ROOTFS/bin/startxfce4"
+
 # Prepare runtime/session paths used by Wayland-capable applications.
 mkdir -p "$ROOTFS/run/user"
 chmod 755 "$ROOTFS/run/user"
 mkdir -p "$ROOTFS/usr/share/wayland-sessions"
 
 # Fix /var/run -> /run
+mkdir -p "$ROOTFS/var"
 rm -rf "$ROOTFS/var/run"
 ln -sf /run "$ROOTFS/var/run"
 
 # 5. Xorg Configuration
 mkdir -p "$ROOTFS/etc/X11"
 mkdir -p "$ROOTFS/var/lib/xkb"
+mkdir -p "$ROOTFS/usr/share/X11/xkb"
 chmod 777 "$ROOTFS/var/lib/xkb"
 # Ensure compiled directory points to writable location
 rm -rf "$ROOTFS/usr/share/X11/xkb/compiled"

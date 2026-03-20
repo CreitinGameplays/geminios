@@ -16,3 +16,4 @@ Installing <package_name>
 [===                      ] 10%
 ✓ Installed <package_name>
 [x] Implement GPKG v2 (Structured packages, metadata, and repository system)
+[ ] Execute the GNOME Shell + full Wayland runtime roadmap in [GNOME_WAYLAND_SUPPORT.md](/home/creitin/Documents/geminios/to_dos/GNOME_WAYLAND_SUPPORT.md) before publishing the full GNOME desktop as `.gpkg`

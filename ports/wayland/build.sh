@@ -7,3 +7,15 @@ rm -rf build
 meson setup build --prefix=/usr --libdir=lib64 -Ddocumentation=false -Ddtd_validation=false -Dtests=false
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install
+
+for pc in wayland-client.pc wayland-cursor.pc wayland-egl.pc wayland-server.pc; do
+    if [ ! -f "$ROOTFS/usr/lib64/pkgconfig/$pc" ]; then
+        echo "ERROR: Wayland build is missing $pc."
+        exit 1
+    fi
+done
+
+if [ ! -x "$ROOTFS/usr/bin/wayland-scanner" ]; then
+    echo "ERROR: Wayland build is missing wayland-scanner."
+    exit 1
+fi

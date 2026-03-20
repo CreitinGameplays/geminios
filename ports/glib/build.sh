@@ -1,13 +1,43 @@
 #!/bin/bash
 set -e
 
-GLIB_VER="2.78.3"
-download_and_extract "https://download.gnome.org/sources/glib/2.78/glib-$GLIB_VER.tar.xz" "glib-$GLIB_VER.tar.xz" "glib-$GLIB_VER"
+GLIB_VER="2.84.4"
+download_and_extract "https://download.gnome.org/sources/glib/2.84/glib-$GLIB_VER.tar.xz" "glib-$GLIB_VER.tar.xz" "glib-$GLIB_VER"
 
 cd "$DEP_DIR/glib-$GLIB_VER"
 
 OLD_PYTHONHOME=$PYTHONHOME
 unset PYTHONHOME
+
+# Build GLib with the host compiler, while resolving GeminiOS deps from the
+# staged rootfs. Meson's native sanity checks break if we point the compiler
+# at the in-progress sysroot libc directly.
+export CC="${CC:-cc}"
+export CXX="${CXX:-c++}"
+export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
+export CFLAGS="-O2 -fPIC -Wno-error"
+export CXXFLAGS="-O2 -fPIC -Wno-error"
+export LDFLAGS=""
+
+PKG_CONFIG_REAL="${PKG_CONFIG:-pkg-config}"
+PKG_CONFIG_FILTER="$PWD/pkg-config-glib-filter.sh"
+cat > "$PKG_CONFIG_FILTER" <<EOF
+#!/bin/sh
+set -e
+out="\$($PKG_CONFIG_REAL "\$@")"
+filtered=""
+for token in \$out; do
+    if [ "\$token" = "-I$ROOTFS/usr/include" ]; then
+        continue
+    fi
+    filtered="\$filtered \$token"
+done
+printf '%s\n' "\${filtered# }"
+EOF
+chmod 755 "$PKG_CONFIG_FILTER"
+export PKG_CONFIG="$PKG_CONFIG_FILTER"
 
 rm -rf build
 meson setup build --prefix=/usr --libdir=lib64 \
@@ -19,6 +49,7 @@ meson setup build --prefix=/usr --libdir=lib64 \
     
 ninja -v -C build
 DESTDIR="$ROOTFS" ninja -C build install
+rm -f "$PKG_CONFIG_FILTER"
 
 # Fix python scripts to work on host (for build) and target
 for tool in glib-mkenums glib-genmarshal; do
@@ -63,4 +94,3 @@ EOF
 done
 
 export PYTHONHOME=$OLD_PYTHONHOME
-
