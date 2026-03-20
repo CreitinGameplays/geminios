@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
     "DISCOVERY_MODE": "seeds",
     "REPO_ROOT": "/var/lib/gpkg-publisher/repo",
     "DOWNLOAD_DIR": "/var/lib/gpkg-publisher/cache/debs",
+    "TEMP_DIR": "/var/lib/gpkg-publisher/tmp",
     "STATE_FILE": "/var/lib/gpkg-publisher/state/state.json",
     "REPORT_FILE": "/var/lib/gpkg-publisher/state/last-run.json",
     "SEED_FILE": "/etc/gpkg-publisher/packages.txt",
@@ -54,6 +55,7 @@ DEFAULT_CONFIG = {
     "INCLUDE_MAINTAINER_SCRIPTS": "0",
     "ALLOW_ESSENTIAL": "0",
     "RCLONE_DEST": "",
+    "RCLONE_CONFIG": "",
     "RCLONE_EXTRA_ARGS": "",
     "UPLOAD_COMMAND": "",
     "BLOCKLIST_PATTERNS": ",".join(DEFAULT_BLOCKLIST),
@@ -305,7 +307,11 @@ def build_upload_command(config: dict[str, str], repo_root: Path) -> list[str] |
     if not rclone_dest:
         return None
 
-    command = ["rclone", "copy", str(repo_root), rclone_dest, "--fast-list", "--checksum"]
+    command = ["rclone"]
+    rclone_config = config.get("RCLONE_CONFIG", "").strip()
+    if rclone_config:
+        command.extend(["--config", rclone_config])
+    command.extend(["copy", str(repo_root), rclone_dest, "--fast-list", "--checksum"])
     extra_args = config.get("RCLONE_EXTRA_ARGS", "").strip()
     if extra_args:
         command.extend(shlex.split(extra_args))
@@ -365,6 +371,7 @@ def main() -> int:
     repo_root = Path(config["REPO_ROOT"]).expanduser()
     repo_arch_dir = repo_root / config["ARCH"]
     download_dir = Path(config["DOWNLOAD_DIR"]).expanduser()
+    temp_dir = Path(config["TEMP_DIR"]).expanduser()
     state_file = Path(config["STATE_FILE"]).expanduser()
     report_file = Path(config["REPORT_FILE"]).expanduser()
     seed_file = Path(config["SEED_FILE"]).expanduser()
@@ -380,6 +387,7 @@ def main() -> int:
 
     ensure_directory(repo_arch_dir)
     ensure_directory(download_dir)
+    ensure_directory(temp_dir)
     ensure_directory(state_file.parent)
     ensure_directory(report_file.parent)
 
@@ -468,6 +476,7 @@ def main() -> int:
                 include_maintainer_scripts=include_maintainer_scripts,
                 allow_essential=allow_essential,
                 compression_level=zstd_level,
+                temp_root=temp_dir,
                 verbose=args.verbose,
             )
             report["built"].append(package.name)
@@ -483,7 +492,12 @@ def main() -> int:
             report["failures"][package.name] = str(exc)
 
     try:
-        indexed_packages = scan_repo(repo_arch_dir, compression_level=index_zstd_level, verbose=args.verbose)
+        indexed_packages = scan_repo(
+            repo_arch_dir,
+            compression_level=index_zstd_level,
+            temp_root=temp_dir,
+            verbose=args.verbose,
+        )
         report["indexed_count"] = len(indexed_packages)
     except Exception as exc:
         failures["index"] = str(exc)

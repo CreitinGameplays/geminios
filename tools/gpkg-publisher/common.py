@@ -353,6 +353,7 @@ def build_gpkg(
     output_path: Path,
     *,
     compression_level: int,
+    temp_root: Path | None = None,
     verbose: bool = False,
 ) -> None:
     control_path = src_dir / "control.json"
@@ -366,7 +367,13 @@ def build_gpkg(
     ensure_directory(output_path.parent)
     ensure_directory(root_dir)
 
-    with tempfile.TemporaryDirectory(prefix="gpkg-build-") as temp_dir_name:
+    if temp_root is not None:
+        ensure_directory(temp_root)
+
+    with tempfile.TemporaryDirectory(
+        prefix="gpkg-build-",
+        dir=str(temp_root) if temp_root is not None else None,
+    ) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         data_tar = temp_dir / "data.tar"
         data_tar_zst = temp_dir / "data.tar.zst"
@@ -418,14 +425,25 @@ def build_gpkg(
         )
 
 
-def scan_repo(repo_dir: Path, *, compression_level: int, verbose: bool = False) -> list[dict[str, Any]]:
+def scan_repo(
+    repo_dir: Path,
+    *,
+    compression_level: int,
+    temp_root: Path | None = None,
+    verbose: bool = False,
+) -> list[dict[str, Any]]:
     packages: list[dict[str, Any]] = []
     repo_dir = repo_dir.resolve()
     ensure_directory(repo_dir)
+    if temp_root is not None:
+        ensure_directory(temp_root)
 
     for gpkg_path in sorted(repo_dir.rglob("*.gpkg")):
         relative_path = gpkg_path.relative_to(repo_dir).as_posix()
-        with tempfile.TemporaryDirectory(prefix="gpkg-scan-") as temp_dir_name:
+        with tempfile.TemporaryDirectory(
+            prefix="gpkg-scan-",
+            dir=str(temp_root) if temp_root is not None else None,
+        ) as temp_dir_name:
             temp_tar = Path(temp_dir_name) / "package.tar"
             if verbose:
                 print(f"Scanning {relative_path}")

@@ -8,6 +8,7 @@ Type=oneshot
 User=gpkg-publisher
 Group=gpkg-publisher
 WorkingDirectory=/opt/geminios
+Environment=TMPDIR=/var/lib/gpkg-publisher/tmp
 ExecStart=/usr/bin/python3 /opt/geminios/tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env
 NoNewPrivileges=yes
 PrivateTmp=yes

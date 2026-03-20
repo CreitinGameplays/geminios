@@ -74,6 +74,7 @@ def convert_deb_to_gpkg(
     include_maintainer_scripts: bool,
     allow_essential: bool,
     compression_level: int,
+    temp_root: Path | None = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
     deb_path = deb_path.resolve()
@@ -83,7 +84,13 @@ def convert_deb_to_gpkg(
     skip_patterns.extend(overrides.get("skip_packages", []))
     skip_patterns.extend(overrides.get("skip_patterns", []))
 
-    with tempfile.TemporaryDirectory(prefix="gpkg-import-") as temp_dir_name:
+    if temp_root is not None:
+        ensure_directory(temp_root)
+
+    with tempfile.TemporaryDirectory(
+        prefix="gpkg-import-",
+        dir=str(temp_root) if temp_root is not None else None,
+    ) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         payload_dir = temp_dir / "payload"
         control_dir = temp_dir / "control"
@@ -165,7 +172,7 @@ def convert_deb_to_gpkg(
             json.dump(control_json, handle, indent=2)
             handle.write("\n")
 
-        shutil.copytree(payload_dir, root_dir, dirs_exist_ok=True)
+        shutil.copytree(payload_dir, root_dir, dirs_exist_ok=True, symlinks=True)
 
         copy_scripts = include_maintainer_scripts or package_override.get("include_maintainer_scripts", False)
         if copy_scripts:
@@ -182,7 +189,13 @@ def convert_deb_to_gpkg(
         output_dir = repo_arch_dir / "pool" / section
         ensure_directory(output_dir)
         output_path = output_dir / f"{gpkg_name}_{version_for_filename}_{gpkg_arch}.gpkg"
-        build_gpkg(source_dir, output_path, compression_level=compression_level, verbose=verbose)
+        build_gpkg(
+            source_dir,
+            output_path,
+            compression_level=compression_level,
+            temp_root=temp_root,
+            verbose=verbose,
+        )
 
     return {
         "package": gpkg_name,
@@ -204,6 +217,7 @@ def main() -> int:
     parser.add_argument("--include-maintainer-scripts", action="store_true", help="Copy Debian maintainer scripts into the gpkg")
     parser.add_argument("--allow-essential", action="store_true", help="Allow importing Essential: yes packages")
     parser.add_argument("--zstd-level", type=int, default=10, help="zstd compression level for generated packages")
+    parser.add_argument("--temp-dir", help="Directory to use for large temporary files instead of /tmp")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show executed commands")
 
     args = parser.parse_args()
@@ -224,6 +238,7 @@ def main() -> int:
                 include_maintainer_scripts=args.include_maintainer_scripts,
                 allow_essential=args.allow_essential,
                 compression_level=args.zstd_level,
+                temp_root=Path(args.temp_dir).expanduser() if args.temp_dir else None,
                 verbose=args.verbose,
             )
             print(json.dumps(result, indent=2))

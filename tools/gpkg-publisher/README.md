@@ -67,6 +67,7 @@ Use a split layout so the repo content, config, and code are easy to reason abou
 /var/lib/gpkg-publisher/
   cache/debs/
   repo/x86_64/
+  tmp/
   state/state.json
   state/last-run.json
 ```
@@ -118,6 +119,7 @@ r2:your-bucket/geminios/x86_64/pool/...
 sudo mkdir -p /etc/gpkg-publisher
 sudo mkdir -p /var/lib/gpkg-publisher/cache/debs
 sudo mkdir -p /var/lib/gpkg-publisher/repo/x86_64
+sudo mkdir -p /var/lib/gpkg-publisher/tmp
 sudo mkdir -p /var/lib/gpkg-publisher/state
 ```
 
@@ -199,6 +201,8 @@ The script will:
 3. Convert changed packages into `.gpkg`.
 4. Rebuild `Packages.json.zst` under `REPO_ROOT/x86_64`.
 5. Upload `REPO_ROOT` if upload is enabled.
+
+Large temporary files are now written under `TEMP_DIR`, so you do not need to rely on `/tmp` having enough space.
 
 ## Incremental Behavior
 
@@ -367,6 +371,7 @@ Then edit `/etc/gpkg-publisher/config.env` to at least set:
 ```text
 DISCOVERY_MODE=all
 RCLONE_DEST=r2:your-bucket/geminios
+RCLONE_CONFIG=/etc/gpkg-publisher/rclone.conf
 SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
 PACKAGE_LIMIT=500
 ```
@@ -380,6 +385,24 @@ python3 tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env
 ```
 
 Once that succeeds, install the timer and let it run unattended.
+
+## Running User
+
+Do not use `sudo python3 ...` for normal runs.
+
+The supplied service is designed to run as `gpkg-publisher`, not `root`. Running as `root` causes two common problems:
+
+- `rclone` looks for `/root/.config/rclone/rclone.conf`, which is usually not where you configured your remote.
+- APT may print `_apt` sandbox warnings when downloading into directories that do not match the expected ownership pattern.
+
+Preferred setup:
+
+```bash
+sudo chown -R gpkg-publisher:gpkg-publisher /var/lib/gpkg-publisher
+sudo chown -R gpkg-publisher:gpkg-publisher /etc/gpkg-publisher
+sudo -u gpkg-publisher -H rclone config
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env --dry-run
+```
 
 ## Operational Notes
 
