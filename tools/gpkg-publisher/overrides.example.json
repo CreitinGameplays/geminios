@@ -1,0 +1,33 @@
+{
+  "skip_packages": [
+    "systemd",
+    "udev",
+    "linux-image-*"
+  ],
+  "skip_patterns": [
+    "initramfs-tools*"
+  ],
+  "skip_dependency_patterns": [
+    "debconf-2.0"
+  ],
+  "dependency_choices": {
+    "debconf | debconf-2.0": "debconf",
+    "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend"
+  },
+  "package_overrides": {
+    "nano": {
+      "section": "editors"
+    },
+    "xfce4-terminal": {
+      "depends_add": [
+        "hicolor-icon-theme"
+      ],
+      "drop_scripts": [
+        "postinst"
+      ]
+    },
+    "some-problem-package": {
+      "skip": true
+    }
+  }
+}

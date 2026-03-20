@@ -1,0 +1,19 @@
+[Unit]
+Description=GeminiOS GPKG bulk publisher
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=gpkg-publisher
+Group=gpkg-publisher
+WorkingDirectory=/opt/geminios
+ExecStart=/usr/bin/python3 /opt/geminios/tools/gpkg-publisher/publish.py --config /etc/gpkg-publisher/config.env
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/lib/gpkg-publisher
+
+[Install]
+WantedBy=multi-user.target

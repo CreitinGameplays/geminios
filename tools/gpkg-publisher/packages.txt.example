@@ -1,0 +1,18 @@
+# Seed packages for the bulk Debian -> GPKG importer.
+# Start small, validate, then expand.
+
+file
+htop
+jq
+less
+mesa-utils
+micro
+python3-pip
+ripgrep
+rsync
+sqlite3
+strace
+tree
+unzip
+xfce4-terminal
+zip

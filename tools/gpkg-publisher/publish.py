@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from common import (  # noqa: E402
+    DEFAULT_BLOCKLIST,
+    choose_first_matching_stanza,
+    ensure_directory,
+    hash_file,
+    load_env_file,
+    matches_any,
+    normalize_dependency_field,
+    parse_control_stanzas,
+    read_json,
+    read_seed_packages,
+    run,
+    safe_filename_component,
+    scan_repo,
+    write_json,
+)
+from import_deb import convert_deb_to_gpkg  # noqa: E402
+
+
+DEFAULT_CONFIG = {
+    "ARCH": "x86_64",
+    "APT_ARCH": "amd64",
+    "REPO_ROOT": "/var/lib/gpkg-publisher/repo",
+    "DOWNLOAD_DIR": "/var/lib/gpkg-publisher/cache/debs",
+    "STATE_FILE": "/var/lib/gpkg-publisher/state/state.json",
+    "REPORT_FILE": "/var/lib/gpkg-publisher/state/last-run.json",
+    "SEED_FILE": "/etc/gpkg-publisher/packages.txt",
+    "OVERRIDES_FILE": "/etc/gpkg-publisher/overrides.json",
+    "ZSTD_LEVEL": "10",
+    "INDEX_ZSTD_LEVEL": "19",
+    "UPLOAD_ENABLED": "1",
+    "INCLUDE_MAINTAINER_SCRIPTS": "0",
+    "ALLOW_ESSENTIAL": "0",
+    "RCLONE_DEST": "",
+    "RCLONE_EXTRA_ARGS": "",
+    "UPLOAD_COMMAND": "",
+    "BLOCKLIST_PATTERNS": ",".join(DEFAULT_BLOCKLIST),
+}
+
+
+@dataclass
+class ResolvedPackage:
+    name: str
+    version: str
+    deb_filename: str
+    fields: dict[str, str]
+    depends: list[str]
+
+
+class AptResolver:
+    def __init__(
+        self,
+        *,
+        apt_arch: str,
+        overrides: dict[str, Any],
+        blocklist_patterns: list[str],
+        allow_essential: bool,
+        verbose: bool,
+    ) -> None:
+        self.apt_arch = apt_arch
+        self.overrides = overrides
+        self.blocklist_patterns = blocklist_patterns
+        self.allow_essential = allow_essential
+        self.verbose = verbose
+        self.package_cache: dict[str, ResolvedPackage | None] = {}
+        self.resolved: dict[str, ResolvedPackage] = {}
+        self.order: list[ResolvedPackage] = []
+        self.failures: dict[str, str] = {}
+        self.active: set[str] = set()
+
+    def candidate_exists(self, package_name: str) -> bool:
+        return self._load_package(package_name) is not None
+
+    def resolve_all(self, packages: list[str]) -> tuple[list[ResolvedPackage], dict[str, str]]:
+        for package_name in packages:
+            self._resolve_one(package_name, parent=None)
+        return self.order, self.failures
+
+    def _resolve_one(self, package_name: str, *, parent: str | None) -> bool:
+        if package_name in self.resolved:
+            return True
+        if package_name in self.failures:
+            return False
+        if package_name in self.active:
+            return True
+        if matches_any(package_name, self.blocklist_patterns):
+            self.failures[package_name] = "blocked by pattern"
+            return False
+
+        package = self._load_package(package_name)
+        if package is None:
+            self.failures[package_name] = "no APT candidate"
+            return False
+
+        self.active.add(package_name)
+        for dep_spec in package.depends:
+            dep_name = dep_spec.split(" ", 1)[0]
+            if not self._resolve_one(dep_name, parent=package_name):
+                self.failures[package_name] = f"dependency {dep_name} could not be resolved"
+                self.active.remove(package_name)
+                return False
+
+        self.active.remove(package_name)
+        self.resolved[package_name] = package
+        self.order.append(package)
+        return True
+
+    def _load_package(self, package_name: str) -> ResolvedPackage | None:
+        if package_name in self.package_cache:
+            return self.package_cache[package_name]
+
+        if matches_any(package_name, self.blocklist_patterns):
+            self.package_cache[package_name] = None
+            return None
+
+        try:
+            policy_output = run(
+                ["apt-cache", "policy", package_name],
+                capture=True,
+                verbose=self.verbose,
+            ).stdout
+        except RuntimeError:
+            self.package_cache[package_name] = None
+            return None
+
+        candidate = None
+        for line in policy_output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Candidate:"):
+                candidate = stripped.split(":", 1)[1].strip()
+                break
+        if candidate in {None, "", "(none)"}:
+            self.package_cache[package_name] = None
+            return None
+
+        show_output = run(
+            ["apt-cache", "show", package_name],
+            capture=True,
+            verbose=self.verbose,
+        ).stdout
+        stanzas = parse_control_stanzas(show_output)
+        fields = choose_first_matching_stanza(stanzas, package_name, candidate, self.apt_arch)
+        if fields is None:
+            self.package_cache[package_name] = None
+            return None
+
+        if fields.get("Essential", "no").lower() == "yes" and not self.allow_essential:
+            self.package_cache[package_name] = None
+            self.failures.setdefault(package_name, "package is marked Essential: yes")
+            return None
+
+        filename = fields.get("Filename", "")
+        if not filename:
+            self.package_cache[package_name] = None
+            return None
+
+        dependency_choices = self.overrides.get("dependency_choices", {})
+        skip_patterns = list(self.blocklist_patterns)
+        skip_patterns.extend(self.overrides.get("skip_dependency_patterns", []))
+        depends = normalize_dependency_field(
+            ", ".join(
+                value
+                for value in [fields.get("Pre-Depends", ""), fields.get("Depends", "")]
+                if value
+            ),
+            package_name=package_name,
+            apt_arch=self.apt_arch,
+            dependency_choices=dependency_choices,
+            dependency_exists=self.candidate_exists,
+            skip_patterns=skip_patterns,
+        )
+
+        package_override = self.overrides.get("package_overrides", {}).get(package_name, {})
+        depends = [dep for dep in depends if dep not in package_override.get("depends_remove", [])]
+        depends.extend(package_override.get("depends_add", []))
+
+        resolved = ResolvedPackage(
+            name=package_name,
+            version=candidate,
+            deb_filename=Path(filename).name,
+            fields=fields,
+            depends=sorted(set(depends)),
+        )
+        self.package_cache[package_name] = resolved
+        return resolved
+
+
+def parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_config(config_path: Path) -> dict[str, str]:
+    config = dict(DEFAULT_CONFIG)
+    config.update(load_env_file(config_path))
+    for key in config:
+        if key in os.environ:
+            config[key] = os.environ[key]
+    return config
+
+
+def split_patterns(raw_value: str) -> list[str]:
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def download_deb(package: ResolvedPackage, download_dir: Path, *, verbose: bool) -> Path:
+    ensure_directory(download_dir)
+    expected_path = download_dir / package.deb_filename
+    if expected_path.exists():
+        return expected_path
+
+    before = {path.name for path in download_dir.glob("*.deb")}
+    run(
+        ["apt-get", "download", f"{package.name}={package.version}"],
+        cwd=download_dir,
+        verbose=verbose,
+    )
+    after = {path.name for path in download_dir.glob("*.deb")}
+    created = sorted(after - before)
+    if expected_path.exists():
+        return expected_path
+    if len(created) == 1:
+        return download_dir / created[0]
+
+    prefix = f"{package.name}_{safe_filename_component(package.version)}"
+    matches = sorted(path for path in download_dir.glob(f"{prefix}*.deb"))
+    if matches:
+        return matches[-1]
+
+    raise RuntimeError(f"Could not locate downloaded .deb for {package.name} {package.version}")
+
+
+def build_upload_command(config: dict[str, str], repo_root: Path) -> list[str] | None:
+    upload_command = config.get("UPLOAD_COMMAND", "").strip()
+    if upload_command:
+        rendered = upload_command.format(repo_root=repo_root, arch_dir=repo_root / config["ARCH"])
+        return shlex.split(rendered)
+
+    rclone_dest = config.get("RCLONE_DEST", "").strip()
+    if not rclone_dest:
+        return None
+
+    command = ["rclone", "copy", str(repo_root), rclone_dest, "--fast-list", "--checksum"]
+    extra_args = config.get("RCLONE_EXTRA_ARGS", "").strip()
+    if extra_args:
+        command.extend(shlex.split(extra_args))
+    return command
+
+
+def build_fingerprint(
+    package: ResolvedPackage,
+    *,
+    deb_sha256: str,
+    overrides: dict[str, Any],
+    zstd_level: int,
+    include_maintainer_scripts: bool,
+) -> str:
+    package_override = overrides.get("package_overrides", {}).get(package.name, {})
+    payload = {
+        "package": package.name,
+        "version": package.version,
+        "deb_sha256": deb_sha256,
+        "zstd_level": zstd_level,
+        "include_maintainer_scripts": include_maintainer_scripts,
+        "package_override": package_override,
+        "dependency_choices": overrides.get("dependency_choices", {}),
+        "skip_dependency_patterns": overrides.get("skip_dependency_patterns", []),
+        "skip_packages": overrides.get("skip_packages", []),
+        "skip_patterns": overrides.get("skip_patterns", []),
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode()
+    return hash_file_from_bytes(encoded)
+
+
+def hash_file_from_bytes(payload: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(payload).hexdigest()
+
+
+def now_utc() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Resolve Debian packages, convert them to .gpkg, index a repo, and optionally upload it.")
+    parser.add_argument("--config", default=str(SCRIPT_DIR / "config.env"), help="Path to the publisher env file")
+    parser.add_argument("--package", action="append", default=[], help="Additional seed package to resolve")
+    parser.add_argument("--skip-upload", action="store_true", help="Do everything except the final upload")
+    parser.add_argument("--force-import", action="store_true", help="Rebuild every gpkg even if state says it is up to date")
+    parser.add_argument("--dry-run", action="store_true", help="Resolve and print the plan without downloading or publishing")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show executed commands")
+    args = parser.parse_args()
+
+    config = load_config(Path(args.config))
+    overrides = read_json(Path(config["OVERRIDES_FILE"]), {}) if config["OVERRIDES_FILE"] else {}
+    blocklist_patterns = split_patterns(config["BLOCKLIST_PATTERNS"])
+
+    repo_root = Path(config["REPO_ROOT"]).expanduser()
+    repo_arch_dir = repo_root / config["ARCH"]
+    download_dir = Path(config["DOWNLOAD_DIR"]).expanduser()
+    state_file = Path(config["STATE_FILE"]).expanduser()
+    report_file = Path(config["REPORT_FILE"]).expanduser()
+    seed_file = Path(config["SEED_FILE"]).expanduser()
+    include_maintainer_scripts = parse_bool(config["INCLUDE_MAINTAINER_SCRIPTS"])
+    allow_essential = parse_bool(config["ALLOW_ESSENTIAL"])
+    upload_enabled = parse_bool(config["UPLOAD_ENABLED"]) and not args.skip_upload
+    zstd_level = int(config["ZSTD_LEVEL"])
+    index_zstd_level = int(config["INDEX_ZSTD_LEVEL"])
+
+    ensure_directory(repo_arch_dir)
+    ensure_directory(download_dir)
+    ensure_directory(state_file.parent)
+    ensure_directory(report_file.parent)
+
+    seeds = read_seed_packages(seed_file)
+    seeds.extend(args.package)
+    seeds = list(dict.fromkeys(seeds))
+    if not seeds:
+        print("error: no seed packages were provided", file=sys.stderr)
+        return 1
+
+    resolver = AptResolver(
+        apt_arch=config["APT_ARCH"],
+        overrides=overrides,
+        blocklist_patterns=blocklist_patterns,
+        allow_essential=allow_essential,
+        verbose=args.verbose,
+    )
+    packages, failures = resolver.resolve_all(seeds)
+
+    report: dict[str, Any] = {
+        "started_at": now_utc(),
+        "seed_packages": seeds,
+        "resolved_count": len(packages),
+        "resolved_packages": [package.name for package in packages],
+        "failures": failures.copy(),
+        "built": [],
+        "reused": [],
+        "uploaded": False,
+    }
+
+    if args.dry_run:
+        print(json.dumps(report, indent=2))
+        return 1 if failures else 0
+
+    state = read_json(state_file, {"packages": {}})
+    package_state = state.setdefault("packages", {})
+
+    for package in packages:
+        try:
+            deb_path = download_deb(package, download_dir, verbose=args.verbose)
+            deb_sha256 = hash_file(deb_path)
+            fingerprint = build_fingerprint(
+                package,
+                deb_sha256=deb_sha256,
+                overrides=overrides,
+                zstd_level=zstd_level,
+                include_maintainer_scripts=include_maintainer_scripts,
+            )
+
+            cached = package_state.get(package.name, {})
+            output_path_value = cached.get("output_path")
+            output_path = Path(output_path_value) if output_path_value else None
+            if (
+                not args.force_import
+                and cached.get("fingerprint") == fingerprint
+                and output_path is not None
+                and output_path.exists()
+            ):
+                report["reused"].append(package.name)
+                continue
+
+            result = convert_deb_to_gpkg(
+                deb_path,
+                repo_arch_dir=repo_arch_dir,
+                overrides=overrides,
+                apt_arch=config["APT_ARCH"],
+                forced_depends=package.depends,
+                include_maintainer_scripts=include_maintainer_scripts,
+                allow_essential=allow_essential,
+                compression_level=zstd_level,
+                verbose=args.verbose,
+            )
+            report["built"].append(package.name)
+            package_state[package.name] = {
+                "version": package.version,
+                "deb_sha256": deb_sha256,
+                "fingerprint": fingerprint,
+                "output_path": result["output_path"],
+                "updated_at": now_utc(),
+            }
+        except Exception as exc:
+            failures[package.name] = str(exc)
+            report["failures"][package.name] = str(exc)
+
+    try:
+        indexed_packages = scan_repo(repo_arch_dir, compression_level=index_zstd_level, verbose=args.verbose)
+        report["indexed_count"] = len(indexed_packages)
+    except Exception as exc:
+        failures["index"] = str(exc)
+        report["failures"]["index"] = str(exc)
+        report["indexed_count"] = 0
+
+    if upload_enabled:
+        command = build_upload_command(config, repo_root)
+        if command is None:
+            failures["upload"] = "UPLOAD_ENABLED is true but no upload backend was configured"
+            report["failures"]["upload"] = failures["upload"]
+        else:
+            try:
+                run(command, verbose=args.verbose)
+                report["uploaded"] = True
+            except Exception as exc:
+                failures["upload"] = str(exc)
+                report["failures"]["upload"] = str(exc)
+
+    report["finished_at"] = now_utc()
+    report["failures"] = failures
+    write_json(state_file, state)
+    write_json(report_file, report)
+
+    print(
+        json.dumps(
+            {
+                "resolved": len(packages),
+                "built": len(report["built"]),
+                "reused": len(report["reused"]),
+                "indexed": report.get("indexed_count", 0),
+                "uploaded": report["uploaded"],
+                "failures": failures,
+            },
+            indent=2,
+        )
+    )
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
