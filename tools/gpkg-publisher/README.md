@@ -539,6 +539,42 @@ If failures look like this:
 
 then those are expected policy skips. Usually leave them skipped. Only relax them if you deliberately want to import core base-system packages and accept the risk.
 
+### Desktop package wants `libsystemd0`
+
+`libsystemd0` is a shared runtime library, not the `systemd` init system itself. Desktop packages may legitimately need the library even if GeminiOS does not boot with `systemd`.
+
+Recommended approach:
+
+1. Keep `systemd*`, `udev`, and `libpam-systemd` blocked.
+2. Do not mark `libsystemd0` as "provided by system" unless GeminiOS already ships a compatible `libsystemd.so.0`.
+3. Allow the publisher to import `libsystemd0` and republish.
+
+If your local config still blocks `libsystemd*`, change it to something narrower, for example:
+
+```text
+BLOCKLIST_PATTERNS=base-files,base-passwd,bash,debianutils,dpkg,gcc-*,glibc-*,grub*,init,initramfs-tools*,linux-*,libc6,libpam*,libpam-systemd,mount,openssh-server,passwd,systemd*,sysvinit*,udev,util-linux
+```
+
+Then rerun:
+
+```bash
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env \
+  --skip-upload
+sudo -u gpkg-publisher -H python3 /opt/geminios/tools/gpkg-publisher/publish.py \
+  --config /etc/gpkg-publisher/config.env
+```
+
+After that, inside GeminiOS:
+
+```bash
+sudo gpkg update
+sudo gpkg install libsystemd0
+sudo gpkg install xfce4 xfce4-goodies
+```
+
+If `libsystemd0` itself pulls in something genuinely unsupported, that is the point where you either package a compatibility shim or drop the affected desktop packages. Do not solve it by globally pretending `libsystemd0` exists when it does not.
+
 ## Operational Notes
 
 - `last-run.json` is the quickest place to inspect failures after a timer run.

@@ -564,57 +564,98 @@ bool ask_confirmation(const std::string& query) {
 }
 // End Helpers
 
-// Helper: split version string into manageable chunks
-std::vector<std::string> split_version(const std::string& v) {
-    std::vector<std::string> parts;
-    std::string current;
-    for (char c : v) {
-        if (isdigit(c)) {
-            if (!current.empty() && !isdigit(current[0])) {
-                parts.push_back(current);
-                current = "";
-            }
-            current += c;
-        } else if (isalpha(c)) {
-             if (!current.empty() && !isalpha(current[0])) {
-                parts.push_back(current);
-                current = "";
-            }
-            current += c;
-        } else {
-            if (!current.empty()) {
-                parts.push_back(current);
-                current = "";
-            }
+struct DebianVersion {
+    long long epoch = 0;
+    std::string upstream;
+    std::string revision;
+};
+
+int debian_char_order(char c) {
+    if (c == '~') return -1;
+    if (c == '\0') return 0;
+    if (std::isalpha(static_cast<unsigned char>(c))) return static_cast<unsigned char>(c);
+    return static_cast<unsigned char>(c) + 256;
+}
+
+int compare_debian_part(const std::string& left, const std::string& right) {
+    size_t i = 0;
+    size_t j = 0;
+
+    while (i < left.size() || j < right.size()) {
+        while ((i < left.size() && !std::isdigit(static_cast<unsigned char>(left[i]))) ||
+               (j < right.size() && !std::isdigit(static_cast<unsigned char>(right[j])))) {
+            char lc = i < left.size() ? left[i] : '\0';
+            char rc = j < right.size() ? right[j] : '\0';
+            int lo = debian_char_order(lc);
+            int ro = debian_char_order(rc);
+            if (lo < ro) return -1;
+            if (lo > ro) return 1;
+            if (i < left.size()) ++i;
+            if (j < right.size()) ++j;
+        }
+
+        while (i < left.size() && left[i] == '0') ++i;
+        while (j < right.size() && right[j] == '0') ++j;
+
+        size_t left_digits_start = i;
+        size_t right_digits_start = j;
+        while (i < left.size() && std::isdigit(static_cast<unsigned char>(left[i]))) ++i;
+        while (j < right.size() && std::isdigit(static_cast<unsigned char>(right[j]))) ++j;
+
+        size_t left_digits_len = i - left_digits_start;
+        size_t right_digits_len = j - right_digits_start;
+        if (left_digits_len < right_digits_len) return -1;
+        if (left_digits_len > right_digits_len) return 1;
+
+        for (size_t k = 0; k < left_digits_len; ++k) {
+            char lc = left[left_digits_start + k];
+            char rc = right[right_digits_start + k];
+            if (lc < rc) return -1;
+            if (lc > rc) return 1;
         }
     }
-    if (!current.empty()) parts.push_back(current);
-    return parts;
+
+    return 0;
+}
+
+DebianVersion parse_debian_version(const std::string& version) {
+    DebianVersion parsed;
+    std::string remainder = version;
+
+    size_t epoch_sep = version.find(':');
+    if (epoch_sep != std::string::npos) {
+        std::string epoch_str = version.substr(0, epoch_sep);
+        if (!epoch_str.empty()) {
+            parsed.epoch = std::strtoll(epoch_str.c_str(), nullptr, 10);
+        }
+        remainder = version.substr(epoch_sep + 1);
+    }
+
+    size_t revision_sep = remainder.rfind('-');
+    if (revision_sep != std::string::npos) {
+        parsed.upstream = remainder.substr(0, revision_sep);
+        parsed.revision = remainder.substr(revision_sep + 1);
+    } else {
+        parsed.upstream = remainder;
+        parsed.revision = "";
+    }
+
+    return parsed;
 }
 
 // Returns: -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
 int compare_versions(const std::string& v1, const std::string& v2) {
     if (v1 == v2) return 0;
-    auto p1 = split_version(v1);
-    auto p2 = split_version(v2);
-    
-    size_t len = std::min(p1.size(), p2.size());
-    for (size_t i = 0; i < len; ++i) {
-        if (isdigit(p1[i][0]) && isdigit(p2[i][0])) {
-            long long n1 = std::stoll(p1[i]);
-            long long n2 = std::stoll(p2[i]);
-            if (n1 < n2) return -1;
-            if (n1 > n2) return 1;
-        } else {
-            if (p1[i] < p2[i]) return -1;
-            if (p1[i] > p2[i]) return 1;
-        }
-    }
-    
-    if (p1.size() < p2.size()) return -1;
-    if (p1.size() > p2.size()) return 1;
-    
-    return 0;
+    DebianVersion left = parse_debian_version(v1);
+    DebianVersion right = parse_debian_version(v2);
+
+    if (left.epoch < right.epoch) return -1;
+    if (left.epoch > right.epoch) return 1;
+
+    int upstream_cmp = compare_debian_part(left.upstream, right.upstream);
+    if (upstream_cmp != 0) return upstream_cmp;
+
+    return compare_debian_part(left.revision, right.revision);
 }
 
 // Check if package is installed and optionally return its version

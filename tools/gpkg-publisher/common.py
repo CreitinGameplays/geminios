@@ -36,7 +36,7 @@ DEFAULT_BLOCKLIST = [
     "linux-*",
     "libc6",
     "libpam*",
-    "libsystemd*",
+    "libpam-systemd",
     "mount",
     "openssh-server",
     "passwd",
