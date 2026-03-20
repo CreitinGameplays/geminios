@@ -316,6 +316,11 @@ def is_built(pkg_name):
                 missing_artifacts.append(artifact)
         
         if not missing_artifacts:
+            if pkg_name == "geminios_core":
+                login_path = os.path.join(ROOT_DIR, "rootfs", "bin", "login")
+                login_needed = set(get_elf_needed(login_path))
+                if "libpam.so.0" in login_needed or "libpam_misc.so.0" in login_needed:
+                    return False
             return True
         else:
             # If manifest exists but files are missing, it's definitely NOT built correctly.
@@ -360,10 +365,24 @@ def build_ginit(force=False, debug=False):
     if not os.path.exists(ginit_dir):
         print_error("ERROR: ginit directory not found!")
         return False
+
+    if force:
+        ret = run_command(
+            "make clean",
+            cwd=ginit_dir,
+            debug=debug,
+        )
+        if ret != 0:
+            print_error("ERROR: Failed to clean ginit core")
+            return False
     
     # Run make inside ginit
     # We use run_command to ensure it uses the correct environment
-    ret = run_command("make", cwd=ginit_dir, debug=debug)
+    ret = run_command(
+        "make",
+        cwd=ginit_dir,
+        debug=debug,
+    )
     if ret != 0:
         print_error("ERROR: Failed to build ginit core")
         return False
@@ -623,6 +642,14 @@ def verify_rootfs_integrity():
         print_error("FATAL: Rootfs integrity check failed. Some critical files are missing.")
         return False
 
+    login_path = os.path.join(ROOT_DIR, "rootfs", "bin", "login")
+    login_needed = set(get_elf_needed(login_path))
+    unexpected_login_libs = {"libpam.so.0", "libpam_misc.so.0"} & login_needed
+    if unexpected_login_libs:
+        libs = ", ".join(sorted(unexpected_login_libs))
+        print_error(f"  [FAILED] GeminiOS login depends on unexpected PAM libraries: {libs}")
+        return False
+
     # Verify Python functionality
     print_info("[*] Verifying Python runtime...")
     env = os.environ.copy()
@@ -733,7 +760,15 @@ def finalize_rootfs():
         os.symlink("/etc/machine-id", dbus_uuid_path)
         print_success(f"  ✓ Generated machine-id: {m_id}")
 
-    # 7. Final Integrity Check
+    # 7. Remove known-unused host runtime libraries that can leak in from the
+    # development overlay. Keep this targeted to avoid breaking dlopen()-based
+    # packages or future native ports.
+    prune_unused_host_runtime_libs()
+
+    # 8. Restore multiarch compatibility symlinks for the in-OS toolchain.
+    ensure_multiarch_dev_compat()
+
+    # 9. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)
@@ -755,6 +790,23 @@ def get_elf_needed(binary_path):
         if start != -1 and end != -1:
             needed.append(line[start + 1:end])
     return needed
+
+def get_elf_soname(binary_path):
+    """Return the DT_SONAME entry for an ELF library, if present."""
+    result = subprocess.run(
+        ["readelf", "-d", binary_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for line in result.stdout.splitlines():
+        if "(SONAME)" not in line:
+            continue
+        start = line.find("[")
+        end = line.find("]", start + 1)
+        if start != -1 and end != -1:
+            return line[start + 1:end]
+    return None
 
 def get_elf_interpreter(binary_path):
     """Return the PT_INTERP path for an ELF binary, if present."""
@@ -780,6 +832,177 @@ def find_rootfs_library(rootfs_dir, lib_filename):
         if os.path.exists(candidate):
             return candidate
     return None
+
+def iter_rootfs_elf_files(rootfs_dir):
+    """Yield likely ELF-bearing files from runtime-relevant rootfs paths."""
+    candidate_dirs = [
+        "bin",
+        "sbin",
+        "lib64",
+        "usr/bin",
+        "usr/sbin",
+        "usr/lib64",
+        "usr/libexec",
+    ]
+
+    seen = set()
+    for rel_dir in candidate_dirs:
+        base_dir = os.path.join(rootfs_dir, rel_dir)
+        if not os.path.exists(base_dir):
+            continue
+
+        for dirpath, _, filenames in os.walk(base_dir):
+            for filename in filenames:
+                path = os.path.join(dirpath, filename)
+                if path in seen or not os.path.isfile(path):
+                    continue
+                seen.add(path)
+                yield path
+
+def collect_rootfs_needed_libs(rootfs_dir, excluded_paths=None):
+    """Collect DT_NEEDED library names used by runtime ELF files."""
+    excluded_paths = set(excluded_paths or [])
+    needed = set()
+
+    for path in iter_rootfs_elf_files(rootfs_dir):
+        if path in excluded_paths:
+            continue
+        needed.update(get_elf_needed(path))
+
+    return needed
+
+def prune_unused_host_runtime_libs():
+    """Remove known host-overlay runtime libraries when nothing in rootfs needs them."""
+    print_info("[*] Pruning unused host-overlay runtime libraries...")
+
+    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    host_multiarch_dirs = [
+        os.path.join(rootfs_dir, "lib64", "x86_64-linux-gnu"),
+        os.path.join(rootfs_dir, "usr", "lib64", "x86_64-linux-gnu"),
+    ]
+    candidate_families = [
+        {"label": "PAM", "soname": "libpam.so.0", "prefix": "libpam.so"},
+        {"label": "PAM Misc", "soname": "libpam_misc.so.0", "prefix": "libpam_misc.so"},
+        {"label": "SELinux", "soname": "libselinux.so.1", "prefix": "libselinux.so"},
+        {"label": "SEPol", "soname": "libsepol.so.2", "prefix": "libsepol.so"},
+    ]
+
+    family_paths = {}
+    all_candidate_paths = set()
+    excluded_paths = set()
+
+    for base_dir in host_multiarch_dirs:
+        if not os.path.isdir(base_dir):
+            continue
+        for dirpath, _, filenames in os.walk(base_dir):
+            for filename in filenames:
+                path = os.path.join(dirpath, filename)
+                if os.path.isfile(path):
+                    excluded_paths.add(path)
+
+    for family in candidate_families:
+        paths = []
+        for base_dir in host_multiarch_dirs:
+            if not os.path.isdir(base_dir):
+                continue
+            for entry in os.listdir(base_dir):
+                if entry.startswith(family["prefix"]):
+                    path = os.path.join(base_dir, entry)
+                    paths.append(path)
+                    all_candidate_paths.add(path)
+        family_paths[family["soname"]] = sorted(set(paths))
+
+    needed_libs = collect_rootfs_needed_libs(rootfs_dir, excluded_paths=excluded_paths)
+    removed_count = 0
+
+    if all_candidate_paths:
+        for family in candidate_families:
+            soname = family["soname"]
+            paths = family_paths.get(soname, [])
+            if not paths:
+                continue
+
+            if soname in needed_libs:
+                print_info(f"  Keeping {family['label']} libraries; still required by rootfs.")
+                continue
+
+            for path in paths:
+                if os.path.lexists(path):
+                    os.remove(path)
+                    removed_count += 1
+            print_success(f"  ✓ Removed unused {family['label']} library family.")
+
+    soname_groups = {}
+    soname_cache = {}
+    for base_dir in host_multiarch_dirs:
+        if not os.path.isdir(base_dir):
+            continue
+        for entry in os.listdir(base_dir):
+            if not entry.startswith("lib") or ".so" not in entry:
+                continue
+            path = os.path.join(base_dir, entry)
+            real_path = os.path.realpath(path)
+            soname = soname_cache.get(real_path)
+            if soname is None:
+                soname = get_elf_soname(real_path)
+                soname_cache[real_path] = soname
+            if not soname:
+                continue
+            soname_groups.setdefault(soname, set()).add(path)
+
+    duplicate_removed = 0
+    for soname, paths in sorted(soname_groups.items()):
+        runtime_copy = find_rootfs_library(rootfs_dir, soname)
+        if runtime_copy or soname not in needed_libs:
+            for path in sorted(paths):
+                if os.path.lexists(path):
+                    os.remove(path)
+                    duplicate_removed += 1
+
+    if duplicate_removed:
+        print_success(f"  ✓ Removed {duplicate_removed} duplicate host multiarch shared libraries.")
+
+    if not excluded_paths:
+        print_success("  ✓ No host multiarch runtime overlay found.")
+        return
+
+    if removed_count == 0 and duplicate_removed == 0:
+        print_success("  ✓ No unused host-overlay runtime libraries needed pruning.")
+
+def ensure_multiarch_dev_compat():
+    """Recreate lightweight multiarch symlinks expected by GCC/ld inside the OS."""
+    print_info("[*] Restoring multiarch toolchain compatibility links...")
+
+    link_specs = [
+        (os.path.join(ROOT_DIR, "rootfs", "lib64"), os.path.join(ROOT_DIR, "rootfs", "lib64", "x86_64-linux-gnu")),
+        (os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"), os.path.join(ROOT_DIR, "rootfs", "usr", "lib64", "x86_64-linux-gnu")),
+    ]
+
+    linked_count = 0
+    for source_dir, compat_dir in link_specs:
+        if not os.path.isdir(source_dir):
+            continue
+        os.makedirs(compat_dir, exist_ok=True)
+
+        for entry in os.listdir(source_dir):
+            if not (entry.startswith("lib") or entry.startswith("ld-linux-")):
+                continue
+            if ".so" not in entry:
+                continue
+
+            source_path = os.path.join(source_dir, entry)
+            compat_path = os.path.join(compat_dir, entry)
+            if not os.path.exists(source_path) or os.path.lexists(compat_path):
+                continue
+
+            rel_target = os.path.relpath(source_path, compat_dir)
+            os.symlink(rel_target, compat_path)
+            linked_count += 1
+
+    if linked_count:
+        print_success(f"  ✓ Restored {linked_count} multiarch compatibility symlinks.")
+    else:
+        print_success("  ✓ Multiarch toolchain compatibility links already present.")
 
 def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
     """Copies a binary and all its shared library dependencies to dest_dir"""

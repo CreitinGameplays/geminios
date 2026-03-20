@@ -7,8 +7,11 @@ make install DESTDIR="$ROOTFS"
 cd -
 
 echo "Compiling Package Manager (gpkg)..."
-g++ $CXXFLAGS -I"$ROOT_DIR/ginit/src" -I"$ROOT_DIR/src" -o gpkg "$ROOT_DIR/packages/system/gpkg/gpkg.cpp" -L"$ROOT_DIR/ginit/lib" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread
-strip gpkg
+# Build gpkg with the host C++ toolchain. The target sysroot is not yet
+# sufficient for libstdc++/pthread-heavy C++ builds.
+unset CFLAGS CXXFLAGS LDFLAGS PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_PATH
+/usr/bin/g++ -I"$ROOT_DIR/ginit/src" -I"$ROOT_DIR/src" -o gpkg "$ROOT_DIR/packages/system/gpkg/gpkg.cpp" -L"$ROOT_DIR/ginit/lib" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread
+/usr/bin/strip gpkg
 
 # Additional setup for ginit
 # ginit Makefile now installs binaries to /bin and /sbin

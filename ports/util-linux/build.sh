@@ -23,6 +23,10 @@ export LDFLAGS="--sysroot=$ROOTFS"
     --enable-wall \
     --enable-write \
     --enable-mesg \
+    --disable-chfn-chsh \
+    --disable-login \
+    --disable-su \
+    --disable-runuser \
     --disable-makeinstall-chown \
     --disable-makeinstall-setuid \
     --without-selinux \
@@ -31,3 +35,13 @@ export LDFLAGS="--sysroot=$ROOTFS"
     --without-python
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
+
+# GeminiOS ships its own login implementation from ginit.
+rm -f "$ROOTFS/bin/login"
+
+# GeminiOS ships its own privilege/user-management tools and does not provide
+# native PAM yet, so remove PAM-bound util-linux account tools as a safeguard.
+rm -f "$ROOTFS/bin/su" \
+      "$ROOTFS/sbin/runuser" \
+      "$ROOTFS/usr/bin/chfn" \
+      "$ROOTFS/usr/bin/chsh"
