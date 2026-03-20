@@ -1069,12 +1069,13 @@ bool check_conflicts(const std::vector<PackageMetadata>& queue, const std::set<s
 }
 
 
-bool verify_hash(const std::string& file, const std::string& expected_hash) {
-    std::cout << "Verifying integrity..." << std::endl;
+bool verify_hash(const std::string& file, const std::string& expected_hash, const std::string& label = "") {
+    std::string subject = label.empty() ? file : label;
+    std::cout << "Verifying " << subject << "..." << std::endl;
     
     std::ifstream f(file, std::ios::binary);
     if (!f) {
-        std::cerr << "E: Could not open file for verification: " << file << std::endl;
+        std::cerr << "E: Could not open " << subject << " for verification: " << file << std::endl;
         return false;
     }
 
@@ -1095,13 +1096,72 @@ bool verify_hash(const std::string& file, const std::string& expected_hash) {
     
     std::string calculated = ss.str();
     if (calculated != expected_hash) {
-        std::cerr << "E: Hash mismatch!" << std::endl;
+        std::cerr << "E: Hash mismatch for " << subject << "!" << std::endl;
         std::cerr << "   Expected:   " << expected_hash << std::endl;
         std::cerr << "   Calculated: " << calculated << std::endl;
         return false;
     }
     
     return true;
+}
+
+std::string get_cached_package_path(const PackageMetadata& meta) {
+    return REPO_CACHE_PATH + meta.name + EXTENSION;
+}
+
+bool fetch_package_archive(const PackageMetadata& meta, size_t index, size_t total, bool verbose, bool* reused_out = nullptr) {
+    if (reused_out) *reused_out = false;
+
+    if (!mkdir_p(REPO_CACHE_PATH)) {
+        std::cerr << Color::RED << "E: Failed to create cache directory " << REPO_CACHE_PATH << Color::RESET << std::endl;
+        return false;
+    }
+
+    std::string local_path = get_cached_package_path(meta);
+    std::string verify_label = "package archive " + meta.name;
+
+    if (access(local_path.c_str(), F_OK) == 0) {
+        std::cout << "Using cached (" << index << "/" << total << ") " << meta.name << "..." << std::endl;
+        if (verify_hash(local_path, meta.sha512, "cached " + verify_label)) {
+            if (reused_out) *reused_out = true;
+            return true;
+        }
+
+        std::cerr << Color::YELLOW << "W: Cached archive for " << meta.name
+                  << " is invalid. Removing it and downloading a fresh copy." << Color::RESET << std::endl;
+        remove(local_path.c_str());
+    }
+
+    std::string url;
+    if (!resolve_download_url(meta, url)) return false;
+
+    const int max_fetch_attempts = 2;
+    for (int attempt = 1; attempt <= max_fetch_attempts; ++attempt) {
+        std::cout << "Downloading (" << index << "/" << total << ") " << meta.name;
+        if (attempt > 1) std::cout << " [retry " << attempt << "/" << max_fetch_attempts << "]";
+        std::cout << "..." << std::endl;
+
+        std::string download_error;
+        if (!DownloadFile(url, local_path, verbose, &download_error)) {
+            remove(local_path.c_str());
+            std::cerr << Color::YELLOW << "W: Failed to download " << meta.name << " from " << url;
+            if (!download_error.empty()) std::cerr << " (" << download_error << ")";
+            std::cerr << Color::RESET << std::endl;
+            continue;
+        }
+
+        if (verify_hash(local_path, meta.sha512, verify_label)) {
+            return true;
+        }
+
+        std::cerr << Color::YELLOW << "W: Downloaded archive for " << meta.name
+                  << " failed integrity verification. Re-downloading." << Color::RESET << std::endl;
+        remove(local_path.c_str());
+    }
+
+    std::cerr << Color::RED << "E: Failed to fetch a valid archive for " << meta.name
+              << " from " << url << Color::RESET << std::endl;
+    return false;
 }
 
 int handle_list_repos() {
@@ -1213,7 +1273,9 @@ bool install_package_from_file(const std::string& pkg_file, bool verbose) {
 }
 
 bool install_package_v2(const std::string& pkg_name, bool verbose) {
-    std::string pkg_file = REPO_CACHE_PATH + pkg_name + EXTENSION;
+    PackageMetadata meta;
+    meta.name = pkg_name;
+    std::string pkg_file = get_cached_package_path(meta);
     return install_package_from_file(pkg_file, verbose);
 }
 
@@ -1264,8 +1326,11 @@ int handle_update(bool verbose) {
         VLOG(verbose, "Fetching index from: " << full_url);
         std::cout << "Get: " << full_url << std::endl;
 
-        if (!DownloadFile(full_url, dest_zst, verbose)) {
-            std::cerr << Color::YELLOW << "W: Failed to fetch index from " << url << Color::RESET << std::endl;
+        std::string download_error;
+        if (!DownloadFile(full_url, dest_zst, verbose, &download_error)) {
+            std::cerr << Color::YELLOW << "W: Failed to fetch index from " << url;
+            if (!download_error.empty()) std::cerr << " (" << download_error << ")";
+            std::cerr << Color::RESET << std::endl;
             continue;
         }
 
@@ -1340,17 +1405,43 @@ int handle_upgrade(const std::set<std::string>& installed_cache, bool verbose) {
     for (const auto& u : updates) std::cout << "  " << Color::GREEN << u.name << Color::RESET << " (" << u.version << ")" << std::endl;
     if (!ask_confirmation("Do you want to continue?")) return 0;
     
-    for (const auto& meta : updates) {
-        std::string url;
-        if (!resolve_download_url(meta, url)) return 1;
-        
-        std::string local_path = REPO_CACHE_PATH + meta.name + EXTENSION;
-        VLOG(verbose, "Downloading upgrade for " << meta.name << " from " << url);
-        std::cout << "Downloading " << meta.name << "..." << std::endl;
-        if (!DownloadFile(url, local_path, verbose)) continue;
-        if (!verify_hash(local_path, meta.sha512)) continue;
-        install_package_v2(meta.name, verbose);
+    size_t upgraded_count = 0;
+    size_t reused_count = 0;
+    size_t downloaded_count = 0;
+    std::vector<std::string> failures;
+
+    for (size_t i = 0; i < updates.size(); ++i) {
+        const auto& meta = updates[i];
+        bool reused = false;
+        if (!fetch_package_archive(meta, i + 1, updates.size(), verbose, &reused)) {
+            failures.push_back(meta.name);
+            continue;
+        }
+
+        if (reused) reused_count++;
+        else downloaded_count++;
+
+        std::cout << "Upgrading (" << (i + 1) << "/" << updates.size() << ") " << meta.name << "..." << std::endl;
+        if (!install_package_v2(meta.name, verbose)) {
+            std::cerr << Color::RED << "E: Failed to upgrade " << meta.name << Color::RESET << std::endl;
+            failures.push_back(meta.name);
+            continue;
+        }
+
+        upgraded_count++;
     }
+
+    std::cout << Color::CYAN << "Upgrade summary: "
+              << upgraded_count << " upgraded, "
+              << downloaded_count << " downloaded, "
+              << reused_count << " reused from cache." << Color::RESET << std::endl;
+
+    if (!failures.empty()) {
+        std::cerr << Color::RED << "E: Upgrade completed with failures: "
+                  << join_strings(failures) << Color::RESET << std::endl;
+        return 1;
+    }
+
     return 0;
 }
 
@@ -1400,32 +1491,40 @@ int handle_install(int argc, char* argv[], const std::set<std::string>& installe
     
     std::cout << "The following NEW packages will be installed:" << std::endl;
     for (const auto& m : install_queue) std::cout << "  " << Color::GREEN << m.name << Color::RESET << " (" << m.version << ")" << std::endl;
-    if (!check_conflicts(install_queue, installed_cache, verbose) || !ask_confirmation("Do you want to continue?")) return 1;
+    if (!check_conflicts(install_queue, installed_cache, verbose)) return 1;
+    if (!ask_confirmation("Do you want to continue?")) return 0;
 
     std::cout << Color::CYAN << "[*] Downloading packages..." << Color::RESET << std::endl;
+    size_t reused_count = 0;
+    size_t downloaded_count = 0;
     for (size_t i = 0; i < install_queue.size(); ++i) {
         const auto& meta = install_queue[i];
-        std::string url;
-        if (!resolve_download_url(meta, url)) return 1;
-        std::string local_path = REPO_CACHE_PATH + meta.name + EXTENSION;
-        
-        if (access(local_path.c_str(), F_OK) != 0) {
-            std::cout << "Downloading (" << (i+1) << "/" << install_queue.size() << ") " << meta.name << "..." << std::endl;
-            if (!DownloadFile(url, local_path, verbose)) return 1;
-        } else {
-            std::cout << "Using cached (" << (i+1) << "/" << install_queue.size() << ") " << meta.name << "..." << std::endl;
-        }
-        if (!verify_hash(local_path, meta.sha512)) {
-            remove(local_path.c_str());
+        bool reused = false;
+        if (!fetch_package_archive(meta, i + 1, install_queue.size(), verbose, &reused)) {
+            std::cerr << Color::RED << "E: Aborting install because " << meta.name
+                      << " could not be fetched safely." << Color::RESET << std::endl;
             return 1;
         }
+        if (reused) reused_count++;
+        else downloaded_count++;
     }
+    std::cout << Color::CYAN << "[*] Download summary: " << downloaded_count
+              << " downloaded, " << reused_count << " reused from cache."
+              << Color::RESET << std::endl;
 
     std::cout << Color::CYAN << "[*] Installing packages..." << Color::RESET << std::endl;
+    size_t installed_count = 0;
     for (size_t i = 0; i < install_queue.size(); ++i) {
         std::cout << "Installing (" << (i+1) << "/" << install_queue.size() << ") " << install_queue[i].name << "..." << std::endl;
-        if (!install_package_v2(install_queue[i].name, verbose)) return 1;
+        if (!install_package_v2(install_queue[i].name, verbose)) {
+            std::cerr << Color::RED << "E: Installation stopped at " << install_queue[i].name
+                      << ". " << installed_count << " package(s) were installed before the failure."
+                      << Color::RESET << std::endl;
+            return 1;
+        }
+        installed_count++;
     }
+    std::cout << Color::GREEN << "✓ Installed " << installed_count << " package(s)." << Color::RESET << std::endl;
     return 0;
 }
 
@@ -1651,7 +1750,8 @@ int handle_add_repo(const std::string& url, bool verbose) {
     std::string check_url = build_repo_index_url(normalized);
     std::cout << "Validating repository " << normalized << "..." << std::endl;
     std::string tmp_index = "/tmp/gpkg_validation_index.zst";
-    if (DownloadFile(check_url, tmp_index, verbose)) {
+    std::string download_error;
+    if (DownloadFile(check_url, tmp_index, verbose, &download_error)) {
         run_command("zstd -df " + tmp_index + " -o /tmp/gpkg_validation.json", verbose);
         std::ifstream f_check("/tmp/gpkg_validation.json");
         std::string content((std::istreambuf_iterator<char>(f_check)), std::istreambuf_iterator<char>());
@@ -1666,7 +1766,9 @@ int handle_add_repo(const std::string& url, bool verbose) {
         if (f) f << normalized << std::endl;
         else std::cerr << "E: Failed to write to " << SOURCES_DIR << name << std::endl;
     } else {
-        std::cerr << Color::RED << "E: Validation failed." << Color::RESET << std::endl;
+        std::cerr << Color::RED << "E: Validation failed.";
+        if (!download_error.empty()) std::cerr << " " << download_error;
+        std::cerr << Color::RESET << std::endl;
         return 1;
     }
     return 0;
