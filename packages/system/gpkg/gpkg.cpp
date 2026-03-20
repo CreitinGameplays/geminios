@@ -43,6 +43,7 @@ namespace Color {
 const std::string REPO_CACHE_PATH = ROOT_PREFIX + "/var/repo/";
 const std::string SOURCES_LIST_PATH = ROOT_PREFIX + "/etc/gpkg/sources.list";
 const std::string SOURCES_DIR = ROOT_PREFIX + "/etc/gpkg/sources.list.d/";
+const std::string SYSTEM_PROVIDES_PATH = ROOT_PREFIX + "/etc/gpkg/system-provides.list";
 const std::string STATUS_FILE = ROOT_PREFIX + "/var/lib/gpkg/status";
 const std::string INFO_DIR = ROOT_PREFIX + "/var/lib/gpkg/info/";
 const std::string TMP_EXTRACT_PATH = "/tmp/gpkg_extract/";
@@ -894,6 +895,29 @@ bool version_satisfies(const std::string& current_ver, const std::string& op, co
     return false;
 }
 
+std::vector<std::string> load_system_provides() {
+    std::vector<std::string> entries;
+    std::ifstream f(SYSTEM_PROVIDES_PATH);
+    std::string line;
+    while (std::getline(f, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        entries.push_back(line);
+    }
+    return entries;
+}
+
+bool is_system_provided(const std::string& pkg, const std::string& op = "", const std::string& req_version = "") {
+    for (const auto& entry : load_system_provides()) {
+        Dependency dep = parse_dependency(entry);
+        if (dep.name != pkg) continue;
+        if (op.empty() || dep.version.empty() || version_satisfies(dep.version, op, req_version)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper: Find a package that provides a capability (Scanning the entire repo index)
 // Returns empty string if not found, or the name of the real package if found.
 std::string find_provider(const std::string& capability, const std::string& op, const std::string& req_version, bool verbose) {
@@ -941,6 +965,11 @@ bool resolve_dependencies(const std::string& pkg, const std::string& op, const s
     }
 
     if (verbose) VLOG(verbose, "Resolving dependencies for: " << pkg << (op.empty() ? "" : (" (" + op + " " + req_version + ")")));
+
+    if (is_system_provided(pkg, op, req_version)) {
+        VLOG(verbose, pkg << " is satisfied by " << SYSTEM_PROVIDES_PATH);
+        return true;
+    }
 
     // Check if already installed (directly or via smart detection)
     std::string installed_ver;

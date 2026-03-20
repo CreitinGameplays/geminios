@@ -66,6 +66,10 @@ LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
 DEFAULT_GPKG_REPO = os.environ.get("GPKG_DEFAULT_REPO", "https://repo.creitingameplays.com").rstrip("/")
+GPKG_SYSTEM_PROVIDES_FILE = os.environ.get(
+    "GPKG_SYSTEM_PROVIDES_FILE",
+    os.path.join(BUILD_SYSTEM_DIR, "gpkg_system_provides.txt"),
+)
 
 # Load Manifests
 try:
@@ -751,6 +755,14 @@ def finalize_rootfs():
     with open(repo_list_path, "w") as f:
         f.write(DEFAULT_GPKG_REPO + "\n")
     print_success(f"  ✓ Added default gpkg repo: {DEFAULT_GPKG_REPO}")
+
+    system_provides_dest = os.path.join(gpkg_dir, "system-provides.list")
+    if os.path.exists(GPKG_SYSTEM_PROVIDES_FILE):
+        shutil.copy2(GPKG_SYSTEM_PROVIDES_FILE, system_provides_dest)
+        print_success(f"  ✓ Added gpkg system provides: {system_provides_dest}")
+    else:
+        with open(system_provides_dest, "w") as f:
+            f.write("")
 
     # 6. Versioning
     version = get_geminios_version()

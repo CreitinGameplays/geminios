@@ -142,6 +142,7 @@ Important:
 - The repository layout must contain `x86_64/Packages.json.zst` and package files referenced by that index underneath the same base URL.
 - `gpkg update` now merges multiple repositories into one local cache instead of overwriting the previous index.
 - `gpkg` no longer contains a hardcoded fallback repository URL. The default repo is seeded into the image at build time under `/etc/gpkg/sources.list.d/`.
+- `gpkg` also reads `/etc/gpkg/system-provides.list` for base-system packages and capabilities that GeminiOS should treat as already installed during dependency resolution.
 
 By default, `builder.py` writes a repo file like:
 
@@ -154,6 +155,14 @@ using `https://repo.creitingameplays.com`. You can override that at build time w
 ```bash
 GPKG_DEFAULT_REPO=https://your-repo.example.com python3 builder.py geminios_core geminios_complex --force
 ```
+
+The default system-provided package list is taken from `build_system/gpkg_system_provides.txt` and copied into the image as:
+
+```text
+/etc/gpkg/system-provides.list
+```
+
+That is where entries like `libc6`, `libgcc-s1`, and `python3-minimal` should live if GeminiOS already ships their runtime equivalents.
 
 ## Ginit (Init System)
 
