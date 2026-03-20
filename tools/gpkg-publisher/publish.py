@@ -5,7 +5,10 @@ import argparse
 import json
 import os
 import shlex
+import subprocess
 import sys
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +34,7 @@ from common import (  # noqa: E402
     scan_repo,
     write_json,
 )
-from import_deb import convert_deb_to_gpkg  # noqa: E402
+from import_deb import convert_deb_to_gpkg, get_output_path_for_fields  # noqa: E402
 
 
 DEFAULT_CONFIG = {
@@ -310,6 +313,14 @@ def build_upload_command(config: dict[str, str], repo_root: Path) -> list[str] |
     command = ["rclone"]
     rclone_config = config.get("RCLONE_CONFIG", "").strip()
     if rclone_config:
+        config_path = Path(rclone_config).expanduser()
+        if not config_path.exists():
+            raise RuntimeError(f"RCLONE_CONFIG does not exist: {config_path}")
+        if not os.access(config_path, os.R_OK):
+            raise RuntimeError(
+                f"RCLONE_CONFIG is not readable by the current user: {config_path}. "
+                "Fix ownership or permissions."
+            )
         command.extend(["--config", rclone_config])
     command.extend(["copy", str(repo_root), rclone_dest, "--fast-list", "--checksum"])
     extra_args = config.get("RCLONE_EXTRA_ARGS", "").strip()
@@ -351,6 +362,52 @@ def hash_file_from_bytes(payload: bytes) -> str:
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def build_sidecar_path(output_path: Path) -> Path:
+    return output_path.with_name(output_path.name + ".build.json")
+
+
+def load_sidecar(output_path: Path) -> dict[str, Any]:
+    return read_json(build_sidecar_path(output_path), {})
+
+
+def write_sidecar(output_path: Path, payload: dict[str, Any]) -> None:
+    write_json(build_sidecar_path(output_path), payload)
+
+
+def load_existing_gpkg_metadata(package_path: Path, *, temp_root: Path) -> dict[str, Any]:
+    ensure_directory(temp_root)
+    with tempfile.TemporaryDirectory(prefix="gpkg-reuse-", dir=str(temp_root)) as temp_dir_name:
+        temp_tar = Path(temp_dir_name) / "package.tar"
+        with temp_tar.open("wb") as handle:
+            completed = subprocess.run(
+                ["zstd", "-dc", str(package_path)],
+                stdout=handle,
+                stderr=subprocess.PIPE,
+                text=False,
+            )
+        if completed.returncode != 0:
+            error = completed.stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"Failed to inspect existing package {package_path}: {error}")
+
+        with tarfile.open(temp_tar, "r") as tar:
+            control_handle = tar.extractfile("control.json")
+            if control_handle is None:
+                raise RuntimeError(f"Existing package is missing control.json: {package_path}")
+            return json.load(control_handle)
+
+
+def persist_progress(
+    *,
+    state_file: Path,
+    report_file: Path,
+    state: dict[str, Any],
+    report: dict[str, Any],
+) -> None:
+    report["last_checkpoint_at"] = now_utc()
+    write_json(state_file, state)
+    write_json(report_file, report)
 
 
 def main() -> int:
@@ -454,10 +511,22 @@ def main() -> int:
                 zstd_level=zstd_level,
                 include_maintainer_scripts=include_maintainer_scripts,
             )
+            expected_output_path = get_output_path_for_fields(
+                package.fields,
+                repo_arch_dir=repo_arch_dir,
+                overrides=overrides,
+                apt_arch=config["APT_ARCH"],
+            )
 
             cached = package_state.get(package.name, {})
             output_path_value = cached.get("output_path")
             output_path = Path(output_path_value) if output_path_value else None
+            sidecar_candidates: list[Path] = []
+            if output_path is not None:
+                sidecar_candidates.append(output_path)
+            if expected_output_path not in sidecar_candidates:
+                sidecar_candidates.append(expected_output_path)
+
             if (
                 not args.force_import
                 and cached.get("fingerprint") == fingerprint
@@ -465,7 +534,82 @@ def main() -> int:
                 and output_path.exists()
             ):
                 report["reused"].append(package.name)
+                package_state[package.name] = {
+                    "version": package.version,
+                    "deb_sha256": deb_sha256,
+                    "fingerprint": fingerprint,
+                    "output_path": str(output_path),
+                    "updated_at": now_utc(),
+                }
+                write_sidecar(output_path, package_state[package.name])
+                persist_progress(
+                    state_file=state_file,
+                    report_file=report_file,
+                    state=state,
+                    report=report,
+                )
                 continue
+
+            if not args.force_import:
+                reused_from_sidecar = False
+                for candidate in sidecar_candidates:
+                    if not candidate.exists():
+                        continue
+                    sidecar = load_sidecar(candidate)
+                    if sidecar.get("fingerprint") != fingerprint:
+                        continue
+                    report["reused"].append(package.name)
+                    package_state[package.name] = {
+                        "version": package.version,
+                        "deb_sha256": deb_sha256,
+                        "fingerprint": fingerprint,
+                        "output_path": str(candidate),
+                        "updated_at": now_utc(),
+                    }
+                    write_sidecar(candidate, package_state[package.name])
+                    persist_progress(
+                        state_file=state_file,
+                        report_file=report_file,
+                        state=state,
+                        report=report,
+                    )
+                    reused_from_sidecar = True
+                    break
+                if reused_from_sidecar:
+                    continue
+
+                reused_from_existing_package = False
+                expected_package_name = overrides.get("package_overrides", {}).get(package.name, {}).get("rename", package.name)
+                expected_architecture = overrides.get("package_overrides", {}).get(package.name, {}).get("architecture", config["ARCH"])
+                for candidate in sidecar_candidates:
+                    if not candidate.exists():
+                        continue
+                    existing_metadata = load_existing_gpkg_metadata(candidate, temp_root=temp_dir)
+                    if existing_metadata.get("package") != expected_package_name:
+                        continue
+                    if existing_metadata.get("version") != package.version:
+                        continue
+                    if existing_metadata.get("architecture") != expected_architecture:
+                        continue
+                    report["reused"].append(package.name)
+                    package_state[package.name] = {
+                        "version": package.version,
+                        "deb_sha256": deb_sha256,
+                        "fingerprint": fingerprint,
+                        "output_path": str(candidate),
+                        "updated_at": now_utc(),
+                    }
+                    write_sidecar(candidate, package_state[package.name])
+                    persist_progress(
+                        state_file=state_file,
+                        report_file=report_file,
+                        state=state,
+                        report=report,
+                    )
+                    reused_from_existing_package = True
+                    break
+                if reused_from_existing_package:
+                    continue
 
             result = convert_deb_to_gpkg(
                 deb_path,
@@ -487,9 +631,22 @@ def main() -> int:
                 "output_path": result["output_path"],
                 "updated_at": now_utc(),
             }
+            write_sidecar(Path(result["output_path"]), package_state[package.name])
+            persist_progress(
+                state_file=state_file,
+                report_file=report_file,
+                state=state,
+                report=report,
+            )
         except Exception as exc:
             failures[package.name] = str(exc)
             report["failures"][package.name] = str(exc)
+            persist_progress(
+                state_file=state_file,
+                report_file=report_file,
+                state=state,
+                report=report,
+            )
 
     try:
         indexed_packages = scan_repo(
@@ -505,22 +662,26 @@ def main() -> int:
         report["indexed_count"] = 0
 
     if upload_enabled:
-        command = build_upload_command(config, repo_root)
-        if command is None:
-            failures["upload"] = "UPLOAD_ENABLED is true but no upload backend was configured"
-            report["failures"]["upload"] = failures["upload"]
-        else:
-            try:
+        try:
+            command = build_upload_command(config, repo_root)
+            if command is None:
+                failures["upload"] = "UPLOAD_ENABLED is true but no upload backend was configured"
+                report["failures"]["upload"] = failures["upload"]
+            else:
                 run(command, verbose=args.verbose)
                 report["uploaded"] = True
-            except Exception as exc:
-                failures["upload"] = str(exc)
-                report["failures"]["upload"] = str(exc)
+        except Exception as exc:
+            failures["upload"] = str(exc)
+            report["failures"]["upload"] = str(exc)
 
     report["finished_at"] = now_utc()
     report["failures"] = failures
-    write_json(state_file, state)
-    write_json(report_file, report)
+    persist_progress(
+        state_file=state_file,
+        report_file=report_file,
+        state=state,
+        report=report,
+    )
 
     print(
         json.dumps(

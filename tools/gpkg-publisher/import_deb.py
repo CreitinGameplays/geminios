@@ -127,6 +127,12 @@ def convert_deb_to_gpkg(
             "architecture",
             normalize_architecture(fields.get("Architecture", apt_arch)),
         )
+        output_path = get_output_path_for_fields(
+            fields,
+            repo_arch_dir=repo_arch_dir,
+            overrides=overrides,
+            apt_arch=apt_arch,
+        )
 
         if forced_depends is None:
             depends = normalize_dependency_field(
@@ -185,10 +191,6 @@ def convert_deb_to_gpkg(
                 if source_script.exists():
                     shutil.copy2(source_script, scripts_dir / script_name)
 
-        version_for_filename = safe_filename_component(fields["Version"])
-        output_dir = repo_arch_dir / "pool" / section
-        ensure_directory(output_dir)
-        output_path = output_dir / f"{gpkg_name}_{version_for_filename}_{gpkg_arch}.gpkg"
         build_gpkg(
             source_dir,
             output_path,
@@ -205,6 +207,27 @@ def convert_deb_to_gpkg(
         "architecture": gpkg_arch,
         "output_path": str(output_path),
     }
+
+
+def get_output_path_for_fields(
+    fields: dict[str, str],
+    *,
+    repo_arch_dir: Path,
+    overrides: dict[str, Any],
+    apt_arch: str,
+) -> Path:
+    original_name = fields["Package"]
+    package_override = overrides.get("package_overrides", {}).get(original_name, {})
+    gpkg_name = package_override.get("rename", original_name)
+    section = sanitize_section(package_override.get("section", fields.get("Section", "misc")))
+    gpkg_arch = package_override.get(
+        "architecture",
+        normalize_architecture(fields.get("Architecture", apt_arch)),
+    )
+    version_for_filename = safe_filename_component(fields["Version"])
+    output_dir = repo_arch_dir / "pool" / section
+    ensure_directory(output_dir)
+    return output_dir / f"{gpkg_name}_{version_for_filename}_{gpkg_arch}.gpkg"
 
 
 def main() -> int:
