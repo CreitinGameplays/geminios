@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule GeminiOS GPKG repository publishing
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=1h
+Persistent=true
+Unit=gpkg-publisher.service
+
+[Install]
+WantedBy=timers.target
