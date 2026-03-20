@@ -2,7 +2,7 @@
 
 # GeminiOS Documentation
 
-GeminiOS is a minimal, open-source, educational Linux-based Operating System built from scratch (made by Google Gemini 3). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot).
+GeminiOS is a minimal, open-source, educational Linux-based Operating System built from scratch (made by Google Gemini 3, continued by Codex). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot).
 
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
