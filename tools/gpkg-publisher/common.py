@@ -40,7 +40,6 @@ DEFAULT_BLOCKLIST = [
     "mount",
     "openssh-server",
     "passwd",
-    "systemd*",
     "sysvinit*",
     "udev",
     "util-linux",
