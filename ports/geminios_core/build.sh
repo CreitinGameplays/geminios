@@ -23,6 +23,7 @@ mkdir -p "$ROOTFS/etc"
 # 1. /etc/passwd - Use /bin/bash as shell
 cat > "$ROOTFS/etc/passwd" <<EOF
 root:x:0:0:System Administrator:/root:/bin/bash
+lightdm:x:620:620:Light Display Manager:/var/lib/lightdm:/bin/false
 messagebus:x:18:18:D-Bus Message Daemon User:/var/run/dbus:/bin/false
 EOF
 
@@ -51,11 +52,14 @@ kvm:x:78:
 systemd-journal:x:190:
 adm:x:191:
 messagebus:x:18:
+lightdm:x:620:
 EOF
 
 # 3. /etc/shadow
 cat > "$ROOTFS/etc/shadow" <<EOF
 root:\$5\$GEMINI_SALT\$4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2:19000:0:99999:7:::
+lightdm:!:19000:0:99999:7:::
+messagebus:!:19000:0:99999:7:::
 EOF
 chmod 600 "$ROOTFS/etc/shadow"
 
@@ -94,6 +98,9 @@ export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
 EOF
 
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
+mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
+mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm"
+chown -R 620:620 "$ROOTFS/var/lib/lightdm" "$ROOTFS/var/cache/lightdm"
 
 cat > "$ROOTFS/etc/environment" <<EOF
 PATH=/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
@@ -207,6 +214,29 @@ cat > "$ROOTFS/etc/elogind/logind.conf.d/10-geminios.conf" <<EOF
 KillUserProcesses=no
 EOF
 
+cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-geminios.conf" <<EOF
+[LightDM]
+run-directory=/run/lightdm
+
+[Seat:*]
+greeter-session=lightdm-greeter
+session-wrapper=/etc/lightdm/Xsession
+EOF
+
+cat > "$ROOTFS/etc/lightdm/Xsession" <<'EOF'
+#!/bin/sh
+if [ -f /etc/profile ]; then
+    . /etc/profile
+fi
+
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
+exec /bin/bash --login
+EOF
+chmod 755 "$ROOTFS/etc/lightdm/Xsession"
+
 # Merge LightDM & PAM from staging (Comprehensive Merge)
 if [ -d "$ROOTFS/staging/lightdm" ]; then
     echo "Merging LightDM & PAM from staging..."
@@ -242,7 +272,12 @@ mkdir -p "$ROOTFS/etc/ld.so.conf.d"
 mkdir -p "$ROOTFS/usr/libexec/geminios"
 cat > "$ROOTFS/usr/libexec/geminios/elogind-launch" <<'EOF'
 #!/bin/sh
-for candidate in /usr/lib/elogind/elogind /usr/libexec/elogind/elogind /usr/lib64/elogind/elogind; do
+for candidate in \
+    /usr/libexec/elogind \
+    /usr/lib/elogind/elogind \
+    /usr/libexec/elogind/elogind \
+    /usr/lib64/elogind/elogind
+do
     if [ -x "$candidate" ]; then
         exec "$candidate" "$@"
     fi
@@ -252,6 +287,35 @@ echo "E: elogind daemon not found in expected locations." >&2
 exit 1
 EOF
 chmod 755 "$ROOTFS/usr/libexec/geminios/elogind-launch"
+
+mkdir -p "$ROOTFS/usr/share/xgreeters"
+cat > "$ROOTFS/usr/libexec/geminios/lightdm-greeter-launch" <<'EOF'
+#!/bin/sh
+for candidate in \
+    /usr/sbin/lightdm-gtk-greeter \
+    /usr/bin/lightdm-gtk-greeter \
+    /usr/sbin/slick-greeter \
+    /usr/bin/slick-greeter \
+    /usr/sbin/unity-greeter \
+    /usr/bin/unity-greeter
+do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+
+echo "E: no supported LightDM greeter binary found." >&2
+exit 1
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/lightdm-greeter-launch"
+
+cat > "$ROOTFS/usr/share/xgreeters/lightdm-greeter.desktop" <<'EOF'
+[Desktop Entry]
+Name=LightDM Greeter
+Comment=GeminiOS LightDM greeter launcher
+Exec=/usr/libexec/geminios/lightdm-greeter-launch
+Type=Application
+EOF
 
 # Compatibility shim for Debian desktop packages linked against GTK Wayland
 # helpers when GeminiOS is still running an X11 session stack.

@@ -329,6 +329,7 @@
     ],
     "elogind": [
         "usr/bin/loginctl",
+        "usr/libexec/elogind",
         "usr/lib64/libelogind.so",
         "usr/lib64/libsystemd.so.0",
         "usr/lib64/pkgconfig/libelogind.pc",
@@ -504,12 +505,16 @@
         "bin/init",
         "bin/login",
         "sbin/getty",
+        "etc/lightdm/Xsession",
+        "etc/lightdm/lightdm.conf.d/50-geminios.conf",
         "usr/lib/ginit/services/dbus.gservice",
         "usr/lib/ginit/services/elogind.gservice",
         "usr/lib/ginit/services/udevd.gservice",
         "usr/lib/ginit/services/udev-trigger.gservice",
         "usr/lib/ginit/services/udev-settle.gservice",
-        "usr/lib/ginit/services/network.gservice"
+        "usr/lib/ginit/services/network.gservice",
+        "usr/libexec/geminios/lightdm-greeter-launch",
+        "usr/share/xgreeters/lightdm-greeter.desktop"
     ],
     "geminios_pkgs": [
         "bin/apps/system/gtop",

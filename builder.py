@@ -265,7 +265,8 @@ PACKAGE_DEPENDENCIES = {
         "hicolor-icon-theme",
         "adwaita-icon-theme",
     ],
-    "geminios_core": ["dbus", "eudev", "linux-pam", "elogind"],
+    "geminios_core": ["kernel_headers", "glibc", "dbus", "eudev", "linux-pam", "elogind"],
+    "geminios_complex": ["kernel_headers", "glibc", "geminios_core"],
 }
 
 def resolve_requested_packages(requested_packages):
@@ -497,6 +498,19 @@ def copy_dev_environment():
     
     # 1. Resolve and Copy Headers
     print_info("[*] Copying standard headers from host...")
+
+    required_target_headers = [
+        os.path.join(ROOT_DIR, "rootfs", "usr", "include", "stdio.h"),
+        os.path.join(ROOT_DIR, "rootfs", "usr", "include", "pthread.h"),
+        os.path.join(ROOT_DIR, "rootfs", "usr", "include", "x86_64-linux-gnu", "bits", "pthreadtypes.h"),
+    ]
+    missing_target_headers = [path for path in required_target_headers if not os.path.exists(path)]
+    if missing_target_headers:
+        missing_display = ", ".join(os.path.relpath(path, ROOT_DIR) for path in missing_target_headers)
+        print_warning(
+            "[*] Target glibc headers are not fully staged yet "
+            f"({missing_display}). Skipping host libc headers; glibc/kernel_headers must populate them."
+        )
     
     # Get include paths from host g++
     res = subprocess.run("g++ -v -E -x c++ - < /dev/null 2>&1", shell=True, capture_output=True, text=True, executable="/usr/bin/bash")
@@ -512,10 +526,15 @@ def copy_dev_environment():
         if in_include_section:
             path = line.strip()
             if os.path.exists(path):
-                include_paths.append(path)
+                if "/include/c++/" in path or "/lib/gcc/" in path or path == "/usr/local/include":
+                    include_paths.append(path)
 
-    # Standard include locations too, just in case
-    include_paths.extend(["/usr/include", "/usr/include/x86_64-linux-gnu"])
+    # Ensure GCC internal headers are staged even if the search list omits them.
+    gcc_internal_paths = [
+        subprocess.run("g++ -print-file-name=include", shell=True, capture_output=True, text=True, executable="/usr/bin/bash").stdout.strip(),
+        subprocess.run("g++ -print-file-name=include-fixed", shell=True, capture_output=True, text=True, executable="/usr/bin/bash").stdout.strip(),
+    ]
+    include_paths.extend(path for path in gcc_internal_paths if path and os.path.exists(path))
     
     # Deduplicate while preserving order
     seen = set()
