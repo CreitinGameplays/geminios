@@ -6,6 +6,7 @@
 # One entry per line. Versioned entries may use Debian-style syntax, e.g.:
 # libc6 (>= 2.39)
 
+apt
 adduser
 base-files
 base-passwd
