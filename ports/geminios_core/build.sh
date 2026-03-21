@@ -261,6 +261,40 @@ if [ -d "$ROOTFS/staging/lightdm" ]; then
     done
 fi
 
+# Re-apply GeminiOS LightDM overrides after the staged package merge so the
+# distro defaults do not overwrite the custom greeter/session policy.
+cat > "$ROOTFS/etc/pam.d/lightdm-greeter" <<EOF
+auth        required      pam_env.so
+auth        required      pam_permit.so
+account     required      pam_permit.so
+password    required      pam_deny.so
+session     required      pam_unix.so
+EOF
+
+cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-geminios.conf" <<EOF
+[LightDM]
+run-directory=/run/lightdm
+
+[Seat:*]
+display-setup-script=/usr/libexec/geminios/lightdm-prepare
+greeter-session=lightdm-greeter
+session-wrapper=/etc/lightdm/Xsession
+EOF
+
+cat > "$ROOTFS/etc/lightdm/Xsession" <<'EOF'
+#!/bin/sh
+if [ -f /etc/profile ]; then
+    . /etc/profile
+fi
+
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
+exec /bin/bash --login
+EOF
+chmod 755 "$ROOTFS/etc/lightdm/Xsession"
+
 cat > "$ROOTFS/etc/ld.so.conf" <<EOF
 /lib64
 /lib64/x86_64-linux-gnu

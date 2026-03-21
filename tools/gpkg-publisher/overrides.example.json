@@ -1,6 +1,7 @@
 {
   "skip_packages": [
     "systemd",
+    "libpam-systemd",
     "udev",
     "linux-image-*"
   ],
@@ -27,18 +28,14 @@
     "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend",
     "lightdm::libpam-systemd | logind": "logind"
   },
+  "dependency_rewrites": {
+    "libpam-systemd": "libpam-elogind",
+    "systemd": "elogind"
+  },
   "provider_choices": {
     "logind": "libpam-elogind"
   },
   "package_overrides": {
-    "lightdm": {
-      "depends_remove": [
-        "libpam-systemd"
-      ],
-      "depends_add": [
-        "libpam-elogind"
-      ]
-    },
     "nano": {
       "section": "editors"
     },

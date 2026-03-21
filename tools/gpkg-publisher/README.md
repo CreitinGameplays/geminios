@@ -313,6 +313,7 @@ Supported top-level keys:
 - `skip_dependency_patterns`: dependency names to ignore during normalization.
 - `provided_by_system_patterns`: dependency names or globs that should be dropped entirely because GeminiOS already ships the runtime or base-system equivalent.
 - `dependency_choices`: choose one side of a Debian alternative dependency.
+- `dependency_rewrites`: rewrite one dependency name to another before resolution. Use this for Debian-to-GeminiOS substitutions such as `libpam-systemd -> libpam-elogind`.
 - `provider_choices`: choose a concrete package for a Debian virtual package when multiple providers exist.
 - `package_overrides`: package-specific behavior.
 
@@ -350,6 +351,10 @@ Example virtual-package provider choice:
 {
   "dependency_choices": {
     "lightdm::libpam-systemd | logind": "logind"
+  },
+  "dependency_rewrites": {
+    "libpam-systemd": "libpam-elogind",
+    "systemd": "elogind"
   },
   "provider_choices": {
     "logind": "libpam-elogind"
@@ -555,6 +560,8 @@ If failures look like this:
 
 then those are expected policy skips. Usually leave them skipped. Only relax them if you deliberately want to import core base-system packages and accept the risk.
 
+Top-level packages skipped by policy now appear under `skipped` in `last-run.json` instead of `failures`, so intentionally blocked packages such as `systemd` should no longer look like unresolved repository errors.
+
 ### Desktop package wants `libsystemd0`
 
 `libsystemd0` is a shared runtime library, not the `systemd` init system itself. Desktop packages may legitimately need the library even if GeminiOS does not boot with `systemd`.
@@ -564,6 +571,28 @@ Recommended approach:
 1. Keep `systemd*`, `udev`, and `libpam-systemd` blocked.
 2. Do not mark `libsystemd0` as "provided by system" unless GeminiOS already ships a compatible `libsystemd.so.0`.
 3. Allow the publisher to import `libsystemd0` and republish.
+4. Rewrite dependency names that should map to GeminiOS equivalents instead of Debian `systemd` packages.
+
+Example:
+
+```json
+{
+  "skip_packages": [
+    "systemd",
+    "libpam-systemd"
+  ],
+  "dependency_choices": {
+    "lightdm::libpam-systemd | logind": "logind"
+  },
+  "dependency_rewrites": {
+    "libpam-systemd": "libpam-elogind",
+    "systemd": "elogind"
+  },
+  "provider_choices": {
+    "logind": "libpam-elogind"
+  }
+}
+```
 
 If your local config still blocks `libsystemd*`, change it to something narrower, for example:
 

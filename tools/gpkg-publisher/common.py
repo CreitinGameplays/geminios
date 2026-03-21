@@ -344,12 +344,38 @@ def matches_any(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
+def apply_dependency_rewrite(
+    parsed: dict[str, str],
+    dependency_rewrites: dict[str, str] | None,
+) -> dict[str, str] | None:
+    if not dependency_rewrites:
+        return parsed
+
+    for pattern, replacement in dependency_rewrites.items():
+        if not fnmatch.fnmatch(parsed["name"], pattern):
+            continue
+        rewritten_name = replacement.strip()
+        if not rewritten_name:
+            return None
+        rewritten = dict(parsed)
+        rewritten["name"] = rewritten_name
+        rewritten["normalized"] = (
+            rewritten_name
+            if not rewritten["op"]
+            else f"{rewritten_name} ({rewritten['op']} {rewritten['version']})"
+        )
+        return rewritten
+
+    return parsed
+
+
 def normalize_dependency_field(
     value: str,
     *,
     package_name: str,
     apt_arch: str,
     dependency_choices: dict[str, str],
+    dependency_rewrites: dict[str, str] | None,
     dependency_exists: Callable[[str], bool],
     skip_patterns: list[str],
     drop_patterns: list[str] | None = None,
@@ -378,8 +404,18 @@ def normalize_dependency_field(
         if choice:
             parsed = normalize_relation_atom(choice, apt_arch)
             if parsed:
+                original_name = parsed["name"]
+                parsed = apply_dependency_rewrite(parsed, dependency_rewrites)
+                if parsed is None:
+                    dropped_as_system_dependency = True
+                    continue
+            if parsed:
                 provider_name, provider_normalized = resolve_provider(parsed)
-                if matches_any(parsed["name"], drop_patterns) or matches_any(provider_name, drop_patterns):
+                if (
+                    matches_any(original_name, drop_patterns)
+                    or matches_any(parsed["name"], drop_patterns)
+                    or matches_any(provider_name, drop_patterns)
+                ):
                     dropped_as_system_dependency = True
                 else:
                     selected = provider_normalized
@@ -388,11 +424,24 @@ def normalize_dependency_field(
                 parsed = normalize_relation_atom(alternative, apt_arch)
                 if not parsed:
                     continue
-                provider_name, provider_normalized = resolve_provider(parsed)
-                if matches_any(parsed["name"], drop_patterns) or matches_any(provider_name, drop_patterns):
+                original_name = parsed["name"]
+                parsed = apply_dependency_rewrite(parsed, dependency_rewrites)
+                if parsed is None:
                     dropped_as_system_dependency = True
                     continue
-                if matches_any(parsed["name"], skip_patterns) or matches_any(provider_name, skip_patterns):
+                provider_name, provider_normalized = resolve_provider(parsed)
+                if (
+                    matches_any(original_name, drop_patterns)
+                    or matches_any(parsed["name"], drop_patterns)
+                    or matches_any(provider_name, drop_patterns)
+                ):
+                    dropped_as_system_dependency = True
+                    continue
+                if (
+                    matches_any(original_name, skip_patterns)
+                    or matches_any(parsed["name"], skip_patterns)
+                    or matches_any(provider_name, skip_patterns)
+                ):
                     continue
                 if dependency_exists(provider_name):
                     selected = provider_normalized
@@ -405,8 +454,17 @@ def normalize_dependency_field(
             for alternative in alternatives:
                 parsed = normalize_relation_atom(alternative, apt_arch)
                 if parsed:
+                    original_name = parsed["name"]
+                    parsed = apply_dependency_rewrite(parsed, dependency_rewrites)
+                    if parsed is None:
+                        dropped_as_system_dependency = True
+                        continue
                     provider_name, provider_normalized = resolve_provider(parsed)
-                    if matches_any(parsed["name"], drop_patterns) or matches_any(provider_name, drop_patterns):
+                    if (
+                        matches_any(original_name, drop_patterns)
+                        or matches_any(parsed["name"], drop_patterns)
+                        or matches_any(provider_name, drop_patterns)
+                    ):
                         dropped_as_system_dependency = True
                         continue
                     selected = provider_normalized

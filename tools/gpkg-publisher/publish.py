@@ -100,6 +100,7 @@ class AptResolver:
         self.resolved: dict[str, ResolvedPackage] = {}
         self.order: list[ResolvedPackage] = []
         self.failures: dict[str, str] = {}
+        self.skipped: dict[str, str] = {}
         self.active: set[str] = set()
         self.provider_resolver = build_provider_resolver(
             apt_arch=self.apt_arch,
@@ -118,22 +119,27 @@ class AptResolver:
             return False
         return self._provider_target_exists(provider_name)
 
-    def resolve_all(self, packages: list[str]) -> tuple[list[ResolvedPackage], dict[str, str]]:
+    def resolve_all(self, packages: list[str]) -> tuple[list[ResolvedPackage], dict[str, str], dict[str, str]]:
         for package_name in packages:
             self._resolve_one(package_name, parent=None)
-        return self.order, self.failures
+        return self.order, self.failures, self.skipped
 
     def _resolve_one(self, package_name: str, *, parent: str | None) -> bool:
         if package_name in self.resolved:
             return True
         if package_name in self.failures:
             return False
+        if package_name in self.skipped:
+            return False
         if package_name in self.active:
             return True
         if matches_any(package_name, self.system_provided_patterns):
             return True
         if matches_any(package_name, self.blocklist_patterns):
-            self.failures[package_name] = "blocked by pattern"
+            if parent is None:
+                self.skipped[package_name] = "blocked by pattern"
+            else:
+                self.failures[package_name] = "blocked by pattern"
             return False
         provider_name = self.provider_resolver(package_name)
         if provider_name and provider_name != package_name:
@@ -197,6 +203,7 @@ class AptResolver:
             return None
 
         dependency_choices = self.overrides.get("dependency_choices", {})
+        dependency_rewrites = self.overrides.get("dependency_rewrites", {})
         skip_patterns = list(self.blocklist_patterns)
         skip_patterns.extend(self.overrides.get("skip_dependency_patterns", []))
         drop_patterns = self.overrides.get("provided_by_system_patterns", [])
@@ -209,6 +216,7 @@ class AptResolver:
             package_name=package_name,
             apt_arch=self.apt_arch,
             dependency_choices=dependency_choices,
+            dependency_rewrites=dependency_rewrites,
             dependency_exists=self.candidate_exists,
             skip_patterns=skip_patterns,
             drop_patterns=drop_patterns,
@@ -374,6 +382,7 @@ def build_fingerprint(
         "include_maintainer_scripts": include_maintainer_scripts,
         "package_override": package_override,
         "dependency_choices": overrides.get("dependency_choices", {}),
+        "dependency_rewrites": overrides.get("dependency_rewrites", {}),
         "skip_dependency_patterns": overrides.get("skip_dependency_patterns", []),
         "provided_by_system_patterns": system_provided_patterns,
         "skip_packages": overrides.get("skip_packages", []),
@@ -563,7 +572,7 @@ def main() -> int:
         allow_essential=allow_essential,
         verbose=args.verbose,
     )
-    packages, failures = resolver.resolve_all(seeds)
+    packages, failures, skipped = resolver.resolve_all(seeds)
 
     report: dict[str, Any] = {
         "started_at": now_utc(),
@@ -571,6 +580,7 @@ def main() -> int:
         "seed_packages": seeds,
         "resolved_count": len(packages),
         "resolved_packages": [package.name for package in packages],
+        "skipped": skipped.copy(),
         "failures": failures.copy(),
         "built": [],
         "reused": [],

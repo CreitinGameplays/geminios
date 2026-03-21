@@ -76,6 +76,7 @@ def convert_deb_to_gpkg(
     deb_path = deb_path.resolve()
     package_overrides = overrides.get("package_overrides", {})
     dependency_choices = overrides.get("dependency_choices", {})
+    dependency_rewrites = overrides.get("dependency_rewrites", {})
     skip_patterns = list(DEFAULT_BLOCKLIST)
     skip_patterns.extend(overrides.get("skip_packages", []))
     skip_patterns.extend(overrides.get("skip_patterns", []))
@@ -147,6 +148,7 @@ def convert_deb_to_gpkg(
                 package_name=original_name,
                 apt_arch=apt_arch,
                 dependency_choices=dependency_choices,
+                dependency_rewrites=dependency_rewrites,
                 dependency_exists=lambda name: package_exists_via_apt(name, verbose=verbose),
                 skip_patterns=skip_patterns,
                 drop_patterns=drop_patterns,
