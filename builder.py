@@ -722,6 +722,12 @@ def verify_rootfs_integrity():
         "usr/lib64/libpam_misc.so.0",
         "usr/lib64/libelogind.so.0",
         "usr/lib64/libsystemd.so.0",
+        "usr/lib64/libGLX.so.0",
+        "usr/lib64/libEGL_mesa.so.0",
+        "usr/lib64/libGLX_mesa.so.0",
+        "usr/lib64/libgbm.so.1",
+        "usr/lib64/dri/swrast_dri.so",
+        "usr/share/glvnd/egl_vendor.d/50_mesa.json",
     ]
     for rel_path in required_runtime_libs:
         path = os.path.join(ROOT_DIR, "rootfs", rel_path)

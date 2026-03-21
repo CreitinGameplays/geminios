@@ -11,7 +11,7 @@ export PATH="$DEP_DIR/bin_shim:$PATH"
 
 rm -rf build
 if [ ! -d "build" ]; then
-    meson setup build --prefix=/usr --libdir=lib64 -Dplatforms=x11,wayland -Dgallium-drivers=swrast,virgl -Dvulkan-drivers= -Dopengl=true -Dglx=dri -Degl=enabled -Dgles1=enabled -Dgles2=enabled -Dllvm=disabled -Dshared-glapi=enabled -Dgbm=enabled -Dbuildtype=release -Dwerror=false
+    meson setup build --prefix=/usr --libdir=lib64 -Dplatforms=x11,wayland -Dgallium-drivers=swrast,virgl -Dvulkan-drivers= -Dopengl=true -Dglx=dri -Degl=enabled -Dgles1=enabled -Dgles2=enabled -Dglvnd=true -Dllvm=disabled -Dshared-glapi=enabled -Dgbm=enabled -Dbuildtype=release -Dwerror=false
 fi
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install
