@@ -111,6 +111,11 @@ PATH=/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/us
 LANG=C.UTF-8
 EOF
 
+mkdir -p "$ROOTFS/etc/default"
+cat > "$ROOTFS/etc/default/locale" <<EOF
+LANG=C.UTF-8
+EOF
+
 cat > "$ROOTFS/etc/security/limits.conf" <<EOF
 # GeminiOS PAM limits defaults
 *               soft    nofile          1024
@@ -189,11 +194,12 @@ session     include       system-session
 EOF
 
 cat > "$ROOTFS/etc/pam.d/lightdm-greeter" <<EOF
-auth        required      pam_env.so
-auth        required      pam_permit.so
-account     required      pam_permit.so
-password    required      pam_deny.so
-session     required      pam_unix.so
+#%PAM-1.0
+auth         required pam_permit.so
+account      include       common-account
+password     include       common-password
+session      include       common-session
+session      required      pam_env.so readenv=1 envfile=/etc/default/locale
 EOF
 
 cat > "$ROOTFS/etc/pam.d/elogind-user" <<EOF
@@ -268,11 +274,12 @@ fi
 # Re-apply GeminiOS LightDM overrides after the staged package merge so the
 # distro defaults do not overwrite the custom greeter/session policy.
 cat > "$ROOTFS/etc/pam.d/lightdm-greeter" <<EOF
-auth        required      pam_env.so
-auth        required      pam_permit.so
-account     required      pam_permit.so
-password    required      pam_deny.so
-session     required      pam_unix.so
+#%PAM-1.0
+auth         required pam_permit.so
+account      include       common-account
+password     include       common-password
+session      include       common-session
+session      required      pam_env.so readenv=1 envfile=/etc/default/locale
 EOF
 
 cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-geminios.conf" <<EOF
