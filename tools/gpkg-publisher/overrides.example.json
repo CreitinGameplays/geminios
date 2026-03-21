@@ -31,6 +31,14 @@
     "logind": "libpam-elogind"
   },
   "package_overrides": {
+    "lightdm": {
+      "depends_remove": [
+        "libpam-systemd"
+      ],
+      "depends_add": [
+        "libpam-elogind"
+      ]
+    },
     "nano": {
       "section": "editors"
     },

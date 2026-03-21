@@ -181,9 +181,13 @@ session     include       system-session
 EOF
 
 cat > "$ROOTFS/etc/pam.d/lightdm-greeter" <<EOF
-auth        sufficient    pam_permit.so
-account     include       system-account
-session     include       system-session
+auth        required      pam_env.so readenv=1
+auth        required      pam_permit.so
+account     required      pam_permit.so
+password    required      pam_deny.so
+session     required      pam_unix.so
+session     optional      pam_keyinit.so force revoke
+session     optional      pam_elogind.so
 EOF
 
 cat > "$ROOTFS/etc/pam.d/elogind-user" <<EOF
