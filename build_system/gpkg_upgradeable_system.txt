@@ -7,6 +7,7 @@
 #   package can replace them
 
 dbus
+dbus-x11
 dbus-system-bus
 default-dbus-session-bus
 default-dbus-system-bus
@@ -17,3 +18,9 @@ libelogind0
 libpam-elogind
 libpam-systemd
 libsystemd0
+wayland
+libdrm
+libglvnd
+libxkbcommon
+mesa
+xorg-server

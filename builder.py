@@ -75,6 +75,10 @@ GPKG_UPGRADEABLE_SYSTEM_FILE = os.environ.get(
     "GPKG_UPGRADEABLE_SYSTEM_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgradeable_system.txt"),
 )
+GPKG_UPGRADE_COMPANIONS_FILE = os.environ.get(
+    "GPKG_UPGRADE_COMPANIONS_FILE",
+    os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgrade_companions.conf"),
+)
 
 # Load Manifests
 try:
@@ -839,6 +843,14 @@ def finalize_rootfs():
         print_success(f"  ✓ Added gpkg upgradeable runtimes: {upgradeable_system_dest}")
     else:
         with open(upgradeable_system_dest, "w") as f:
+            f.write("")
+
+    upgrade_companions_dest = os.path.join(gpkg_dir, "upgrade-companions.conf")
+    if os.path.exists(GPKG_UPGRADE_COMPANIONS_FILE):
+        shutil.copy2(GPKG_UPGRADE_COMPANIONS_FILE, upgrade_companions_dest)
+        print_success(f"  ✓ Added gpkg upgrade companions: {upgrade_companions_dest}")
+    else:
+        with open(upgrade_companions_dest, "w") as f:
             f.write("")
 
     # 6. Versioning

@@ -24,3 +24,6 @@ libwebkit2gtk-4.1-0
 task-mate-desktop
 fastfetch
 lomiri-wallpapers
+xorg
+libdbus-1-3
+dbus-x11
