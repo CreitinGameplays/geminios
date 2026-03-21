@@ -37,7 +37,6 @@ DEFAULT_BLOCKLIST = [
     "initramfs-tools*",
     "linux-*",
     "libc6",
-    "libpam*",
     "libpam-systemd",
     "mount",
     "openssh-server",
