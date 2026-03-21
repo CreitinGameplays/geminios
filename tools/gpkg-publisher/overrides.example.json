@@ -1,5 +1,6 @@
 {
   "skip_packages": [
+    "apt*",
     "systemd",
     "libpam-systemd",
     "udev",
