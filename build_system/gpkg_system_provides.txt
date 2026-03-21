@@ -38,3 +38,4 @@ libelogind0
 libsystemd0
 libcap2
 libcap2-bin
+udev
