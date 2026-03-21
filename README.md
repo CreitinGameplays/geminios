@@ -2,7 +2,7 @@
 
 # GeminiOS Documentation
 
-GeminiOS is a minimal, open-source, educational debian-like Linux-based Operating System built from scratch (made by Google Gemini 3, continued by Codex). It does not rely on existing distributions (like Debian or Arch) or build systems (like Buildroot).
+GeminiOS is a minimal, open-source, educational Debian-like Linux-based Operating System built from scratch (made by Google Gemini 3, continued by Codex). It does not rely on build systems (like Buildroot).
 
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
@@ -10,7 +10,7 @@ Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
 To build GeminiOS, you need a Linux host (Ubuntu/Debian recommended) with the following dependencies:
 
-*Only tested on a Debian 13 Trixie x86_64 system*
+*Only tested and built on a Debian 13 Trixie x86_64 system*
 
 ```bash
 sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev \
