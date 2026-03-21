@@ -100,7 +100,11 @@ EOF
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
 mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
 mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm"
-chown -R 620:620 "$ROOTFS/var/lib/lightdm" "$ROOTFS/var/cache/lightdm"
+if [ "$(id -u)" -eq 0 ]; then
+    chown -R 620:620 "$ROOTFS/var/lib/lightdm" "$ROOTFS/var/cache/lightdm"
+else
+    echo "[*] Skipping LightDM directory ownership fixups during unprivileged build; runtime setup must create/chown them on the target system."
+fi
 
 cat > "$ROOTFS/etc/environment" <<EOF
 PATH=/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
@@ -181,13 +185,11 @@ session     include       system-session
 EOF
 
 cat > "$ROOTFS/etc/pam.d/lightdm-greeter" <<EOF
-auth        required      pam_env.so readenv=1
+auth        required      pam_env.so
 auth        required      pam_permit.so
 account     required      pam_permit.so
 password    required      pam_deny.so
 session     required      pam_unix.so
-session     optional      pam_keyinit.so force revoke
-session     optional      pam_elogind.so
 EOF
 
 cat > "$ROOTFS/etc/pam.d/elogind-user" <<EOF
@@ -223,6 +225,7 @@ cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-geminios.conf" <<EOF
 run-directory=/run/lightdm
 
 [Seat:*]
+display-setup-script=/usr/libexec/geminios/lightdm-prepare
 greeter-session=lightdm-greeter
 session-wrapper=/etc/lightdm/Xsession
 EOF
@@ -291,6 +294,24 @@ echo "E: elogind daemon not found in expected locations." >&2
 exit 1
 EOF
 chmod 755 "$ROOTFS/usr/libexec/geminios/elogind-launch"
+
+cat > "$ROOTFS/usr/libexec/geminios/lightdm-prepare" <<'EOF'
+#!/bin/sh
+set -e
+
+mkdir -p /run/lightdm
+mkdir -p /var/lib/lightdm/data
+mkdir -p /var/cache/lightdm
+
+if getent passwd lightdm >/dev/null 2>&1; then
+    chown -R lightdm:lightdm /var/lib/lightdm /var/cache/lightdm || true
+    chmod 700 /var/lib/lightdm || true
+    touch /var/lib/lightdm/.Xauthority
+    chown lightdm:lightdm /var/lib/lightdm/.Xauthority || true
+    chmod 600 /var/lib/lightdm/.Xauthority || true
+fi
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/lightdm-prepare"
 
 mkdir -p "$ROOTFS/usr/share/xgreeters"
 cat > "$ROOTFS/usr/libexec/geminios/lightdm-greeter-launch" <<'EOF'

@@ -6,6 +6,7 @@ import time
 import json
 import shutil
 import glob
+import tempfile
 from datetime import datetime, timezone
 
 # Terminal Colors
@@ -1160,74 +1161,79 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
 
 def create_minimal_initramfs():
     print_section("\n=== Building Minimal Initramfs (Live CD Bootloader) ===")
-    
-    work_dir = os.path.join(ROOT_DIR, "initramfs_build")
-    if os.path.exists(work_dir):
-        shutil.rmtree(work_dir)
-    os.makedirs(work_dir)
-    
-    # structure
-    for d in ["bin", "sbin", "lib64", "mnt", "dev", "proc", "sys", "run", "usr/bin", "usr/sbin"]:
-        os.makedirs(os.path.join(work_dir, d), exist_ok=True)
-    
-    # Symlink lib to lib64
-    if not os.path.exists(os.path.join(work_dir, "lib")):
-        os.symlink("lib64", os.path.join(work_dir, "lib"))
-        
-    rootfs = os.path.join(ROOT_DIR, "rootfs")
-    
-    # Essential binaries
-    essential_tools = [
-        ("bash", ["bin/bash", "usr/bin/bash"]),
-        ("sh", ["bin/sh", "usr/bin/sh"]),
-        ("mount", ["usr/bin/mount", "bin/mount", "bin/apps/system/mount"]),
-        ("ls", ["usr/bin/ls", "bin/ls", "bin/apps/system/ls"]),
-        ("mkdir", ["usr/bin/mkdir", "bin/mkdir", "bin/apps/system/mkdir"]),
-        ("cat", ["usr/bin/cat", "bin/cat", "bin/apps/system/cat"]),
-        ("sleep", ["usr/bin/sleep", "bin/sleep", "bin/apps/system/sleep"]),
-        ("umount", ["usr/bin/umount", "bin/umount", "bin/apps/system/umount"]),
-    ]
-    
-    binaries = []
-    for tool_name, paths in essential_tools:
-        found = False
-        for path in paths:
-            if os.path.exists(os.path.join(rootfs, path)):
-                binaries.append((path, "bin"))
-                found = True
-                break
-        if not found:
-             print_warning(f"WARNING: Essential tool {tool_name} not found in rootfs!")
-    
-    # Locate switch_root
-    if os.path.exists(os.path.join(rootfs, "sbin/switch_root")):
-        binaries.append(("sbin/switch_root", "sbin"))
-    elif os.path.exists(os.path.join(rootfs, "usr/sbin/switch_root")):
-         binaries.append(("usr/sbin/switch_root", "usr/sbin"))
-    
-    for src_rel, dest_rel in binaries:
-        src_path = os.path.join(rootfs, src_rel)
-        dest_path = os.path.join(work_dir, dest_rel)
-        
-        if not os.path.exists(src_path):
-             print_warning(f"WARNING: Initramfs binary missing: {src_rel}")
-             continue
-        
-        # Always resolve to real file to avoid broken symlinks in minimal env
-        real_src = os.path.realpath(src_path)
-        
-        # Determine destination filename (preserve the name requested, e.g. sh)
-        dest_file = os.path.join(dest_path, os.path.basename(src_rel))
-        
-        # Copy the actual content
-        shutil.copy2(real_src, dest_file)
-        os.chmod(dest_file, 0o755)
-        
-        # Copy dependencies - ALWAYS copy to work_dir root so libs land in /lib64 or /usr/lib64
-        copy_with_libs(real_src, work_dir, rootfs, copy_bin=False)
 
-    # Create init script
-    init_script = """#!/bin/bash
+    stale_work_dir = os.path.join(ROOT_DIR, "initramfs_build")
+    if os.path.exists(stale_work_dir):
+        try:
+            shutil.rmtree(stale_work_dir)
+        except PermissionError:
+            print_warning(f"WARNING: Could not remove stale {stale_work_dir}; using a fresh temporary staging dir instead.")
+
+    work_dir = tempfile.mkdtemp(prefix="initramfs_build.", dir=ROOT_DIR)
+
+    try:
+        # structure
+        for d in ["bin", "sbin", "lib64", "mnt", "dev", "proc", "sys", "run", "usr/bin", "usr/sbin"]:
+            os.makedirs(os.path.join(work_dir, d), exist_ok=True)
+
+        # Symlink lib to lib64
+        if not os.path.exists(os.path.join(work_dir, "lib")):
+            os.symlink("lib64", os.path.join(work_dir, "lib"))
+
+        rootfs = os.path.join(ROOT_DIR, "rootfs")
+
+        # Essential binaries
+        essential_tools = [
+            ("bash", ["bin/bash", "usr/bin/bash"]),
+            ("sh", ["bin/sh", "usr/bin/sh"]),
+            ("mount", ["usr/bin/mount", "bin/mount", "bin/apps/system/mount"]),
+            ("ls", ["usr/bin/ls", "bin/ls", "bin/apps/system/ls"]),
+            ("mkdir", ["usr/bin/mkdir", "bin/mkdir", "bin/apps/system/mkdir"]),
+            ("cat", ["usr/bin/cat", "bin/cat", "bin/apps/system/cat"]),
+            ("sleep", ["usr/bin/sleep", "bin/sleep", "bin/apps/system/sleep"]),
+            ("umount", ["usr/bin/umount", "bin/umount", "bin/apps/system/umount"]),
+        ]
+
+        binaries = []
+        for tool_name, paths in essential_tools:
+            found = False
+            for path in paths:
+                if os.path.exists(os.path.join(rootfs, path)):
+                    binaries.append((path, "bin"))
+                    found = True
+                    break
+            if not found:
+                 print_warning(f"WARNING: Essential tool {tool_name} not found in rootfs!")
+
+        # Locate switch_root
+        if os.path.exists(os.path.join(rootfs, "sbin/switch_root")):
+            binaries.append(("sbin/switch_root", "sbin"))
+        elif os.path.exists(os.path.join(rootfs, "usr/sbin/switch_root")):
+             binaries.append(("usr/sbin/switch_root", "usr/sbin"))
+
+        for src_rel, dest_rel in binaries:
+            src_path = os.path.join(rootfs, src_rel)
+            dest_path = os.path.join(work_dir, dest_rel)
+
+            if not os.path.exists(src_path):
+                 print_warning(f"WARNING: Initramfs binary missing: {src_rel}")
+                 continue
+
+            # Always resolve to real file to avoid broken symlinks in minimal env
+            real_src = os.path.realpath(src_path)
+
+            # Determine destination filename (preserve the name requested, e.g. sh)
+            dest_file = os.path.join(dest_path, os.path.basename(src_rel))
+
+            # Copy the actual content
+            shutil.copy2(real_src, dest_file)
+            os.chmod(dest_file, 0o755)
+
+            # Copy dependencies - ALWAYS copy to work_dir root so libs land in /lib64 or /usr/lib64
+            copy_with_libs(real_src, work_dir, rootfs, copy_bin=False)
+
+        # Create init script
+        init_script = """#!/bin/bash
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin
 
 mount -t devtmpfs devtmpfs /dev
@@ -1297,21 +1303,23 @@ umount /mnt/cdrom
 echo "Switching to real root..."
 exec switch_root /new_root /bin/init
 """
-    with open(os.path.join(work_dir, "init"), "w") as f:
-        f.write(init_script)
-    os.chmod(os.path.join(work_dir, "init"), 0o755)
-    
-    # Pack it
-    print_info("[*] Compressing minimal initramfs...")
-    os.makedirs(os.path.join(ROOT_DIR, "isodir/boot"), exist_ok=True)
-    
-    pack_cmd = (
-        f"cd {work_dir} && "
-        "find . -print0 | cpio --null -o --format=newc | lz4 -l -T0 > ../isodir/boot/initramfs.cpio.lz4"
-    )
-    run_command(pack_cmd)
-    
-    return True
+        with open(os.path.join(work_dir, "init"), "w") as f:
+            f.write(init_script)
+        os.chmod(os.path.join(work_dir, "init"), 0o755)
+
+        # Pack it
+        print_info("[*] Compressing minimal initramfs...")
+        os.makedirs(os.path.join(ROOT_DIR, "isodir/boot"), exist_ok=True)
+        initramfs_out = os.path.join(ROOT_DIR, "isodir/boot/initramfs.cpio.lz4")
+
+        pack_cmd = (
+            f"cd {work_dir} && "
+            f"find . -print0 | cpio --null -o --format=newc | lz4 -l -T0 > {initramfs_out}"
+        )
+        run_command(pack_cmd)
+        return True
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 def create_iso():
     finalize_rootfs()

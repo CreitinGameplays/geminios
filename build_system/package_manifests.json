@@ -513,6 +513,7 @@
         "usr/lib/ginit/services/udev-trigger.gservice",
         "usr/lib/ginit/services/udev-settle.gservice",
         "usr/lib/ginit/services/network.gservice",
+        "usr/libexec/geminios/lightdm-prepare",
         "usr/libexec/geminios/lightdm-greeter-launch",
         "usr/share/xgreeters/lightdm-greeter.desktop"
     ],
