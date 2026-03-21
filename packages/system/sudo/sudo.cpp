@@ -43,19 +43,35 @@ void print_usage() {
     std::cout << "Usage: sudo [-u user] <command> [args...]\n";
 }
 
+bool is_member_of_privileged_group(const std::vector<std::string>& user_groups) {
+    for (const auto& group : user_groups) {
+        if (group == "root" || group == "sudo" || group == "wheel") {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool check_sudoers(const std::string& user, const std::vector<std::string>& user_groups) {
     std::ifstream f("/etc/sudoers");
     if (!f) {
-        std::cerr << "sudo: unable to open /etc/sudoers: " << strerror(errno) << "\n";
         return false;
     }
 
+    bool saw_rule = false;
     std::string line;
     while(std::getline(f, line)) {
         // Strip comments
         size_t comment = line.find('#');
         if(comment != std::string::npos) line = line.substr(0, comment);
-        
+
+        line = std::string(line.begin(), std::find_if(line.rbegin(), line.rend(), [](unsigned char c) {
+            return !std::isspace(c);
+        }).base());
+        line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char c) {
+            return !std::isspace(c);
+        }));
+
         if (line.empty()) continue;
 
         std::stringstream ss(line);
@@ -63,6 +79,7 @@ bool check_sudoers(const std::string& user, const std::vector<std::string>& user
         ss >> subject;
 
         if (subject.empty()) continue;
+        saw_rule = true;
 
         if (subject[0] == '%') {
             std::string grp = subject.substr(1);
@@ -71,7 +88,7 @@ bool check_sudoers(const std::string& user, const std::vector<std::string>& user
             if (subject == user) return true;
         }
     }
-    return false;
+    return saw_rule ? false : is_member_of_privileged_group(user_groups);
 }
 
 std::string get_tty_name() {
@@ -197,8 +214,9 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (!check_sudoers(current_user->username, user_groups)) {
-        std::cerr << current_user->username << " is not in the sudoers file. This incident will be reported.\n";
+    if (!is_member_of_privileged_group(user_groups) &&
+        !check_sudoers(current_user->username, user_groups)) {
+        std::cerr << current_user->username << " is not allowed to use sudo on this system.\n";
         return 1;
     }
 

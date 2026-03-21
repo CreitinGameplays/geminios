@@ -14,6 +14,14 @@ sqlite3
 strace
 tree
 unzip
-xfce4-terminal
+xfce4
+xfce4-goodies
+firefox-esr
 zip
-libc6
+vlc
+lightdm
+libwebkit2gtk-4.1-0
+task-mate-desktop
+fastfetch
+neofetch
+lomiri-wallpapers

@@ -30,5 +30,5 @@ for tool in passwd adduser useradd userdel usermod su sudo; do
 done
 
 echo "Compiling Installer..."
-/usr/bin/g++ -I "$GINIT_SRC" -I "$SRC" -o "$ROOTFS/bin/apps/system/installer" "$PKGS/installer/installer.cpp" -L"$GINIT_LIB" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt
+/usr/bin/g++ -I "$GINIT_SRC" -I "$SRC" -o "$ROOTFS/bin/apps/system/installer" "$PKGS/installer/"*.cpp -L"$GINIT_LIB" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt
 /usr/bin/strip "$ROOTFS/bin/apps/system/installer"

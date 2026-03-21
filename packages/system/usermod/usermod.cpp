@@ -175,8 +175,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (!user_modified && !groups_modified) {
-        std::cerr << "usermod: user not found or nothing to do.\n";
-        return 1;
+        std::cout << "usermod: nothing to do\n";
+        return 0;
     }
 
     if (!UserMgmt::save_users(users) || !UserMgmt::save_shadow(users) || !UserMgmt::save_groups(groups)) {
