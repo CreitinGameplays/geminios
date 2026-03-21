@@ -18,6 +18,19 @@ namespace installer {
 
 namespace {
 
+std::string kernel_root_argument(const InstallArtifacts& artifacts) {
+    if (!artifacts.root_partuuid.empty()) {
+        return "PARTUUID=" + artifacts.root_partuuid;
+    }
+    if (!artifacts.root_partition.empty()) {
+        return artifacts.root_partition;
+    }
+    if (!artifacts.root_uuid.empty()) {
+        return "UUID=" + artifacts.root_uuid;
+    }
+    return {};
+}
+
 bool auto_partition_disk(const ToolRegistry& tools, const InstallerConfig& config, InstallArtifacts& artifacts, std::string& error) {
     if (tools.sfdisk.empty()) {
         error = "sfdisk is required for automatic partitioning.";
@@ -132,6 +145,7 @@ bool format_partitions(const ToolRegistry& tools, const InstallerConfig& config,
     }
 
     artifacts.root_uuid = capture_blkid_value(tools, artifacts.root_partition, "UUID");
+    artifacts.root_partuuid = capture_blkid_value(tools, artifacts.root_partition, "PARTUUID");
     artifacts.efi_uuid = capture_blkid_value(tools, artifacts.efi_partition, "UUID");
     artifacts.swap_uuid = capture_blkid_value(tools, artifacts.swap_partition, "UUID");
     return true;
@@ -496,6 +510,7 @@ bool configure_identity(const InstallerConfig& config, const InstallArtifacts& a
     marker << "BOOT_MODE=" << boot_mode_label(effective_boot_mode(config)) << "\n";
     marker << "FILESYSTEM=" << filesystem_label(config.filesystem) << "\n";
     marker << "ROOT_PARTITION=" << artifacts.root_partition << "\n";
+    if (!artifacts.root_partuuid.empty()) marker << "ROOT_PARTUUID=" << artifacts.root_partuuid << "\n";
     marker << "EFI_PARTITION=" << artifacts.efi_partition << "\n";
     if (config.user.create) marker << "USER=" << config.user.username << "\n";
 
@@ -540,7 +555,11 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
         return false;
     }
 
-    const std::string kernel_root = !artifacts.root_uuid.empty() ? "UUID=" + artifacts.root_uuid : artifacts.root_partition;
+    const std::string kernel_root = kernel_root_argument(artifacts);
+    if (kernel_root.empty()) {
+        error = "Unable to determine kernel root device argument.";
+        return false;
+    }
     std::ostringstream grub;
     grub << "set timeout=5\n";
     grub << "set default=0\n";
@@ -554,7 +573,7 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
         grub << "set root=" << (boot_mode == BootMode::Uefi ? "(hd0,gpt2)" : "(hd0,msdos1)") << "\n";
     }
     grub << "menuentry \"GeminiOS\" {\n";
-    grub << "  linux /boot/kernel root=" << kernel_root << " rootfstype=" << filesystem_label(config.filesystem) << " rw quiet\n";
+    grub << "  linux /boot/kernel root=" << kernel_root << " rootfstype=" << filesystem_label(config.filesystem) << " rootwait rw quiet\n";
     grub << "}\n";
 
     if (!write_text_file(kTargetRoot + "/boot/grub/grub.cfg", grub.str())) {

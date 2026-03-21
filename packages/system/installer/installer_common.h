@@ -124,6 +124,7 @@ struct InstallArtifacts {
     std::string efi_partition;
     std::string swap_partition;
     std::string root_uuid;
+    std::string root_partuuid;
     std::string efi_uuid;
     std::string swap_uuid;
 };

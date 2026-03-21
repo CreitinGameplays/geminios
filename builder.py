@@ -392,9 +392,10 @@ def sync_kernel():
     kernel_dest = os.path.join(ROOT_DIR, "rootfs/boot/kernel")
     
     if os.path.exists(kernel_src):
-        print_info(f"[*] Copying {kernel_src} to {kernel_dest}")
+        print_info(f"[*] Copying {kernel_src} to {kernel_dest} and zoneinfo...")
         os.makedirs(os.path.dirname(kernel_dest), exist_ok=True)
         subprocess.run(f"cp {kernel_src} {kernel_dest}", shell=True, executable="/usr/bin/bash")
+        subprocess.run(f"cp -r /usr/share/zoneinfo rootfs/usr/share", shell=True, executable="/usr/bin/bash")
         return True
     else:
         print_warning(f" [WARNING] Kernel image not found at {kernel_src}")
