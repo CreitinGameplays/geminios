@@ -321,10 +321,10 @@ mkdir -p \
     "$ROOTFS/lib64/security" \
     "$ROOTFS/lib/x86_64-linux-gnu/security" \
     "$ROOTFS/usr/lib/x86_64-linux-gnu/security"
-ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/usr/lib64/security/pam_systemd.so"
-ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/lib64/security/pam_systemd.so"
-ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/lib/x86_64-linux-gnu/security/pam_systemd.so"
-ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/security/pam_systemd.so"
+ln -sfn pam_elogind.so "$ROOTFS/usr/lib64/security/pam_systemd.so"
+ln -sfn ../../usr/lib64/security/pam_elogind.so "$ROOTFS/lib64/security/pam_systemd.so"
+ln -sfn ../../../usr/lib64/security/pam_elogind.so "$ROOTFS/lib/x86_64-linux-gnu/security/pam_systemd.so"
+ln -sfn ../../../../usr/lib64/security/pam_elogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/security/pam_systemd.so"
 
 mkdir -p "$ROOTFS/usr/libexec/geminios"
 cat > "$ROOTFS/usr/libexec/geminios/elogind-launch" <<'EOF'
