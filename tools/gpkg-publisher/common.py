@@ -30,7 +30,6 @@ DEFAULT_BLOCKLIST = [
     "bash",
     "debianutils",
     "dpkg",
-    "gcc-*",
     "glibc-*",
     "grub*",
     "init",
