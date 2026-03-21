@@ -687,6 +687,10 @@ std::string capture_blkid_value(const ToolRegistry& tools, const std::string& de
 
 bool create_swapfile(const ToolRegistry& tools, const InstallerConfig& config) {
     if (config.swap_mode != SwapMode::Swapfile || config.swap_size_mb <= 0) return true;
+    if (config.filesystem == FilesystemType::Btrfs) {
+        log_message("ERROR", "Swapfiles on Btrfs are not supported by this installer yet. Use a swap partition instead.");
+        return false;
+    }
 
     const std::string swapfile = kTargetRoot + "/swapfile";
     int fd = open(swapfile.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);
@@ -696,18 +700,34 @@ bool create_swapfile(const ToolRegistry& tools, const InstallerConfig& config) {
     }
 
     const off_t size = static_cast<off_t>(config.swap_size_mb) * 1024 * 1024;
-    if (ftruncate(fd, size) != 0) {
-        log_message("ERROR", "Failed to size swapfile: " + std::string(std::strerror(errno)));
+    const int fallocate_result = posix_fallocate(fd, 0, size);
+    if (fallocate_result != 0) {
+        log_message("ERROR", "Failed to allocate swapfile blocks: " + std::string(std::strerror(fallocate_result)));
         close(fd);
+        ensure_file_removed(swapfile);
         return false;
     }
+
+    if (fsync(fd) != 0) {
+        log_message("ERROR", "Failed to flush swapfile to disk: " + std::string(std::strerror(errno)));
+        close(fd);
+        ensure_file_removed(swapfile);
+        return false;
+    }
+
     close(fd);
 
     if (chmod(swapfile.c_str(), 0600) != 0) {
         log_message("WARN", "chmod failed for swapfile: " + std::string(std::strerror(errno)));
     }
 
-    return run_command(tools.mkswap, {swapfile}).success;
+    CommandResult result = run_command(tools.mkswap, {"-L", "GeminiSwap", swapfile});
+    if (!result.success) {
+        ensure_file_removed(swapfile);
+        return false;
+    }
+
+    return true;
 }
 
 ToolRegistry detect_tools() {
