@@ -9,14 +9,108 @@
 #include <termios.h>
 #include <cstring>
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <sys/stat.h>
 #include <ctime>
 #include "user_mgmt.h"
 #include "sys_info.h"
 
 // Configuration
-const int SUDO_TIMEOUT_MINUTES = 15;
+const double DEFAULT_SUDO_TIMEOUT_MINUTES = 15.0;
 const char* SUDO_TS_DIR = "/run/sudo/ts";
+
+std::string trim_copy(const std::string& input) {
+    auto begin = std::find_if_not(input.begin(), input.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto end = std::find_if_not(input.rbegin(), input.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    if (begin >= end) {
+        return "";
+    }
+    return std::string(begin, end);
+}
+
+std::string strip_comments(const std::string& input) {
+    size_t comment = input.find('#');
+    if (comment == std::string::npos) {
+        return input;
+    }
+    return input.substr(0, comment);
+}
+
+std::vector<std::string> split_string(const std::string& input, char separator) {
+    std::vector<std::string> parts;
+    std::stringstream ss(input);
+    std::string part;
+    while (std::getline(ss, part, separator)) {
+        parts.push_back(trim_copy(part));
+    }
+    return parts;
+}
+
+bool defaults_line_applies_to_user(const std::string& token, const std::string& user) {
+    if (token == "Defaults") {
+        return true;
+    }
+
+    const std::string prefix = "Defaults:";
+    if (token.rfind(prefix, 0) != 0) {
+        return false;
+    }
+
+    for (const auto& candidate : split_string(token.substr(prefix.size()), ',')) {
+        if (candidate == user) {
+            return true;
+        }
+    }
+    return false;
+}
+
+double get_sudo_timeout_minutes(const std::string& user) {
+    std::ifstream f("/etc/sudoers");
+    if (!f) {
+        return DEFAULT_SUDO_TIMEOUT_MINUTES;
+    }
+
+    double timeout_minutes = DEFAULT_SUDO_TIMEOUT_MINUTES;
+    std::string raw_line;
+    while (std::getline(f, raw_line)) {
+        std::string line = trim_copy(strip_comments(raw_line));
+        if (line.empty()) {
+            continue;
+        }
+
+        std::stringstream ss(line);
+        std::string token;
+        ss >> token;
+        if (!defaults_line_applies_to_user(token, user)) {
+            continue;
+        }
+
+        std::string remainder;
+        std::getline(ss, remainder);
+        for (const auto& option : split_string(remainder, ',')) {
+            const std::string prefix = "timestamp_timeout=";
+            if (option.rfind(prefix, 0) != 0) {
+                continue;
+            }
+            const std::string value = trim_copy(option.substr(prefix.size()));
+            if (value.empty()) {
+                continue;
+            }
+            char* end_ptr = nullptr;
+            const double parsed = std::strtod(value.c_str(), &end_ptr);
+            if (end_ptr && *end_ptr == '\0') {
+                timeout_minutes = parsed;
+            }
+        }
+    }
+
+    return timeout_minutes;
+}
 
 // Helper to read password without echo
 std::string get_pass(const std::string& prompt) {
@@ -61,16 +155,7 @@ bool check_sudoers(const std::string& user, const std::vector<std::string>& user
     bool saw_rule = false;
     std::string line;
     while(std::getline(f, line)) {
-        // Strip comments
-        size_t comment = line.find('#');
-        if(comment != std::string::npos) line = line.substr(0, comment);
-
-        line = std::string(line.begin(), std::find_if(line.rbegin(), line.rend(), [](unsigned char c) {
-            return !std::isspace(c);
-        }).base());
-        line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char c) {
-            return !std::isspace(c);
-        }));
+        line = trim_copy(strip_comments(line));
 
         if (line.empty()) continue;
 
@@ -79,6 +164,7 @@ bool check_sudoers(const std::string& user, const std::vector<std::string>& user
         ss >> subject;
 
         if (subject.empty()) continue;
+        if (subject.rfind("Defaults", 0) == 0) continue;
         saw_rule = true;
 
         if (subject[0] == '%') {
@@ -100,14 +186,22 @@ std::string get_tty_name() {
     return s;
 }
 
-bool check_timestamp(uid_t uid) {
+bool check_timestamp(uid_t uid, double timeout_minutes) {
+    if (timeout_minutes == 0.0) {
+        return false;
+    }
+
     std::string tty = get_tty_name();
     std::string ts_path = std::string(SUDO_TS_DIR) + "/" + std::to_string(uid) + "_" + tty;
     
     struct stat st;
     if (stat(ts_path.c_str(), &st) == 0) {
-        time_t now = time(nullptr);
-        if (now - st.st_mtime < SUDO_TIMEOUT_MINUTES * 60) {
+        if (timeout_minutes < 0.0) {
+            return true;
+        }
+
+        const double age_seconds = std::difftime(time(nullptr), st.st_mtime);
+        if (age_seconds < timeout_minutes * 60.0) {
             return true;
         }
     }
@@ -221,8 +315,10 @@ int main(int argc, char* argv[]) {
     }
 
     // 6. Authenticate (Ask for CURRENT USER'S password)
+    const double timeout_minutes = get_sudo_timeout_minutes(current_user->username);
+
     // First, check if we have a valid timestamp
-    bool authenticated = check_timestamp(real_uid);
+    bool authenticated = check_timestamp(real_uid, timeout_minutes);
 
     if (!authenticated) {
         // Allow 3 attempts
