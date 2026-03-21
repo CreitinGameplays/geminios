@@ -35,7 +35,8 @@ libpam-elogind
 elogind
 logind
 libelogind0
+mount
+udev
 libsystemd0
 libcap2
 libcap2-bin
-udev
