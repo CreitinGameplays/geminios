@@ -505,6 +505,7 @@
         "bin/init",
         "bin/login",
         "sbin/getty",
+        "etc/pam.d/common-session-noninteractive",
         "etc/lightdm/Xsession",
         "etc/lightdm/lightdm.conf.d/50-geminios.conf",
         "usr/lib/ginit/services/dbus.gservice",
@@ -513,6 +514,7 @@
         "usr/lib/ginit/services/udev-trigger.gservice",
         "usr/lib/ginit/services/udev-settle.gservice",
         "usr/lib/ginit/services/network.gservice",
+        "usr/lib64/security/pam_systemd.so",
         "usr/libexec/geminios/lightdm-prepare",
         "usr/libexec/geminios/lightdm-greeter-launch",
         "usr/share/xgreeters/lightdm-greeter.desktop"

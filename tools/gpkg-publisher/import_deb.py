@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import functools
 import json
 import shutil
@@ -34,6 +35,37 @@ from common import (  # noqa: E402
     safe_repo_filename_component,
     sanitize_section,
 )
+
+
+def remove_payload_entry(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+        return
+    path.unlink()
+
+
+def drop_payload_paths(
+    root_dir: Path,
+    *,
+    exact_paths: list[str],
+    path_patterns: list[str],
+) -> None:
+    for raw_path in exact_paths:
+        normalized = raw_path.strip()
+        if not normalized:
+            continue
+        relative = normalized.lstrip("/")
+        remove_payload_entry(root_dir / relative)
+
+    if not path_patterns:
+        return
+
+    for candidate in root_dir.rglob("*"):
+        relative = "/" + candidate.relative_to(root_dir).as_posix()
+        if any(fnmatch.fnmatch(relative, pattern) for pattern in path_patterns):
+            remove_payload_entry(candidate)
 
 
 def deb_description(fields: dict[str, str]) -> str:
@@ -186,6 +218,11 @@ def convert_deb_to_gpkg(
             handle.write("\n")
 
         shutil.copytree(payload_dir, root_dir, dirs_exist_ok=True, symlinks=True)
+        drop_payload_paths(
+            root_dir,
+            exact_paths=package_override.get("drop_paths", []),
+            path_patterns=package_override.get("drop_path_patterns", []),
+        )
 
         copy_scripts = include_maintainer_scripts or package_override.get("include_maintainer_scripts", False)
         if copy_scripts:

@@ -31,6 +31,7 @@ libpam0g
 libpam-modules
 libpam-modules-bin
 libpam-runtime
+libpam-systemd
 libpam-elogind
 elogind
 logind

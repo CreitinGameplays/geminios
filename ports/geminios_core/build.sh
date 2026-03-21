@@ -152,6 +152,10 @@ cat > "$ROOTFS/etc/pam.d/common-session" <<EOF
 session     include       system-session
 EOF
 
+cat > "$ROOTFS/etc/pam.d/common-session-noninteractive" <<EOF
+session     include       system-session
+EOF
+
 cat > "$ROOTFS/etc/pam.d/common-password" <<EOF
 password    include       system-password
 EOF
@@ -309,6 +313,18 @@ cat > "$ROOTFS/etc/ld.so.conf" <<EOF
 include /etc/ld.so.conf.d/*.conf
 EOF
 mkdir -p "$ROOTFS/etc/ld.so.conf.d"
+
+# Debian-style PAM compatibility for packages that expect pam_systemd.so while
+# GeminiOS provides elogind instead of the full systemd init/session stack.
+mkdir -p \
+    "$ROOTFS/usr/lib64/security" \
+    "$ROOTFS/lib64/security" \
+    "$ROOTFS/lib/x86_64-linux-gnu/security" \
+    "$ROOTFS/usr/lib/x86_64-linux-gnu/security"
+ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/usr/lib64/security/pam_systemd.so"
+ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/lib64/security/pam_systemd.so"
+ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/lib/x86_64-linux-gnu/security/pam_systemd.so"
+ln -sfn /usr/lib64/security/pam_elogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/security/pam_systemd.so"
 
 mkdir -p "$ROOTFS/usr/libexec/geminios"
 cat > "$ROOTFS/usr/libexec/geminios/elogind-launch" <<'EOF'

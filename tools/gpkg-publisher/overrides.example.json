@@ -36,6 +36,13 @@
     "logind": "libpam-elogind"
   },
   "package_overrides": {
+    "lightdm": {
+      "drop_paths": [
+        "/etc/pam.d/lightdm",
+        "/etc/pam.d/lightdm-autologin",
+        "/etc/pam.d/lightdm-greeter"
+      ]
+    },
     "nano": {
       "section": "editors"
     },

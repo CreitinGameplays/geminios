@@ -331,6 +331,8 @@ Supported `package_overrides.<name>` keys:
 - `depends_remove`
 - `conflicts_add`
 - `provides_add`
+- `drop_paths`
+- `drop_path_patterns`
 - `include_maintainer_scripts`
 - `drop_scripts`
 
@@ -361,6 +363,24 @@ Example virtual-package provider choice:
   }
 }
 ```
+
+Example payload filtering for packages that ship Debian config files GeminiOS must own itself:
+
+```json
+{
+  "package_overrides": {
+    "lightdm": {
+      "drop_paths": [
+        "/etc/pam.d/lightdm",
+        "/etc/pam.d/lightdm-autologin",
+        "/etc/pam.d/lightdm-greeter"
+      ]
+    }
+  }
+}
+```
+
+Use this when the imported Debian package installs config files that are valid on Debian but wrong for GeminiOS. The files are removed from the generated `.gpkg` payload before publish, so future installs and upgrades stop reintroducing them.
 
 Example extra base-system dependency suppression:
 
