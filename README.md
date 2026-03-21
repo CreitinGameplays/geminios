@@ -2,7 +2,13 @@
 
 # GeminiOS Documentation
 
-GeminiOS is a minimal, open-source, educational, Debian-like and Linux-based Operating System built from scratch (made by Google Gemini 3, continued by Codex). It does not rely on build systems (like Buildroot).
+GeminiOS is a minimal, open-source, educational, Debian-compatible Linux operating system built from scratch (made by Google Gemini 3, continued by Codex). It does not rely on build systems like Buildroot.
+
+The project now follows a clear model:
+
+- Debian-compatible userland and package ecosystem
+- GeminiOS-specific boot flow, init/service model, and packaging workflow
+- `gpkg` as the package delivery and repository layer on top
 
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
@@ -206,6 +212,13 @@ cd ginit && make
 For more information, see [ginit/README.md](https://github.com/CreitinGameplays/ginit/blob/master/README.md).
 
 ## GPKG (Package Manager)
+
+`gpkg` now supports two different kinds of base-system knowledge:
+
+- `/etc/gpkg/system-provides.list`: packages or capabilities GeminiOS should treat as already present
+- `/etc/gpkg/upgradeable-system.list`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
+
+This split is important for a Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
 
 To build the package manager standalone:
 

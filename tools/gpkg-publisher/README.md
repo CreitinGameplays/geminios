@@ -2,6 +2,8 @@
 
 This directory contains a bulk importer and publisher for growing a GeminiOS package repository from Debian 13 packages.
 
+It is designed for the current GeminiOS model: a Debian-compatible userland with GeminiOS-specific boot, init, and package-management policy.
+
 The model is simple:
 
 1. Resolve a seed list with APT on a Debian VPS.
@@ -21,6 +23,7 @@ It is designed to scale repository size quickly without turning the VPS into a s
 - Writes a repo tree that `gpkg` can consume at `<base-url>/x86_64/Packages.json.zst`.
 - Supports a JSON overrides file for dependency choices, package skips, renames, and script policy.
 - Keeps a local state file so unchanged packages are not rebuilt on every run.
+- Understands the split between base capabilities (`SYSTEM_PROVIDES_FILE`) and base runtimes that should still be published and upgraded (`SYSTEM_UPGRADEABLE_FILE`).
 
 ## Safety Model
 
