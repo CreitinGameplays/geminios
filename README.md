@@ -172,7 +172,7 @@ Important:
 - `gpkg update` now merges multiple repositories into one local cache instead of overwriting the previous index.
 - `gpkg` no longer contains a hardcoded fallback repository URL. The default repo is seeded into the image at build time under `/etc/gpkg/sources.list.d/`.
 - `gpkg` also reads `/etc/gpkg/system-provides.list` for base-system packages and capabilities that GeminiOS should treat as already installed during dependency resolution.
-- `gpkg` also reads `/etc/gpkg/upgradeable-system.list` for base runtimes that may exist in the image but should still be upgraded from the repository when a matching package is available.
+- `gpkg` also reads `/etc/gpkg/upgradeable-system.list` for base runtimes that may exist in the image but should still be upgraded from the repository when a matching package is available. Entries there are also treated as base-provided automatically, so they do not need to be duplicated in `system-provides.list`.
 
 By default, `builder.py` writes a repo file like:
 
@@ -192,7 +192,7 @@ The default system-provided package list is taken from `build_system/gpkg_system
 /etc/gpkg/system-provides.list
 ```
 
-That is where entries like `libc6`, `libgcc-s1`, and `python3-minimal` should live if GeminiOS already ships their runtime equivalents.
+That is where non-upgradeable base entries like `libc6` and `libgcc-s1` should live if GeminiOS already ships their runtime equivalents.
 
 The upgradeable base-runtime list is taken from `build_system/gpkg_upgradeable_system.txt` and copied into the image as:
 
@@ -200,7 +200,7 @@ The upgradeable base-runtime list is taken from `build_system/gpkg_upgradeable_s
 /etc/gpkg/upgradeable-system.list
 ```
 
-Use that file for things like `dbus` or `elogind` where GeminiOS may boot with a base copy, but userland packages should still be allowed to pull in a newer repository version to avoid ABI mismatches.
+Use that file for things like `dbus`, `elogind`, PAM/libcap runtimes, Python, and graphics stacks where GeminiOS may boot with a base copy, but userland packages should still be allowed to pull in a newer repository version to avoid ABI mismatches.
 
 ## Ginit (Init System)
 

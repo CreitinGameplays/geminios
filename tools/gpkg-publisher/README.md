@@ -23,7 +23,7 @@ It is designed to scale repository size quickly without turning the VPS into a s
 - Writes a repo tree that `gpkg` can consume at `<base-url>/x86_64/Packages.json.zst`.
 - Supports a JSON overrides file for dependency choices, package skips, renames, and script policy.
 - Keeps a local state file so unchanged packages are not rebuilt on every run.
-- Understands the split between base capabilities (`SYSTEM_PROVIDES_FILE`) and base runtimes that should still be published and upgraded (`SYSTEM_UPGRADEABLE_FILE`).
+- Understands the split between base capabilities (`SYSTEM_PROVIDES_FILE`) and base runtimes that should still be published and upgraded (`SYSTEM_UPGRADEABLE_FILE`). Upgradeable entries do not need to be duplicated in the provides file.
 
 ## Safety Model
 

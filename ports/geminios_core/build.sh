@@ -254,21 +254,40 @@ exec /bin/bash --login
 EOF
 chmod 755 "$ROOTFS/etc/lightdm/Xsession"
 
-# Merge LightDM & PAM from staging (Comprehensive Merge)
+# Merge LightDM & PAM from staging without importing foreign DBus runtime
+# binaries or libraries. Those must remain owned by the GeminiOS base image or
+# by gpkg-managed upgrades, otherwise desktop sessions can end up with a
+# mismatched dbus-launch/libdbus pair.
+should_skip_lightdm_stage_path() {
+    case "$1" in
+        bin/dbus-*|sbin/dbus-*|usr/bin/dbus-*|usr/sbin/dbus-*|usr/libexec/dbus-*|usr/lib/libdbus-1.so*|usr/lib64/libdbus-1.so*|lib/libdbus-1.so*|lib64/libdbus-1.so*|usr/lib/x86_64-linux-gnu/libdbus-1.so*|usr/lib64/x86_64-linux-gnu/libdbus-1.so*|lib/x86_64-linux-gnu/libdbus-1.so*|lib64/x86_64-linux-gnu/libdbus-1.so*|etc/dbus-1|etc/dbus-1/*|usr/share/dbus-1|usr/share/dbus-1/*|usr/lib/dbus-1.0|usr/lib/dbus-1.0/*|usr/lib64/dbus-1.0|usr/lib64/dbus-1.0/*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 if [ -d "$ROOTFS/staging/lightdm" ]; then
-    echo "Merging LightDM & PAM from staging..."
-    
-    # Merge directories
-    for dir in etc lib lib64 sbin usr bin; do
-        if [ -d "$ROOTFS/staging/lightdm/$dir" ]; then
-            # Create destination if not exists (handling lib/lib64 symlinks automatically by shell expansion usually, 
-            # but cp -r to a symlink copies INTO the target dir, which is what we want)
-            # We use cp -rn to not overwrite existing critical files if conflicts, 
-            # BUT for lightdm we might want to overwrite (e.g. pam configs).
-            # Let's use cp -r and force overwrite for now to ensure we get the lightdm files.
-            cp -rf "$ROOTFS/staging/lightdm/$dir/"* "$ROOTFS/$dir/" || true
+    echo "Merging LightDM & PAM from staging (DBus payload filtered)..."
+    while IFS= read -r -d '' staged_dir; do
+        rel_path="${staged_dir#$ROOTFS/staging/lightdm/}"
+        if should_skip_lightdm_stage_path "$rel_path"; then
+            echo "[*] Skipping staged DBus directory: $rel_path"
+            continue
         fi
-    done
+        mkdir -p "$ROOTFS/$rel_path"
+    done < <(find "$ROOTFS/staging/lightdm" -mindepth 1 -type d -print0)
+
+    while IFS= read -r -d '' staged_path; do
+        rel_path="${staged_path#$ROOTFS/staging/lightdm/}"
+        if should_skip_lightdm_stage_path "$rel_path"; then
+            echo "[*] Skipping staged DBus payload: $rel_path"
+            continue
+        fi
+        dest_path="$ROOTFS/$rel_path"
+        mkdir -p "$(dirname "$dest_path")"
+        cp -a "$staged_path" "$dest_path"
+    done < <(find "$ROOTFS/staging/lightdm" -mindepth 1 ! -type d -print0)
 fi
 
 # Re-apply GeminiOS LightDM overrides after the staged package merge so the

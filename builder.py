@@ -6,6 +6,7 @@ import time
 import json
 import shutil
 import glob
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -727,6 +728,37 @@ def verify_rootfs_integrity():
         if not os.path.exists(path):
             print_error(f"  [MISSING] {rel_path}")
             return False
+
+    def extract_dbus_private_versions(path):
+        result = subprocess.run(
+            ["objdump", "-T", path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print_warning(f"  [WARNING] Could not inspect DBus symbols in {path}: {result.stderr.strip()}")
+            return None
+
+        versions = set()
+        for token in re.findall(r"LIBDBUS_PRIVATE_[A-Za-z0-9_.-]+", result.stdout):
+            versions.add(token)
+        return versions
+
+    dbus_launch_path = os.path.join(ROOT_DIR, "rootfs/usr/bin/dbus-launch")
+    dbus_lib_path = os.path.join(ROOT_DIR, "rootfs/usr/lib64/libdbus-1.so.3")
+    if os.path.exists(dbus_launch_path) and os.path.exists(dbus_lib_path):
+        required_versions = extract_dbus_private_versions(dbus_launch_path)
+        provided_versions = extract_dbus_private_versions(dbus_lib_path)
+        if required_versions is not None and provided_versions is not None:
+            missing_versions = sorted(required_versions - provided_versions)
+            if missing_versions:
+                print_error(
+                    "  [FAILED] dbus-launch expects private DBus symbols that the image library does not provide: "
+                    + ", ".join(missing_versions)
+                )
+                print_error("           A staged package likely overwrote GeminiOS DBus binaries or libraries.")
+                return False
+            print_success("  [OK] DBus runtime ABI")
 
     # Verify Python functionality
     print_info("[*] Verifying Python runtime...")

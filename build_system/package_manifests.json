@@ -142,7 +142,9 @@
         "usr/bin/hexdump"
     ],
     "dbus": [
-        "usr/bin/dbus-daemon"
+        "usr/bin/dbus-daemon",
+        "usr/bin/dbus-launch",
+        "usr/bin/dbus-run-session"
     ],
     "libffi": [
         "usr/lib64/libffi.so",
