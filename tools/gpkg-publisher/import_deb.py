@@ -18,6 +18,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
     DEFAULT_SYSTEM_PROVIDES_FILE,
+    DEFAULT_SYSTEM_UPGRADEABLE_FILE,
     apt_candidate_version,
     build_provider_resolver,
     build_gpkg,
@@ -285,6 +286,7 @@ def main() -> int:
     parser.add_argument("--overrides-file", help="JSON overrides file")
     parser.add_argument("--config", help="Optional env config file; used only for defaults")
     parser.add_argument("--system-provides-file", help="Optional base-system provides file; defaults to build_system/gpkg_system_provides.txt")
+    parser.add_argument("--system-upgradeable-file", help="Optional list of base runtimes that should still be imported when repo candidates exist")
     parser.add_argument("--apt-arch", default="amd64", help="APT architecture to use when normalizing dependencies")
     parser.add_argument("--include-maintainer-scripts", action="store_true", help="Copy Debian maintainer scripts into the gpkg")
     parser.add_argument("--allow-essential", action="store_true", help="Allow importing Essential: yes packages")
@@ -299,9 +301,17 @@ def main() -> int:
     if overrides_value:
         overrides = read_json(Path(overrides_value).expanduser(), {})
     system_provides_value = args.system_provides_file or config.get("SYSTEM_PROVIDES_FILE", str(DEFAULT_SYSTEM_PROVIDES_FILE))
+    system_upgradeable_value = args.system_upgradeable_file or config.get("SYSTEM_UPGRADEABLE_FILE", str(DEFAULT_SYSTEM_UPGRADEABLE_FILE))
     system_provided_patterns = read_pattern_file(Path(system_provides_value).expanduser())
+    system_upgradeable_patterns = read_pattern_file(Path(system_upgradeable_value).expanduser())
     extra_system_patterns = overrides.get("provided_by_system_patterns", [])
-    overrides["provided_by_system_patterns"] = list(dict.fromkeys(system_provided_patterns + extra_system_patterns))
+    merged_patterns = list(dict.fromkeys(system_provided_patterns + extra_system_patterns))
+    if system_upgradeable_patterns:
+        merged_patterns = [
+            pattern for pattern in merged_patterns
+            if not matches_any(pattern, system_upgradeable_patterns)
+        ]
+    overrides["provided_by_system_patterns"] = merged_patterns
 
     try:
         for deb_name in args.deb:

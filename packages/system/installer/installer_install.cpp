@@ -3,6 +3,7 @@
 #include "user_mgmt.h"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
@@ -226,6 +227,60 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
     }
     if (!file_exists(kTargetRoot + "/usr/lib")) {
         ensure_symlink("lib64", kTargetRoot + "/usr/lib");
+    }
+
+    return true;
+}
+
+bool configure_display_stack(const InstallerConfig& config, std::string& error) {
+    if (config.profile == InstallProfile::Minimal) return true;
+
+    if (!mkdir_p(kTargetRoot + "/etc/X11/xorg.conf.d")) {
+        error = "Failed to create Xorg configuration directory.";
+        return false;
+    }
+    if (!mkdir_p(kTargetRoot + "/var/lib/lightdm/data")) {
+        error = "Failed to create LightDM data directory.";
+        return false;
+    }
+    if (!mkdir_p(kTargetRoot + "/var/cache/lightdm")) {
+        error = "Failed to create LightDM cache directory.";
+        return false;
+    }
+
+    const std::string legacy_xorg_conf = kTargetRoot + "/etc/X11/xorg.conf";
+    const std::string backup_xorg_conf = legacy_xorg_conf + ".installer-backup";
+    if (file_exists(legacy_xorg_conf)) {
+        if (!file_exists(backup_xorg_conf)) {
+            if (std::rename(legacy_xorg_conf.c_str(), backup_xorg_conf.c_str()) != 0) {
+                error = "Failed to back up legacy Xorg configuration.";
+                return false;
+            }
+        } else if (!ensure_file_removed(legacy_xorg_conf)) {
+            error = "Failed to remove legacy Xorg configuration.";
+            return false;
+        }
+    }
+
+    const std::string safe_xorg_conf =
+        "Section \"Files\"\n"
+        "    XkbDir \"/usr/share/X11/xkb\"\n"
+        "EndSection\n\n"
+        "Section \"ServerFlags\"\n"
+        "    Option \"AutoAddDevices\" \"true\"\n"
+        "    Option \"AutoEnableDevices\" \"true\"\n"
+        "EndSection\n\n"
+        "Section \"Device\"\n"
+        "    Identifier \"GeminiOS Safe Graphics\"\n"
+        "    Driver \"modesetting\"\n"
+        "    Option \"AccelMethod\" \"none\"\n"
+        "    Option \"ShadowFB\" \"true\"\n"
+        "    Option \"SWcursor\" \"on\"\n"
+        "EndSection\n";
+
+    if (!write_text_file(kTargetRoot + "/etc/X11/xorg.conf.d/20-geminios-safe-graphics.conf", safe_xorg_conf)) {
+        error = "Failed to write safe Xorg fallback configuration.";
+        return false;
     }
 
     return true;
@@ -666,6 +721,12 @@ bool perform_install(const ToolRegistry& tools, const InstallerConfig& config, s
 
     print_notice("->", C_CYAN, "Configuring system identity");
     if (!configure_identity(config, artifacts, error)) {
+        cleanup_install_state(state);
+        return false;
+    }
+
+    print_notice("->", C_CYAN, "Hardening display configuration");
+    if (!configure_display_stack(config, error)) {
         cleanup_install_state(state);
         return false;
     }

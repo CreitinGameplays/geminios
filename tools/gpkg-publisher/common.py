@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SYSTEM_PROVIDES_FILE = REPO_ROOT / "build_system" / "gpkg_system_provides.txt"
+DEFAULT_SYSTEM_UPGRADEABLE_FILE = REPO_ROOT / "build_system" / "gpkg_upgradeable_system.txt"
 
 ARCH_MAP = {
     "all": "x86_64",

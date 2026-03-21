@@ -307,15 +307,15 @@ EOF
 chmod 755 "$ROOTFS/etc/lightdm/Xsession"
 
 cat > "$ROOTFS/etc/ld.so.conf" <<EOF
-/lib64
 /lib64/x86_64-linux-gnu
-/usr/lib64
 /usr/lib64/x86_64-linux-gnu
+/lib/x86_64-linux-gnu
+/usr/lib/x86_64-linux-gnu
+/lib64
+/usr/lib64
 /usr/local/lib64
 /lib
-/lib/x86_64-linux-gnu
 /usr/lib
-/usr/lib/x86_64-linux-gnu
 /usr/local/lib
 include /etc/ld.so.conf.d/*.conf
 EOF

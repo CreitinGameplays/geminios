@@ -1,0 +1,19 @@
+# GeminiOS base runtimes that may exist in the image but should be upgraded
+# from the repository when a matching gpkg is available.
+#
+# These entries are different from system-provides.list:
+# - system-provides.list = satisfy dependencies from the base image
+# - upgradeable-system.list = only satisfy from the base image if no repo
+#   package can replace them
+
+dbus
+dbus-system-bus
+default-dbus-session-bus
+default-dbus-system-bus
+dbus-session-bus
+elogind
+logind
+libelogind0
+libpam-elogind
+libpam-systemd
+libsystemd0

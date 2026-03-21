@@ -129,6 +129,7 @@ STATE_FILE=/var/lib/gpkg-publisher/state/state.json
 REPORT_FILE=/var/lib/gpkg-publisher/state/last-run.json
 OVERRIDES_FILE=/etc/gpkg-publisher/overrides.json
 SYSTEM_PROVIDES_FILE=/opt/geminios/build_system/gpkg_system_provides.txt
+SYSTEM_UPGRADEABLE_FILE=/opt/geminios/build_system/gpkg_upgradeable_system.txt
 RCLONE_DEST=r2:your-bucket/geminios
 RCLONE_CONFIG=/etc/gpkg-publisher/rclone.conf
 SECTION_ALLOWLIST=admin,editors,fonts,graphics,libs,misc,net,python,shells,sound,utils,vcs,video,x11,xfce
@@ -317,7 +318,7 @@ Supported top-level keys:
 - `provider_choices`: choose a concrete package for a Debian virtual package when multiple providers exist.
 - `package_overrides`: package-specific behavior.
 
-The publisher already merges the base defaults from `SYSTEM_PROVIDES_FILE` into `provided_by_system_patterns`, so you usually only need to add site-specific extras in `overrides.json`.
+The publisher already merges the base defaults from `SYSTEM_PROVIDES_FILE` into `provided_by_system_patterns`, but it subtracts anything listed in `SYSTEM_UPGRADEABLE_FILE`. Use that second file for base runtimes that may exist in the image yet should still be imported and upgraded from the repo when available.
 
 Supported `package_overrides.<name>` keys:
 
@@ -364,23 +365,21 @@ Example virtual-package provider choice:
 }
 ```
 
-Example payload filtering for packages that ship Debian config files GeminiOS must own itself:
+Example payload filtering for packages that ship Debian config files GeminiOS must never install verbatim:
 
 ```json
 {
   "package_overrides": {
-    "lightdm": {
+    "some-package": {
       "drop_paths": [
-        "/etc/pam.d/lightdm",
-        "/etc/pam.d/lightdm-autologin",
-        "/etc/pam.d/lightdm-greeter"
+        "/etc/example.conf"
       ]
     }
   }
 }
 ```
 
-Use this when the imported Debian package installs config files that are valid on Debian but wrong for GeminiOS. The files are removed from the generated `.gpkg` payload before publish, so future installs and upgrades stop reintroducing them.
+Use this sparingly. Prefer making GeminiOS handle Debian-standard files when possible, and reserve `drop_paths` for genuinely incompatible payloads.
 
 Example extra base-system dependency suppression:
 

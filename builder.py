@@ -71,6 +71,10 @@ GPKG_SYSTEM_PROVIDES_FILE = os.environ.get(
     "GPKG_SYSTEM_PROVIDES_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_system_provides.txt"),
 )
+GPKG_UPGRADEABLE_SYSTEM_FILE = os.environ.get(
+    "GPKG_UPGRADEABLE_SYSTEM_FILE",
+    os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgradeable_system.txt"),
+)
 
 # Load Manifests
 try:
@@ -827,6 +831,14 @@ def finalize_rootfs():
         print_success(f"  ✓ Added gpkg system provides: {system_provides_dest}")
     else:
         with open(system_provides_dest, "w") as f:
+            f.write("")
+
+    upgradeable_system_dest = os.path.join(gpkg_dir, "upgradeable-system.list")
+    if os.path.exists(GPKG_UPGRADEABLE_SYSTEM_FILE):
+        shutil.copy2(GPKG_UPGRADEABLE_SYSTEM_FILE, upgradeable_system_dest)
+        print_success(f"  ✓ Added gpkg upgradeable runtimes: {upgradeable_system_dest}")
+    else:
+        with open(upgradeable_system_dest, "w") as f:
             f.write("")
 
     # 6. Versioning

@@ -21,6 +21,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
     DEFAULT_SYSTEM_PROVIDES_FILE,
+    DEFAULT_SYSTEM_UPGRADEABLE_FILE,
     apt_candidate_version,
     build_provider_resolver,
     choose_first_matching_stanza,
@@ -53,6 +54,7 @@ DEFAULT_CONFIG = {
     "SEED_FILE": "/etc/gpkg-publisher/packages.txt",
     "OVERRIDES_FILE": "/etc/gpkg-publisher/overrides.json",
     "SYSTEM_PROVIDES_FILE": str(DEFAULT_SYSTEM_PROVIDES_FILE),
+    "SYSTEM_UPGRADEABLE_FILE": str(DEFAULT_SYSTEM_UPGRADEABLE_FILE),
     "SECTION_ALLOWLIST": "",
     "SECTION_BLOCKLIST": "debug,doc,devel,kernel,libdevel,metapackages,oldlibs",
     "PRIORITY_BLOCKLIST": "required,important",
@@ -511,8 +513,15 @@ def main() -> int:
     overrides = read_json(Path(config["OVERRIDES_FILE"]), {}) if config["OVERRIDES_FILE"] else {}
     system_provides_file = Path(config["SYSTEM_PROVIDES_FILE"]).expanduser()
     system_provided_patterns = read_pattern_file(system_provides_file)
+    system_upgradeable_file = Path(config["SYSTEM_UPGRADEABLE_FILE"]).expanduser()
+    system_upgradeable_patterns = read_pattern_file(system_upgradeable_file)
     extra_system_patterns = overrides.get("provided_by_system_patterns", [])
     system_provided_patterns = list(dict.fromkeys(system_provided_patterns + extra_system_patterns))
+    if system_upgradeable_patterns:
+        system_provided_patterns = [
+            pattern for pattern in system_provided_patterns
+            if not matches_any(pattern, system_upgradeable_patterns)
+        ]
     overrides["provided_by_system_patterns"] = system_provided_patterns
     blocklist_patterns = split_patterns(config["BLOCKLIST_PATTERNS"])
 
