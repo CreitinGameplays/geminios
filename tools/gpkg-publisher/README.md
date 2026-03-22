@@ -43,7 +43,7 @@ This is the right default for "grow the repo fast without bricking the design".
 - `common.py`: shared helpers.
 - `config.env.example`: sample runtime configuration.
 - `packages.txt.example`: sample seed list.
-- `overrides.example.json`: sample policy overrides.
+- `overrides.example.json`: built-in baseline policy plus a template for site-local overrides.
 - `systemd/`: timer and service units for unattended runs.
 
 ## VPS Prerequisites
@@ -91,9 +91,12 @@ sudo chmod 755 /var/lib/gpkg-publisher/cache/debs
 sudo git clone https://github.com/CreitinGameplays/geminios.git /opt/geminios
 
 sudo cp /opt/geminios/tools/gpkg-publisher/config.env.example /etc/gpkg-publisher/config.env
-sudo cp /opt/geminios/tools/gpkg-publisher/overrides.example.json /etc/gpkg-publisher/overrides.json
 sudo cp /opt/geminios/tools/gpkg-publisher/packages.txt.example /etc/gpkg-publisher/packages.txt
 ```
+
+`overrides.example.json` is loaded automatically as the baseline policy. Copy it to
+`/etc/gpkg-publisher/overrides.json` only if you want site-local additions or
+replacements.
 
 ### 4. Configure `rclone` for Cloudflare R2
 
@@ -332,6 +335,10 @@ Supported top-level keys:
 
 The publisher already merges the base defaults from `SYSTEM_PROVIDES_FILE` into `provided_by_system_patterns`, but it subtracts anything listed in `SYSTEM_UPGRADEABLE_FILE`. Use that second file for base runtimes that may exist in the image yet should still be imported and upgraded from the repo when available.
 
+The repo's own `overrides.example.json` is also loaded automatically before the
+site-local `OVERRIDES_FILE`, so local overrides only need to carry your
+delta from the GeminiOS baseline.
+
 Supported `package_overrides.<name>` keys:
 
 - `skip`
@@ -366,14 +373,16 @@ Example virtual-package provider choice:
 ```json
 {
   "dependency_choices": {
-    "lightdm::libpam-systemd | logind": "logind"
+    "libpam-systemd | logind": "logind",
+    "policykit-1-gnome | polkit-1-auth-agent": "polkit-1-auth-agent"
   },
   "dependency_rewrites": {
     "libpam-systemd": "libpam-elogind",
     "systemd": "elogind"
   },
   "provider_choices": {
-    "logind": "libpam-elogind"
+    "logind": "libpam-elogind",
+    "polkit-1-auth-agent": "mate-polkit"
   }
 }
 ```
@@ -597,7 +606,9 @@ If failures look like this:
 - `dependency python3-minimal could not be resolved`
 - `dependency init-system-helpers could not be resolved`
 
-then the fix is usually not "import more Essential packages". The better fix is to add those names to `provided_by_system_patterns` in `overrides.json`, assuming GeminiOS already ships the equivalent runtime.
+then the fix is usually not "import more Essential packages". The better fix is
+to add those names to `SYSTEM_PROVIDES_FILE` when GeminiOS ships the
+equivalent globally, or to `overrides.json` when the mapping is site-specific.
 
 If failures look like this:
 
@@ -628,7 +639,7 @@ Example:
     "libpam-systemd"
   ],
   "dependency_choices": {
-    "lightdm::libpam-systemd | logind": "logind"
+    "libpam-systemd | logind": "logind"
   },
   "dependency_rewrites": {
     "libpam-systemd": "libpam-elogind",
@@ -643,7 +654,7 @@ Example:
 If your local config still blocks `libsystemd*`, change it to something narrower, for example:
 
 ```text
-BLOCKLIST_PATTERNS=base-files,base-passwd,bash,debianutils,dpkg,gcc-*,glibc-*,grub*,init,initramfs-tools*,linux-*,libc6,libpam*,libpam-systemd,mount,openssh-server,passwd,systemd*,sysvinit*,udev,util-linux
+BLOCKLIST_PATTERNS=base-files,base-passwd,bash,debianutils,dpkg,gcc-*,glibc-*,grub*,init,initramfs-tools*,linux-image-*,libc6,libpam*,libpam-systemd,mount,openssh-server,passwd,systemd*,sysvinit*,udev,util-linux
 ```
 
 Then rerun:

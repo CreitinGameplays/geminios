@@ -17,6 +17,7 @@ from typing import Any, Callable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SYSTEM_PROVIDES_FILE = REPO_ROOT / "build_system" / "gpkg_system_provides.txt"
 DEFAULT_SYSTEM_UPGRADEABLE_FILE = REPO_ROOT / "build_system" / "gpkg_upgradeable_system.txt"
+DEFAULT_OVERRIDES_FILE = REPO_ROOT / "tools" / "gpkg-publisher" / "overrides.example.json"
 
 ARCH_MAP = {
     "all": "x86_64",
@@ -34,7 +35,7 @@ DEFAULT_BLOCKLIST = [
     "grub*",
     "init",
     "initramfs-tools*",
-    "linux-*",
+    "linux-image-*",
     "libc6",
     "libpam-systemd",
     "mount",
@@ -188,6 +189,34 @@ def write_json(path: Path, payload: Any) -> None:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
     temp_path.replace(path)
+
+
+def merge_override_data(base: Any, extra: Any) -> Any:
+    if isinstance(base, dict) and isinstance(extra, dict):
+        merged = dict(base)
+        for key, value in extra.items():
+            if key in merged:
+                merged[key] = merge_override_data(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    if isinstance(base, list) and isinstance(extra, list):
+        return unique_items(list(base) + list(extra))
+
+    return extra
+
+
+def load_merged_overrides(*paths: Path | None) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for path in paths:
+        if path is None:
+            continue
+        payload = read_json(path.expanduser(), {})
+        if not isinstance(payload, dict):
+            raise ValueError(f"{path}: overrides file must contain a JSON object")
+        merged = merge_override_data(merged, payload)
+    return merged
 
 
 def hash_file(path: Path, algorithm: str = "sha256") -> str:

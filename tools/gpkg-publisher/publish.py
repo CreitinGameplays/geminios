@@ -20,6 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
+    DEFAULT_OVERRIDES_FILE,
     DEFAULT_SYSTEM_PROVIDES_FILE,
     DEFAULT_SYSTEM_UPGRADEABLE_FILE,
     apt_candidate_version,
@@ -29,6 +30,7 @@ from common import (  # noqa: E402
     ensure_directory,
     hash_file,
     load_env_file,
+    load_merged_overrides,
     matches_any,
     merge_system_provided_patterns,
     normalize_dependency_field,
@@ -522,7 +524,8 @@ def main() -> int:
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
-    overrides = read_json(Path(config["OVERRIDES_FILE"]), {}) if config["OVERRIDES_FILE"] else {}
+    overrides_path = Path(config["OVERRIDES_FILE"]).expanduser() if config["OVERRIDES_FILE"] else None
+    overrides = load_merged_overrides(DEFAULT_OVERRIDES_FILE, overrides_path)
     system_provides_file = Path(config["SYSTEM_PROVIDES_FILE"]).expanduser()
     system_provided_patterns = read_pattern_file(system_provides_file)
     system_upgradeable_file = Path(config["SYSTEM_UPGRADEABLE_FILE"]).expanduser()
@@ -536,6 +539,9 @@ def main() -> int:
     )
     overrides["provided_by_system_patterns"] = system_provided_patterns
     blocklist_patterns = split_patterns(config["BLOCKLIST_PATTERNS"])
+    blocklist_patterns.extend(overrides.get("skip_packages", []))
+    blocklist_patterns.extend(overrides.get("skip_patterns", []))
+    blocklist_patterns = list(dict.fromkeys(blocklist_patterns))
 
     repo_root = Path(config["REPO_ROOT"]).expanduser()
     repo_arch_dir = repo_root / config["ARCH"]

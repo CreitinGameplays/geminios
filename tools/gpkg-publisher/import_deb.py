@@ -17,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from common import (  # noqa: E402
     DEFAULT_BLOCKLIST,
+    DEFAULT_OVERRIDES_FILE,
     DEFAULT_SYSTEM_PROVIDES_FILE,
     DEFAULT_SYSTEM_UPGRADEABLE_FILE,
     apt_candidate_version,
@@ -26,6 +27,7 @@ from common import (  # noqa: E402
     ensure_directory,
     legacy_repo_filename_component,
     load_env_file,
+    load_merged_overrides,
     matches_any,
     merge_system_provided_patterns,
     normalize_architecture,
@@ -33,7 +35,6 @@ from common import (  # noqa: E402
     normalize_relation_field,
     parse_control_stanzas,
     read_pattern_file,
-    read_json,
     run,
     safe_repo_filename_component,
     sanitize_section,
@@ -301,9 +302,8 @@ def main() -> int:
     args = parser.parse_args()
     config = load_env_file(Path(args.config)) if args.config else {}
     overrides_value = args.overrides_file or config.get("OVERRIDES_FILE", "")
-    overrides = {}
-    if overrides_value:
-        overrides = read_json(Path(overrides_value).expanduser(), {})
+    overrides_path = Path(overrides_value).expanduser() if overrides_value else None
+    overrides = load_merged_overrides(DEFAULT_OVERRIDES_FILE, overrides_path)
     system_provides_value = args.system_provides_file or config.get("SYSTEM_PROVIDES_FILE", str(DEFAULT_SYSTEM_PROVIDES_FILE))
     system_upgradeable_value = args.system_upgradeable_file or config.get("SYSTEM_UPGRADEABLE_FILE", str(DEFAULT_SYSTEM_UPGRADEABLE_FILE))
     system_provided_patterns = read_pattern_file(Path(system_provides_value).expanduser())

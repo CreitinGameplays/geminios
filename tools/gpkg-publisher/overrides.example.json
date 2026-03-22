@@ -1,44 +1,32 @@
 {
-  "skip_packages": [
-    "apt*",
-    "systemd",
-    "libpam-systemd",
-    "udev",
-    "linux-image-*"
-  ],
-  "skip_patterns": [
-    "initramfs-tools*"
-  ],
   "skip_dependency_patterns": [
     "debconf-2.0"
-  ],
-  "provided_by_system_patterns": [
-    "debianutils",
-    "init-system-helpers",
-    "libc6",
-    "libcrypt1",
-    "libgcc-s1",
-    "libstdc++6",
-    "lsb-base",
-    "perl-base",
-    "python3-minimal",
-    "sysvinit-utils"
   ],
   "dependency_choices": {
     "debconf | debconf-2.0": "debconf",
     "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend",
-    "lightdm::libpam-systemd | logind": "logind"
+    "libpam-systemd | logind": "logind",
+    "policykit-1-gnome | polkit-1-auth-agent": "polkit-1-auth-agent"
   },
   "dependency_rewrites": {
     "libpam-systemd": "libpam-elogind",
     "systemd": "elogind"
   },
   "provider_choices": {
-    "logind": "libpam-elogind"
+    "logind": "libpam-elogind",
+    "polkit-1-auth-agent": "mate-polkit"
   },
   "package_overrides": {
     "nano": {
       "section": "editors"
+    },
+    "python3-pip": {
+      "include_recommends": false
+    },
+    "tasksel": {
+      "depends_remove": [
+        "apt"
+      ]
     },
     "xfce4-terminal": {
       "depends_add": [
@@ -47,9 +35,6 @@
       "drop_scripts": [
         "postinst"
       ]
-    },
-    "some-problem-package": {
-      "skip": true
     }
   }
 }
