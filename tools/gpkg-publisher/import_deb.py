@@ -175,10 +175,11 @@ def convert_deb_to_gpkg(
         )
 
         if forced_depends is None:
+            package_include_recommends = package_override.get("include_recommends", include_recommends)
             depends = normalize_dependency_field(
                 collect_dependency_relation_text(
                     fields,
-                    include_recommends=include_recommends,
+                    include_recommends=package_include_recommends,
                 ),
                 package_name=original_name,
                 apt_arch=apt_arch,

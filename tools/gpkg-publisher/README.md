@@ -340,6 +340,7 @@ Supported `package_overrides.<name>` keys:
 - `architecture`
 - `maintainer`
 - `description`
+- `include_recommends`
 - `depends_add`
 - `depends_remove`
 - `conflicts_add`
@@ -392,6 +393,20 @@ Example payload filtering for packages that ship Debian config files GeminiOS mu
 ```
 
 Use this sparingly. Prefer making GeminiOS handle Debian-standard files when possible, and reserve `drop_paths` for genuinely incompatible payloads.
+
+Example package-specific recommends control:
+
+```json
+{
+  "package_overrides": {
+    "python3-pip": {
+      "include_recommends": false
+    }
+  }
+}
+```
+
+That is useful for packages whose Debian `Recommends` are really development or distro-integration extras rather than runtime requirements you want in GeminiOS.
 
 Example extra base-system dependency suppression:
 

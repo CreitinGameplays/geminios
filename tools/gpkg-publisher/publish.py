@@ -213,13 +213,18 @@ class AptResolver:
 
         dependency_choices = self.overrides.get("dependency_choices", {})
         dependency_rewrites = self.overrides.get("dependency_rewrites", {})
+        package_override = self.overrides.get("package_overrides", {}).get(package_name, {})
+        package_include_recommends = package_override.get(
+            "include_recommends",
+            self.include_recommends and package_name in self.explicit_packages,
+        )
         skip_patterns = list(self.blocklist_patterns)
         skip_patterns.extend(self.overrides.get("skip_dependency_patterns", []))
         drop_patterns = self.overrides.get("provided_by_system_patterns", [])
         depends = normalize_dependency_field(
             collect_dependency_relation_text(
                 fields,
-                include_recommends=self.include_recommends and package_name in self.explicit_packages,
+                include_recommends=package_include_recommends,
             ),
             package_name=package_name,
             apt_arch=self.apt_arch,
@@ -231,7 +236,6 @@ class AptResolver:
             provider_resolver=self.provider_resolver,
         )
 
-        package_override = self.overrides.get("package_overrides", {}).get(package_name, {})
         depends = [dep for dep in depends if dep not in package_override.get("depends_remove", [])]
         depends.extend(package_override.get("depends_add", []))
 
