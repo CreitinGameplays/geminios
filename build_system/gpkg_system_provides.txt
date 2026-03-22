@@ -33,11 +33,13 @@ libssl3t64
 libstdc++6
 libudev1
 libxml2
+liblzma5
 libzstd1
 perl-base
 perl
 procps
 python3-dev
+xz-utils
 zlib1g
 
 # Native SDK / toolchain aliases so Debian development metapackages resolve

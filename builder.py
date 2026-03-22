@@ -111,6 +111,7 @@ PACKAGES = [
     "expat",
     "curl",
     "zstd",
+    "xz",
     "pkg-config",
     "bison",
     "flex",

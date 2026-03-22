@@ -76,6 +76,11 @@
         "usr/lib64/libzstd.so",
         "usr/lib64/pkgconfig/libzstd.pc"
     ],
+    "xz": [
+        "usr/bin/xz",
+        "usr/lib64/liblzma.so",
+        "usr/lib64/pkgconfig/liblzma.pc"
+    ],
     "elfutils": [
         "usr/lib64/libelf.so",
         "usr/lib64/pkgconfig/libelf.pc"
