@@ -13,7 +13,7 @@ meson setup build \
     --prefix=/usr \
     --libdir=lib64 \
     -Ddefault_library=shared \
-    -Dgtk_doc=false \
+    -Dgtk_doc=disabled \
     -Dman=false \
     -Dintrospection=disabled \
     -Dtests=false \
