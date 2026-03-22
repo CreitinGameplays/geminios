@@ -68,6 +68,7 @@ LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
 DEFAULT_GPKG_REPO = os.environ.get("GPKG_DEFAULT_REPO", "https://repo.creitingameplays.com").rstrip("/")
+VERIFY_SOURCES_SCRIPT = os.path.join(ROOT_DIR, "tools", "verify_source_urls.py")
 GPKG_SYSTEM_PROVIDES_FILE = os.environ.get(
     "GPKG_SYSTEM_PROVIDES_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_system_provides.txt"),
@@ -517,6 +518,11 @@ def build_package(pkg_name, index, total, force=False, debug=False):
                 pass
             print_warning("----------------------------")
         return False
+
+def verify_source_urls(requested_packages):
+    cmd = [sys.executable, VERIFY_SOURCES_SCRIPT]
+    cmd.extend(requested_packages)
+    return subprocess.call(cmd, cwd=ROOT_DIR)
 
 def copy_dev_environment():
     """Copies host C/C++ development environment (headers and libraries) to rootfs"""
@@ -1480,12 +1486,14 @@ def main():
         print(f"Usage: {sys.argv[0]} [options] [package_names...]")
         print("\nOptions:")
         print("  --clean     Clean the entire build environment (rootfs, logs, etc.)")
+        print("  --verify-sources  Verify port source URLs without building")
         print("  --force     Force rebuild of specified packages (ignoring verification)")
         print("  --debug     Enable verbose debug logging")
         print("  --help      Show this help message")
         print("\nExamples:")
         print(f"  {sys.argv[0]}                   # Build all packages")
         print(f"  {sys.argv[0]} --clean           # Clean everything")
+        print(f"  {sys.argv[0]} --verify-sources  # Verify all port source URLs")
         print(f"  {sys.argv[0]} bash coreutils    # Build specific packages")
         print(f"  {sys.argv[0]} bash --force      # Force rebuild bash")
         sys.exit(0)
@@ -1493,6 +1501,23 @@ def main():
     if "--clean" in sys.argv:
         clean_system()
         sys.exit(0)
+
+    if "--verify-sources" in sys.argv:
+        requested_packages = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+        if requested_packages:
+            valid_requested_packages = []
+            invalid = [pkg for pkg in requested_packages if pkg not in PACKAGES]
+            if invalid:
+                for pkg in invalid:
+                    print_warning(f"WARNING: Package '{pkg}' not found in PACKAGES list.")
+            for pkg in requested_packages:
+                if pkg in PACKAGES:
+                    valid_requested_packages.append(pkg)
+            if not valid_requested_packages:
+                print_error("ERROR: No valid packages specified for source verification.")
+                sys.exit(1)
+            requested_packages = valid_requested_packages
+        sys.exit(verify_source_urls(requested_packages))
 
     os.makedirs(LOG_DIR, exist_ok=True)
     prepare_rootfs()
