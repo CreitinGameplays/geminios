@@ -5,7 +5,9 @@ DBUS_VER="1.14.10"
 download_and_extract "https://dbus.freedesktop.org/releases/dbus/dbus-$DBUS_VER.tar.xz" "dbus-$DBUS_VER.tar.xz" "dbus-$DBUS_VER"
 
 cd "$DEP_DIR/dbus-$DBUS_VER"
-export LDFLAGS="$LDFLAGS -L$ROOTFS/usr/lib64 -L$ROOTFS/lib64"
+# Do not force both staged glibc library directories into configure-time
+# compiler probes. That can bypass the libc linker script and make autoconf
+# fail with GLIBC_PRIVATE symbol errors before the actual build starts.
 ./configure --prefix=/usr \
             --libdir=/usr/lib64 \
             --sysconfdir=/etc \

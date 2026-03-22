@@ -1,6 +1,7 @@
 # Seed packages for the bulk Debian -> GPKG importer.
 # Start small, validate, then expand.
 
+# system tools
 file
 htop
 jq
@@ -14,16 +15,23 @@ sqlite3
 strace
 tree
 unzip
-xfce4
-xfce4-goodies
-firefox-esr
-zip
-vlc
-lightdm
-libwebkit2gtk-4.1-0
-task-mate-desktop
 fastfetch
 lomiri-wallpapers
 xorg
 libdbus-1-3
 dbus-x11
+zip
+lightdm
+
+# DEs
+task-mate-desktop
+xfce4
+xfce4-goodies
+task-gnome-desktop
+
+# browsers
+firefox-esr
+
+# apps
+vlc
+libwebkit2gtk-4.1-0

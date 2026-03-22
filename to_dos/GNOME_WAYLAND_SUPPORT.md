@@ -13,11 +13,13 @@ Already present:
 - Mesa with `x11` and `wayland` platforms
 - X11 desktop flow working with XFCE
 - D-Bus system bus
+- manual Wayland session bootstrap with XDG session/runtime exports
+- session environment drop-in support plus `wayland-session-report` diagnostics
 - `gpkg` importing large Debian desktop packages successfully
 
 Still missing at the OS level:
 - native Wayland compositor/session flow
-- complete seat/session management
+- complete seat/session management polish
 - XDG desktop portal stack
 - modern audio/screen-share stack
 - GNOME session daemons and policy integration
@@ -44,17 +46,17 @@ Recommendation:
 
 Modern Wayland desktops depend on proper login/session ownership, device access, and runtime directories.
 
-- [ ] Add `pam`-backed session creation that reliably sets:
+- [x] Add `pam`-backed session creation that reliably sets:
   - `XDG_RUNTIME_DIR`
   - `XDG_SESSION_TYPE`
   - `XDG_CURRENT_DESKTOP`
   - `XDG_SESSION_DESKTOP`
   - `DBUS_SESSION_BUS_ADDRESS`
-- [ ] Add `elogind` as the primary `logind` provider.
-- [ ] Start and supervise `elogind` from `ginit`.
+- [x] Add `elogind` as the primary `logind` provider.
+- [x] Start and supervise `elogind` from `ginit`.
 - [ ] Ensure `polkit` can query active sessions through `elogind`.
-- [ ] Ensure `/run/user/<uid>` is created with correct ownership and lifetime.
-- [ ] Add support for user sessions in `ginit` or a compatible session bootstrap layer.
+- [x] Ensure `/run/user/<uid>` is created with correct ownership and lifetime.
+- [x] Add support for user sessions in `ginit` or a compatible session bootstrap layer.
 - [ ] Verify DRM/input device permissions are granted to the active graphical session.
 
 Definition of done:
@@ -66,15 +68,15 @@ Definition of done:
 
 This is the shared base needed by GNOME and most modern Wayland desktops.
 
-- [ ] Add `libinput`.
+- [x] Add `libinput`.
 - [ ] Add `libseat` support if required by specific compositors/components.
 - [ ] Add `xkbcommon` tooling/runtime validation.
-- [ ] Add `Xwayland` so legacy X11 applications work inside Wayland sessions.
+- [x] Add `Xwayland` so legacy X11 applications work inside Wayland sessions.
 - [ ] Add `xdg-desktop-portal`.
 - [ ] Add at least these portal backends:
   - `xdg-desktop-portal-gtk`
   - GNOME backend later with GNOME session stack
-- [ ] Add `dconf`.
+- [x] Add `dconf`.
 - [ ] Add `gvfs`.
 - [ ] Add `glib-networking`.
 - [ ] Add `libsecret`.
@@ -87,8 +89,8 @@ This is the shared base needed by GNOME and most modern Wayland desktops.
 - [ ] Add `pipewire`.
 - [ ] Add `wireplumber`.
 - [ ] Add `pipewire-pulse`.
-- [ ] Add `xdg-user-dirs` and initial user dir population.
-- [ ] Ensure `gsettings` schema compilation happens automatically after installs.
+- [x] Add `xdg-user-dirs` and initial user dir population.
+- [x] Ensure `gsettings` schema compilation happens automatically after installs.
 
 Definition of done:
 - portals work
@@ -196,9 +198,9 @@ Minimum required test matrix:
 
 If the goal is fastest route to a real GNOME Wayland desktop:
 
-1. [ ] `elogind`
-2. [ ] `libinput`
-3. [ ] `Xwayland`
+1. [x] `elogind`
+2. [x] `libinput`
+3. [x] `Xwayland`
 4. [ ] `dconf`, `gvfs`, `glib-networking`, `libsecret`, `gnome-keyring`
 5. [ ] `xdg-desktop-portal` + GTK backend
 6. [ ] `pipewire` + `wireplumber` + `rtkit`
@@ -219,6 +221,7 @@ If the goal is fastest route to a real GNOME Wayland desktop:
 
 The next milestone should be:
 
-- [ ] get a minimal native Wayland session working on GeminiOS with proper session ownership, runtime dir management, DRM/input access, and `Xwayland`
+- [ ] validate the new manual session bootstrap with a real compositor package on GeminiOS, confirming DRM/input access, runtime dir ownership, and `Xwayland`
+- [ ] use `wayland-session-report` from a TTY before launching the first validation compositor to confirm the session environment and device visibility
 
 Once that is stable, GNOME Shell becomes a realistic target instead of a package-conversion experiment.

@@ -56,4 +56,15 @@ mesa-libgallium
 libegl-mesa0
 libgl1-mesa-dri
 libglx-mesa0
+json-glib
+libjson-glib-1.0-0
+dconf
+dconf-cli
+dconf-gsettings-backend
+dconf-service
+libdconf1
+xdg-user-dirs
+libinput
+libinput10
 xorg-server
+xwayland

@@ -2,7 +2,10 @@
 # GeminiOS Target Environment (Apply after Glibc)
 export CFLAGS="--sysroot=$ROOTFS -O2 -fPIC -Wno-error"
 export CXXFLAGS="--sysroot=$ROOTFS -O2 -fPIC -Wno-error"
-export LDFLAGS="--sysroot=$ROOTFS -L$ROOTFS/usr/lib64 -L$ROOTFS/lib64"
+# Prefer the staged linker-script directory only. Adding $ROOTFS/lib64 here
+# makes autoconf sanity checks bypass libc.so's linker script, which can fail
+# early with GLIBC_PRIVATE references from the staged libc.so.6.
+export LDFLAGS="--sysroot=$ROOTFS -L$ROOTFS/usr/lib64"
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 

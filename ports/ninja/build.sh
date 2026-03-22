@@ -4,9 +4,9 @@ NINJA_VER="1.11.1"
 download_and_extract "https://github.com/ninja-build/ninja/archive/v$NINJA_VER.tar.gz" "ninja-$NINJA_VER.tar.gz" "ninja-$NINJA_VER"
 cd "$DEP_DIR/ninja-$NINJA_VER"
 
-# Use host python to generate build.ninja
-export LDFLAGS="$LDFLAGS -L$ROOTFS/usr/lib64 -L$ROOTFS/lib64"
-export CXXFLAGS="$CXXFLAGS -L$ROOTFS/usr/lib64 -L$ROOTFS/lib64"
+# Build the bootstrap ninja binary with the host toolchain defaults. Pointing
+# its link step at both staged glibc library directories can trigger the same
+# GLIBC_PRIVATE linker failure seen in autoconf sanity checks.
 "$HOME/.pyenv/versions/3.11.9/bin/python3" configure.py
 
 # Build using host ninja

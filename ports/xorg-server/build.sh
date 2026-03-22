@@ -37,7 +37,7 @@ if ! grep -q "#undef bool" glx/glxdri2.c; then
 fi
 
 ./configure --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
-    --disable-static --enable-xorg --disable-xwayland --disable-xephyr --disable-xvfb \
+    --disable-static --enable-xorg --enable-xwayland --disable-xephyr --disable-xvfb \
     --disable-xnest --enable-config-udev --disable-config-udev-kms --disable-config-hal \
     --disable-systemd-logind --enable-glx --enable-dri --enable-dri2 --enable-dri3 \
     --enable-fbdev --enable-libdrm --disable-unit-tests --enable-glamor --disable-selective-werror \

@@ -98,6 +98,8 @@ export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
 EOF
 
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
+mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg/autostart"
+mkdir -p "$ROOTFS/usr/libexec/geminios/session-env.d"
 mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
 mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm"
 if [ "$(id -u)" -eq 0 ]; then
@@ -246,6 +248,12 @@ if [ -f /etc/profile ]; then
     . /etc/profile
 fi
 
+export GEMINIOS_SESSION_TYPE="${GEMINIOS_SESSION_TYPE:-x11}"
+export GEMINIOS_SESSION_DESKTOP="${GEMINIOS_SESSION_DESKTOP:-lightdm}"
+if [ -r /usr/libexec/geminios/session-common ]; then
+    . /usr/libexec/geminios/session-common
+fi
+
 if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
@@ -315,6 +323,12 @@ cat > "$ROOTFS/etc/lightdm/Xsession" <<'EOF'
 #!/bin/sh
 if [ -f /etc/profile ]; then
     . /etc/profile
+fi
+
+export GEMINIOS_SESSION_TYPE="${GEMINIOS_SESSION_TYPE:-x11}"
+export GEMINIOS_SESSION_DESKTOP="${GEMINIOS_SESSION_DESKTOP:-lightdm}"
+if [ -r /usr/libexec/geminios/session-common ]; then
+    . /usr/libexec/geminios/session-common
 fi
 
 if [ "$#" -gt 0 ]; then
@@ -424,6 +438,432 @@ mkdir -p "$ROOTFS/usr/lib64"
 gcc -shared -fPIC "$ROOT_DIR/build_system/gdk_wayland_compat.c" \
     -o "$ROOTFS/usr/lib64/libgdk-wayland-compat.so"
 
+cat > "$ROOTFS/usr/libexec/geminios/session-common" <<'EOF'
+#!/bin/sh
+
+if [ -f /etc/profile ]; then
+    . /etc/profile
+fi
+
+geminios_source_shell_dropins() {
+    for dropin_dir in "$@"; do
+        [ -d "$dropin_dir" ] || continue
+        for dropin in "$dropin_dir"/*.sh; do
+            [ -r "$dropin" ] || continue
+            . "$dropin"
+        done
+    done
+}
+
+geminios_guess_vtnr() {
+    current_tty="$(readlink /proc/self/fd/0 2>/dev/null || true)"
+    case "$current_tty" in
+        /dev/tty[0-9]*)
+            basename "$current_tty" | sed 's/[^0-9]//g'
+            ;;
+    esac
+}
+
+geminios_update_activation_environment() {
+    if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-update-activation-environment >/dev/null 2>&1; then
+        dbus-update-activation-environment \
+            DISPLAY \
+            WAYLAND_DISPLAY \
+            XDG_CACHE_HOME \
+            XDG_CONFIG_HOME \
+            XDG_CURRENT_DESKTOP \
+            XDG_DATA_HOME \
+            XDG_DATA_DIRS \
+            XDG_MENU_PREFIX \
+            XDG_RUNTIME_DIR \
+            XDG_SEAT \
+            XDG_SESSION_CLASS \
+            XDG_SESSION_DESKTOP \
+            XDG_SESSION_ID \
+            XDG_SESSION_TYPE \
+            XDG_STATE_HOME \
+            XDG_VTNR \
+            DESKTOP_SESSION \
+            DBUS_SESSION_BUS_ADDRESS \
+            GDK_BACKEND \
+            GTK_USE_PORTAL \
+            QT_QPA_PLATFORM \
+            SDL_VIDEODRIVER \
+            CLUTTER_BACKEND \
+            MOZ_ENABLE_WAYLAND \
+            ELECTRON_OZONE_PLATFORM_HINT \
+            SSH_AUTH_SOCK \
+            GNOME_KEYRING_CONTROL >/dev/null 2>&1 || true
+    fi
+}
+
+export XDG_CONFIG_DIRS="${XDG_CONFIG_DIRS:-/etc/xdg}"
+export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+export XDG_SESSION_CLASS="${XDG_SESSION_CLASS:-user}"
+
+if [ -n "${GEMINIOS_SESSION_TYPE:-}" ] && [ -z "${XDG_SESSION_TYPE:-}" ]; then
+    export XDG_SESSION_TYPE="$GEMINIOS_SESSION_TYPE"
+fi
+
+if [ -n "${GEMINIOS_SESSION_DESKTOP:-}" ]; then
+    export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-$GEMINIOS_SESSION_DESKTOP}"
+    export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-$GEMINIOS_SESSION_DESKTOP}"
+    export DESKTOP_SESSION="${DESKTOP_SESSION:-$GEMINIOS_SESSION_DESKTOP}"
+fi
+
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+fi
+mkdir -p "$XDG_RUNTIME_DIR"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" 2>/dev/null || true
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+
+if [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+    echo "E: XDG_RUNTIME_DIR ($XDG_RUNTIME_DIR) is not usable for $(id -un)." >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+if [ -z "${XDG_VTNR:-}" ]; then
+    xdg_vtnr="$(geminios_guess_vtnr)"
+    if [ -n "$xdg_vtnr" ]; then
+        export XDG_VTNR="$xdg_vtnr"
+    fi
+fi
+
+if [ -z "${XDG_SEAT:-}" ] && [ -e /run/systemd/seats/seat0 ]; then
+    export XDG_SEAT="seat0"
+fi
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+
+case "${XDG_SESSION_TYPE:-tty}" in
+    wayland)
+        export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+        export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+        export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
+        export CLUTTER_BACKEND="${CLUTTER_BACKEND:-wayland}"
+        export MOZ_ENABLE_WAYLAND="${MOZ_ENABLE_WAYLAND:-1}"
+        export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
+        if command -v xdg-desktop-portal >/dev/null 2>&1; then
+            export GTK_USE_PORTAL="${GTK_USE_PORTAL:-1}"
+        fi
+        ;;
+    x11)
+        export GDK_BACKEND="${GDK_BACKEND:-x11}"
+        export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+        export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
+        ;;
+esac
+
+if [ "${XDG_CURRENT_DESKTOP:-}" = "GNOME" ] || [ "${XDG_SESSION_DESKTOP:-}" = "GNOME" ]; then
+    export XDG_MENU_PREFIX="${XDG_MENU_PREFIX:-gnome-}"
+fi
+
+geminios_source_shell_dropins \
+    /usr/libexec/geminios/session-env.d \
+    /etc/geminios/session-env.d \
+    "$XDG_CONFIG_HOME/geminios/session-env.d"
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+
+geminios_update_activation_environment
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/session-common"
+
+cat > "$ROOTFS/usr/libexec/geminios/session-runtime" <<'EOF'
+#!/bin/sh
+set -eu
+
+if [ "$#" -lt 3 ]; then
+    echo "Usage: session-runtime <x11|wayland> <desktop> <command> [args...]" >&2
+    exit 2
+fi
+
+export GEMINIOS_SESSION_TYPE="$1"
+export GEMINIOS_SESSION_DESKTOP="$2"
+shift 2
+
+. /usr/libexec/geminios/session-common
+
+user_id="$(id -u)"
+bg_pids=""
+session_pid=""
+
+start_bg_process() {
+    pattern="$1"
+    shift
+    if [ "$#" -eq 0 ]; then
+        return 0
+    fi
+    if command -v pgrep >/dev/null 2>&1 && pgrep -u "$user_id" -f "$pattern" >/dev/null 2>&1; then
+        return 0
+    fi
+    "$@" >/dev/null 2>&1 &
+    bg_pids="$bg_pids $!"
+}
+
+find_candidate() {
+    for candidate in "$@"; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+cleanup() {
+    if [ -n "$session_pid" ]; then
+        kill "$session_pid" >/dev/null 2>&1 || true
+        wait "$session_pid" >/dev/null 2>&1 || true
+    fi
+    for pid in $bg_pids; do
+        kill "$pid" >/dev/null 2>&1 || true
+        wait "$pid" >/dev/null 2>&1 || true
+    done
+}
+trap cleanup EXIT HUP INT TERM
+
+wait_for_wayland_display() {
+    if [ "${XDG_SESSION_TYPE:-}" != "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        return 0
+    fi
+
+    attempts=50
+    while [ "$attempts" -gt 0 ]; do
+        socket_path="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' 2>/dev/null | sort | head -n 1)"
+        if [ -n "$socket_path" ]; then
+            export WAYLAND_DISPLAY="$(basename "$socket_path")"
+            return 0
+        fi
+        sleep 0.1
+        attempts=$((attempts - 1))
+    done
+
+    echo "[*] Waiting for a Wayland display timed out in $XDG_RUNTIME_DIR." >&2
+}
+
+start_graphical_helpers() {
+    if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+        return 0
+    fi
+
+    geminios_update_activation_environment
+
+    if command -v xdg-permission-store >/dev/null 2>&1; then
+        start_bg_process "xdg-permission-store" xdg-permission-store
+    fi
+    if command -v xdg-document-portal >/dev/null 2>&1; then
+        start_bg_process "xdg-document-portal" xdg-document-portal
+    fi
+
+    if command -v xdg-desktop-portal >/dev/null 2>&1; then
+        start_bg_process "xdg-desktop-portal" xdg-desktop-portal
+    fi
+    if command -v xdg-desktop-portal-gtk >/dev/null 2>&1; then
+        start_bg_process "xdg-desktop-portal-gtk" xdg-desktop-portal-gtk
+    fi
+    if command -v xdg-desktop-portal-gnome >/dev/null 2>&1; then
+        start_bg_process "xdg-desktop-portal-gnome" xdg-desktop-portal-gnome
+    fi
+
+    polkit_agent="$(find_candidate \
+        /usr/libexec/polkit-gnome-authentication-agent-1 \
+        /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 \
+        /usr/libexec/polkit-kde-authentication-agent-1 \
+        /usr/lib/polkit-kde-1/polkit-kde-authentication-agent-1 \
+        /usr/bin/lxqt-policykit-agent \
+        /usr/libexec/mate-polkit \
+        /usr/lib/mate-polkit/polkit-mate-authentication-agent-1 || true)"
+    if [ -n "$polkit_agent" ]; then
+        start_bg_process "$polkit_agent" "$polkit_agent"
+    fi
+}
+
+if command -v xdg-user-dirs-update >/dev/null 2>&1; then
+    xdg-user-dirs-update >/dev/null 2>&1 || true
+fi
+
+if command -v at-spi-bus-launcher >/dev/null 2>&1; then
+    start_bg_process "at-spi-bus-launcher" at-spi-bus-launcher --launch-immediately
+fi
+
+if command -v gnome-keyring-daemon >/dev/null 2>&1; then
+    keyring_env="$(gnome-keyring-daemon --start --components=secrets,pkcs11,ssh 2>/dev/null || true)"
+    if [ -n "$keyring_env" ]; then
+        eval "$keyring_env"
+        export SSH_AUTH_SOCK GNOME_KEYRING_CONTROL GNOME_KEYRING_PID
+        geminios_update_activation_environment
+    fi
+fi
+
+if command -v pipewire >/dev/null 2>&1; then
+    start_bg_process "pipewire" pipewire
+fi
+if command -v wireplumber >/dev/null 2>&1; then
+    start_bg_process "wireplumber" wireplumber
+fi
+if command -v pipewire-pulse >/dev/null 2>&1; then
+    start_bg_process "pipewire-pulse" pipewire-pulse
+fi
+
+"$@" &
+session_pid="$!"
+
+wait_for_wayland_display
+geminios_update_activation_environment
+start_graphical_helpers
+
+if wait "$session_pid"; then
+    session_status=0
+else
+    session_status="$?"
+fi
+session_pid=""
+exit "$session_status"
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/session-runtime"
+
+cat > "$ROOTFS/usr/libexec/geminios/session-launch" <<'EOF'
+#!/bin/sh
+set -eu
+
+if [ "$#" -lt 3 ]; then
+    echo "Usage: session-launch <x11|wayland> <desktop> <command> [args...]" >&2
+    exit 2
+fi
+
+session_type="$1"
+desktop="$2"
+shift 2
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null 2>&1; then
+    exec dbus-run-session -- /usr/libexec/geminios/session-runtime "$session_type" "$desktop" "$@"
+fi
+
+exec /usr/libexec/geminios/session-runtime "$session_type" "$desktop" "$@"
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/session-launch"
+
+cat > "$ROOTFS/usr/libexec/geminios/wayland-session-report" <<'EOF'
+#!/bin/sh
+set -eu
+
+if [ -r /usr/libexec/geminios/session-common ]; then
+    . /usr/libexec/geminios/session-common
+fi
+
+print_row() {
+    printf '%-24s %s\n' "$1" "$2"
+}
+
+report_binary() {
+    name="$1"
+    if path="$(command -v "$name" 2>/dev/null)"; then
+        print_row "$name" "$path"
+    else
+        print_row "$name" "missing"
+    fi
+}
+
+report_device() {
+    path="$1"
+    if [ -e "$path" ]; then
+        details="$(ls -ld "$path" 2>/dev/null | tr -s ' ')"
+        print_row "$path" "$details"
+    else
+        print_row "$path" "missing"
+    fi
+}
+
+session_id="${XDG_SESSION_ID:-}"
+if [ -z "$session_id" ] && command -v loginctl >/dev/null 2>&1; then
+    session_id="$(loginctl list-sessions --no-legend 2>/dev/null | awk -v user="$(id -un)" '$3 == user { print $1; exit }')"
+fi
+
+echo "GeminiOS Wayland Session Report"
+echo
+print_row "user" "$(id -un) ($(id -u))"
+print_row "groups" "$(id -Gn)"
+print_row "session type" "${XDG_SESSION_TYPE:-unset}"
+print_row "desktop" "${XDG_CURRENT_DESKTOP:-unset}"
+print_row "session desktop" "${XDG_SESSION_DESKTOP:-unset}"
+print_row "session id" "${session_id:-unset}"
+print_row "seat" "${XDG_SEAT:-unset}"
+print_row "vt" "${XDG_VTNR:-unset}"
+print_row "runtime dir" "${XDG_RUNTIME_DIR:-unset}"
+print_row "dbus session" "${DBUS_SESSION_BUS_ADDRESS:-unset}"
+print_row "wayland display" "${WAYLAND_DISPLAY:-unset}"
+print_row "display" "${DISPLAY:-unset}"
+
+echo
+echo "Runtime sockets"
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then
+    found_socket=false
+    for socket_path in "$XDG_RUNTIME_DIR"/wayland-* "$XDG_RUNTIME_DIR"/bus; do
+        [ -S "$socket_path" ] || continue
+        print_row "$(basename "$socket_path")" "$socket_path"
+        found_socket=true
+    done
+    if [ "$found_socket" = false ]; then
+        echo "none"
+    fi
+else
+    echo "runtime directory is unavailable"
+fi
+
+echo
+echo "Device access"
+report_device /dev/dri/card0
+report_device /dev/dri/renderD128
+report_device /dev/input/event0
+
+echo
+echo "Session tools"
+report_binary loginctl
+report_binary dbus-run-session
+report_binary dbus-update-activation-environment
+report_binary Xwayland
+report_binary xdg-desktop-portal
+report_binary xdg-desktop-portal-gtk
+report_binary xdg-desktop-portal-gnome
+report_binary pipewire
+report_binary wireplumber
+report_binary pipewire-pulse
+report_binary gnome-keyring-daemon
+report_binary gnome-session
+report_binary weston
+
+if [ -n "$session_id" ] && command -v loginctl >/dev/null 2>&1; then
+    echo
+    echo "loginctl show-session"
+    loginctl show-session "$session_id" \
+        -p Id \
+        -p Name \
+        -p State \
+        -p Active \
+        -p Class \
+        -p Type \
+        -p Seat \
+        -p VTNr 2>/dev/null || true
+fi
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/wayland-session-report"
+
+cat > "$ROOTFS/bin/wayland-session-report" <<'EOF'
+#!/bin/sh
+exec /usr/libexec/geminios/wayland-session-report "$@"
+EOF
+chmod 755 "$ROOTFS/bin/wayland-session-report"
+
 cat > "$ROOTFS/bin/startxfce4" <<'EOF'
 #!/bin/sh
 REAL_STARTXFCE4="/usr/bin/startxfce4"
@@ -433,31 +873,59 @@ if [ ! -x "$REAL_STARTXFCE4" ]; then
     exit 1
 fi
 
-export GDK_BACKEND="${GDK_BACKEND:-x11}"
-export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-x11}"
-
-if [ -z "$XDG_RUNTIME_DIR" ]; then
-    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-fi
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
-
 if [ ! -f /usr/lib64/pkgconfig/gdk-wayland-3.0.pc ] && [ -r /usr/lib64/libgdk-wayland-compat.so ]; then
     export LD_PRELOAD="/usr/lib64/libgdk-wayland-compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
 fi
 
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-run-session >/dev/null 2>&1; then
-    exec dbus-run-session -- "$REAL_STARTXFCE4" "$@"
-fi
-
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-launch >/dev/null 2>&1; then
-    eval "$(dbus-launch --sh-syntax)"
-    export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
-fi
-
-exec "$REAL_STARTXFCE4" "$@"
+exec /usr/libexec/geminios/session-launch x11 XFCE "$REAL_STARTXFCE4" "$@"
 EOF
 chmod 755 "$ROOTFS/bin/startxfce4"
+
+cat > "$ROOTFS/bin/startwayland" <<'EOF'
+#!/bin/sh
+set -eu
+
+desktop="${GEMINIOS_WAYLAND_DESKTOP:-GeminiOS}"
+
+if [ "$#" -eq 0 ]; then
+    if command -v weston >/dev/null 2>&1; then
+        set -- weston
+    else
+        echo "E: no Wayland compositor command was provided and weston is not installed." >&2
+        exit 1
+    fi
+fi
+
+exec /usr/libexec/geminios/session-launch wayland "$desktop" "$@"
+EOF
+chmod 755 "$ROOTFS/bin/startwayland"
+
+cat > "$ROOTFS/bin/startweston" <<'EOF'
+#!/bin/sh
+set -eu
+
+if command -v weston >/dev/null 2>&1; then
+    exec env GEMINIOS_WAYLAND_DESKTOP=Weston /bin/startwayland weston "$@"
+fi
+
+echo "E: weston is not installed." >&2
+exit 1
+EOF
+chmod 755 "$ROOTFS/bin/startweston"
+
+cat > "$ROOTFS/bin/startgnome-wayland" <<'EOF'
+#!/bin/sh
+set -eu
+
+if ! command -v gnome-session >/dev/null 2>&1; then
+    echo "E: gnome-session is not installed." >&2
+    exit 1
+fi
+
+export GNOME_SHELL_SESSION_MODE="${GNOME_SHELL_SESSION_MODE:-user}"
+exec env GEMINIOS_WAYLAND_DESKTOP=GNOME /bin/startwayland gnome-session --session=gnome "$@"
+EOF
+chmod 755 "$ROOTFS/bin/startgnome-wayland"
 
 # Prepare runtime/session paths used by Wayland-capable applications.
 mkdir -p "$ROOTFS/run/user"
@@ -465,6 +933,24 @@ chmod 755 "$ROOTFS/run/user"
 mkdir -p "$ROOTFS/run/systemd" "$ROOTFS/run/systemd/inhibit" "$ROOTFS/run/systemd/seats"
 mkdir -p "$ROOTFS/run/systemd/sessions" "$ROOTFS/run/systemd/users" "$ROOTFS/var/lib/elogind"
 mkdir -p "$ROOTFS/usr/share/wayland-sessions"
+
+cat > "$ROOTFS/usr/share/wayland-sessions/geminios-weston.desktop" <<'EOF'
+[Desktop Entry]
+Name=Weston
+Comment=Weston Wayland compositor session
+Exec=/bin/startweston
+Type=Application
+DesktopNames=Weston
+EOF
+
+cat > "$ROOTFS/usr/share/wayland-sessions/geminios-gnome.desktop" <<'EOF'
+[Desktop Entry]
+Name=GNOME
+Comment=GNOME Shell on Wayland
+Exec=/bin/startgnome-wayland
+Type=Application
+DesktopNames=GNOME
+EOF
 
 # Fix /var/run -> /run
 mkdir -p "$ROOTFS/var"

@@ -218,6 +218,11 @@ std::string format_bytes(unsigned long long bytes) {
     return oss.str();
 }
 
+std::string format_meminfo_kib(long kib) {
+    if (kib <= 0) return "0 B";
+    return format_bytes(static_cast<unsigned long long>(kib) * 1024ULL);
+}
+
 std::string format_temperature(const TemperatureReading& reading) {
     if (!reading.available) return "n/a";
     std::ostringstream oss;
@@ -874,14 +879,16 @@ int main(int argc, char* argv[]) {
                 long m_total, m_used, m_free, m_avail, s_total, s_free;
                 get_mem_info(m_total, m_used, m_free, m_avail, s_total, s_free);
                 header_ss << "  RAM  " << draw_bar(safe_percentage(static_cast<double>(m_used), static_cast<double>(m_total)), 25)
-                          << " " << CLR_BOLD << m_used/1024 << CLR_RESET << " / " << m_total/1024
-                          << " MB | Avail " << m_avail/1024 << " MB" << CLR_EOL << "\n";
+                          << " " << CLR_BOLD << format_meminfo_kib(m_used) << CLR_RESET << " / "
+                          << format_meminfo_kib(m_total) << " | Avail " << format_meminfo_kib(m_avail)
+                          << CLR_EOL << "\n";
                 header_lines += 2;
                 
                 if (s_total > 0) {
                     long s_used = s_total - s_free;
                     header_ss << "  Swap " << draw_bar(safe_percentage(static_cast<double>(s_used), static_cast<double>(s_total)), 25)
-                              << " " << CLR_BOLD << s_used/1024 << CLR_RESET << " / " << s_total/1024 << " MB" << CLR_EOL << "\n";
+                              << " " << CLR_BOLD << format_meminfo_kib(s_used) << CLR_RESET << " / "
+                              << format_meminfo_kib(s_total) << CLR_EOL << "\n";
                     header_lines++;
                 }
 
@@ -917,9 +924,10 @@ int main(int argc, char* argv[]) {
                 header_ss << " CPU: " << draw_bar(total_cpu_usage, 18)
                           << " " << CLR_CYAN << (cpu_freq_info.has_current ? format_frequency_mhz(cpu_freq_info.average_mhz) : "n/a") << CLR_RESET
                           << " | " << CLR_YELLOW << format_temperature(cpu_temp_info) << CLR_RESET << CLR_EOL << "\n";
-                header_ss << " RAM: " << CLR_YELLOW << used_ram << "MB" << CLR_RESET
-                          << " / " << total_ram << "MB " << draw_bar(safe_percentage(static_cast<double>(used_ram), static_cast<double>(total_ram)), 18)
-                          << " | Avail " << avail_ram << "MB" << CLR_EOL << "\n";
+                header_ss << " RAM: " << CLR_YELLOW << format_meminfo_kib(used_ram) << CLR_RESET
+                          << " / " << format_meminfo_kib(total_ram) << " "
+                          << draw_bar(safe_percentage(static_cast<double>(used_ram), static_cast<double>(total_ram)), 18)
+                          << " | Avail " << format_meminfo_kib(avail_ram) << CLR_EOL << "\n";
                 header_ss << " GPU: " << truncate_string(gpu_info.model, 36);
                 if (gpu_info.memory.available) {
                     header_ss << " | " << gpu_info.memory.label << ' '

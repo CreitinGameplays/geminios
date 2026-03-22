@@ -117,16 +117,40 @@ GeminiOS currently boots and runs a regular X11 desktop session. The base image 
 - Wayland-enabled `libxkbcommon`
 - Wayland-enabled GTK 3
 - Mesa built with both `x11` and `wayland` platforms
+- Xwayland-capable `xorg-server`
+- `libinput` for compositor/input stacks
+- `json-glib`, `dconf`, and `xdg-user-dirs` as core GNOME-facing session prerequisites
+- session bootstrap helpers in `geminios_core`:
+  - `/bin/startwayland`
+  - `/bin/startweston`
+  - `/bin/startgnome-wayland`
+  - `/bin/wayland-session-report`
+  - `/usr/libexec/geminios/session-launch`
+  - `/usr/libexec/geminios/session-runtime`
 
 That solves the class of runtime failures caused by packages expecting GTK/Wayland client symbols to exist.
+It also means GeminiOS now has a non-`systemd --user` session bootstrap path for imported Wayland desktops: the wrapper starts a session bus when needed, exports the XDG session variables, and opportunistically launches common user daemons such as PipeWire, portals, polkit agents, `at-spi`, and `gnome-keyring` if those packages are installed later via `.gpkg`.
+The base login/session layer now also seeds the standard XDG home directories, infers the runtime D-Bus socket when one already exists, and supports shell drop-ins under `/usr/libexec/geminios/session-env.d`, `/etc/geminios/session-env.d`, and `$HOME/.config/geminios/session-env.d` so future Wayland/GNOME packages can extend the session environment without patching `geminios_core` again.
 
 What it does **not** mean yet:
 
-- GeminiOS does not ship a Wayland compositor in-tree yet.
-- The default desktop/session flow is still X11.
-- Packages that require a real Wayland compositor/session manager still need that compositor to be added separately.
+- GeminiOS still does not ship a Wayland compositor in-tree yet.
+- The default desktop/session flow is still X11 unless you explicitly start a Wayland session.
+- Full GNOME still depends on the remaining desktop services being published and installed as `.gpkg` packages.
 
-So the current state is: **Wayland-capable userspace foundation, but not a full native Wayland desktop session yet.**
+So the current state is: **Wayland-capable userspace foundation plus a real session bootstrap path, but the compositor and the heavier GNOME services still need to be installed on top.**
+
+Once a compositor or GNOME session package is installed, the intended manual smoke-test flow from a TTY is:
+
+```bash
+wayland-session-report
+startweston
+startwayland <compositor-command>
+startgnome-wayland
+```
+
+`wayland-session-report` is the quick sanity check before launching a compositor: it reports the current XDG session environment, runtime sockets, DRM/input device visibility, and whether `Xwayland`, portals, PipeWire, and GNOME session binaries are already installed.
+Those wrappers are the supported bridge between GeminiOS login/PAM/elogind and imported desktop packages that normally expect `dbus-run-session` plus `systemd --user`-style session setup.
 
 The implementation roadmap for closing that gap is tracked in [GNOME_WAYLAND_SUPPORT.md](/home/creitin/Documents/geminios/to_dos/GNOME_WAYLAND_SUPPORT.md).
 
