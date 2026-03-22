@@ -30,6 +30,7 @@ out="\$($PKG_CONFIG_REAL "\$@")"
 filtered=""
 for token in \$out; do
     if [ "\$token" = "-I$ROOTFS/usr/include" ]; then
+        filtered="\$filtered -idirafter $ROOTFS/usr/include"
         continue
     fi
     filtered="\$filtered \$token"

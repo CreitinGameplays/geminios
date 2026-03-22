@@ -8,6 +8,6 @@ download_and_extract \
     "xdg-user-dirs-$XDG_USER_DIRS_VER"
 
 cd "$DEP_DIR/xdg-user-dirs-$XDG_USER_DIRS_VER"
-./configure --prefix=/usr --disable-static --host=x86_64-linux-gnu
+./configure --prefix=/usr --sysconfdir=/etc --disable-static --disable-documentation --host=x86_64-linux-gnu
 make -j$JOBS
 make install DESTDIR="$ROOTFS"

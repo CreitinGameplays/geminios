@@ -3,8 +3,8 @@ set -e
 
 LIBINPUT_VER="1.26.2"
 download_and_extract \
-    "https://gitlab.freedesktop.org/libinput/libinput/-/releases/$LIBINPUT_VER/downloads/libinput-$LIBINPUT_VER.tar.xz" \
-    "libinput-$LIBINPUT_VER.tar.xz" \
+    "https://gitlab.freedesktop.org/libinput/libinput/-/archive/$LIBINPUT_VER/libinput-$LIBINPUT_VER.tar.gz" \
+    "libinput-$LIBINPUT_VER.tar.gz" \
     "libinput-$LIBINPUT_VER"
 
 cd "$DEP_DIR/libinput-$LIBINPUT_VER"

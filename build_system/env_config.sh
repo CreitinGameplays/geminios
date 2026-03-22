@@ -21,10 +21,17 @@ download_and_extract() {
     mkdir -p "$DEP_DIR"
     if [ ! -d "$DEP_DIR/$dirname" ]; then
         echo "Downloading and Extracting $dirname..."
+        if [ -f "$DEP_DIR/$archive" ] && [ ! -s "$DEP_DIR/$archive" ]; then
+            rm -f "$DEP_DIR/$archive"
+        fi
         if [ ! -f "$DEP_DIR/$archive" ]; then
             wget -q -O "$DEP_DIR/$archive" "$url"
         fi
-        tar -xf "$DEP_DIR/$archive" -C "$DEP_DIR"
+        if ! tar -xf "$DEP_DIR/$archive" -C "$DEP_DIR"; then
+            rm -f "$DEP_DIR/$archive"
+            echo "Failed to extract $archive; removed cached archive so the next run can re-download it."
+            return 1
+        fi
         rm "$DEP_DIR/$archive"
     fi
 }

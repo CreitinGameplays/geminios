@@ -6,3 +6,7 @@ cd "$DEP_DIR/eudev-$EUDEV_VER"
 ./configure --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --disable-static --disable-selinux --disable-introspection --disable-blkid --disable-kmod --host=x86_64-linux-gnu
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
+
+if [ -f "$ROOTFS/usr/lib64/libudev.la" ]; then
+    sed -i "s|^dependency_libs=.*$|dependency_libs=''|" "$ROOTFS/usr/lib64/libudev.la"
+fi

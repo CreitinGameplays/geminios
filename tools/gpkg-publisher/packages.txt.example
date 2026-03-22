@@ -35,3 +35,47 @@ firefox-esr
 
 # apps
 vlc
+mpv
+celluloid
+rhythmbox
+audacious
+cheese
+
+# graphics / images
+gimp
+inkscape
+eog
+gthumb
+shotwell
+
+# file management / archives
+file-roller
+
+# internet / communication
+thunderbird
+pidgin
+hexchat
+transmission-gtk
+filezilla
+
+# utilities
+synaptic
+gparted
+baobab
+gnome-disk-utility
+keepassxc
+qalculate-gtk
+galculator
+
+# remote / desktop sharing
+remmina
+
+# screenshots / recording / streaming
+flameshot
+obs-studio
+
+# extra useful GUI apps
+pavucontrol
+seahorse
+gnome-font-viewer
+font-manager
