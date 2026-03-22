@@ -23,6 +23,7 @@ dbus-x11
 zip
 lightdm
 libwebkit2gtk-4.1-0
+weston
 
 # DEs
 task-mate-desktop
