@@ -539,7 +539,10 @@ def main() -> int:
     )
     overrides["provided_by_system_patterns"] = system_provided_patterns
     blocklist_patterns = split_patterns(config["BLOCKLIST_PATTERNS"])
-    blocklist_patterns.extend(overrides.get("skip_packages", []))
+    if not blocklist_patterns:
+        blocklist_patterns = list(overrides.get("skip_packages", DEFAULT_BLOCKLIST))
+    else:
+        blocklist_patterns.extend(overrides.get("skip_packages", []))
     blocklist_patterns.extend(overrides.get("skip_patterns", []))
     blocklist_patterns = list(dict.fromkeys(blocklist_patterns))
 

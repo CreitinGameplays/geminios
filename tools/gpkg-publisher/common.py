@@ -17,7 +17,7 @@ from typing import Any, Callable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SYSTEM_PROVIDES_FILE = REPO_ROOT / "build_system" / "gpkg_system_provides.txt"
 DEFAULT_SYSTEM_UPGRADEABLE_FILE = REPO_ROOT / "build_system" / "gpkg_upgradeable_system.txt"
-DEFAULT_OVERRIDES_FILE = REPO_ROOT / "tools" / "gpkg-publisher" / "overrides.example.json"
+DEFAULT_OVERRIDES_FILE = REPO_ROOT / "build_system" / "gpkg_import_policy.json"
 
 ARCH_MAP = {
     "all": "x86_64",
@@ -25,26 +25,40 @@ ARCH_MAP = {
     "arm64": "aarch64",
 }
 
-DEFAULT_BLOCKLIST = [
-    "base-files",
-    "base-passwd",
-    "bash",
-    "debianutils",
-    "dpkg",
-    "glibc-*",
-    "grub*",
-    "init",
-    "initramfs-tools*",
-    "linux-image-*",
-    "libc6",
-    "libpam-systemd",
-    "mount",
-    "openssh-server",
-    "passwd",
-    "sysvinit*",
-    "udev",
-    "util-linux",
-]
+def load_default_blocklist() -> list[str]:
+    fallback = [
+        "base-files",
+        "base-passwd",
+        "bash",
+        "debianutils",
+        "dpkg",
+        "glibc-*",
+        "grub*",
+        "init",
+        "initramfs-tools*",
+        "linux-image-*",
+        "libc6",
+        "libpam-systemd",
+        "mount",
+        "openssh-server",
+        "passwd",
+        "sysvinit*",
+        "udev",
+        "util-linux",
+    ]
+    try:
+        payload = json.loads(DEFAULT_OVERRIDES_FILE.read_text())
+        patterns = payload.get("skip_packages", [])
+        if isinstance(patterns, list):
+            normalized = [item for item in patterns if isinstance(item, str) and item.strip()]
+            if normalized:
+                return normalized
+    except Exception:
+        pass
+    return fallback
+
+
+DEFAULT_BLOCKLIST = load_default_blocklist()
 
 RELATION_RE = re.compile(
     r"^(?P<name>[A-Za-z0-9.+-]+)"

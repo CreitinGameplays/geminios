@@ -2,6 +2,27 @@
   "skip_dependency_patterns": [
     "debconf-2.0"
   ],
+  "skip_packages": [
+    "apt",
+    "base-files",
+    "base-passwd",
+    "bash",
+    "debianutils",
+    "dpkg",
+    "glibc-*",
+    "grub*",
+    "init",
+    "initramfs-tools*",
+    "libc6",
+    "libpam-systemd",
+    "linux-image-*",
+    "mount",
+    "openssh-server",
+    "passwd",
+    "sysvinit*",
+    "udev",
+    "util-linux"
+  ],
   "dependency_choices": {
     "debconf | debconf-2.0": "debconf",
     "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend",

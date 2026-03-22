@@ -114,8 +114,7 @@ def convert_deb_to_gpkg(
     package_overrides = overrides.get("package_overrides", {})
     dependency_choices = overrides.get("dependency_choices", {})
     dependency_rewrites = overrides.get("dependency_rewrites", {})
-    skip_patterns = list(DEFAULT_BLOCKLIST)
-    skip_patterns.extend(overrides.get("skip_packages", []))
+    skip_patterns = list(overrides.get("skip_packages", DEFAULT_BLOCKLIST))
     skip_patterns.extend(overrides.get("skip_patterns", []))
     drop_patterns = overrides.get("provided_by_system_patterns", [])
     provider_resolver = build_provider_resolver(

@@ -8,7 +8,7 @@ The project now follows a clear model:
 
 - Debian-compatible userland and package ecosystem
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
-- `gpkg` as the package delivery and repository layer on top
+- `gpkg` as a sid-first package manager with GeminiOS/S2 packages layered on top
 
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
@@ -154,9 +154,22 @@ Those wrappers are the supported bridge between GeminiOS login/PAM/elogind and i
 
 The implementation roadmap for closing that gap is tracked in [GNOME_WAYLAND_SUPPORT.md](/home/creitin/Documents/geminios/to_dos/GNOME_WAYLAND_SUPPORT.md).
 
-## Using External GPKG Repositories
+## Package Sources
 
-If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:
+`gpkg` now uses Debian sid as its primary package source and merges that metadata with any configured GeminiOS/S2 `.gpkg` repositories.
+
+The default image seeds:
+
+- `/etc/gpkg/debian.conf`: built-in Debian sid backend configuration
+- `/etc/gpkg/import-policy.json`: sid import blocklist and dependency/provider policy
+- `/etc/gpkg/system-provides.list`: base packages/capabilities GeminiOS already provides
+- `/etc/gpkg/upgradeable-system.list`: base runtimes that may still be upgraded from sid or S2
+- `/etc/gpkg/sources.list.d/*.list`: optional secondary `.gpkg` repositories
+
+Debian sid is the main source for `search`, `show`, `install`, and `upgrade`.
+Public `.gpkg` repositories are still supported for GeminiOS-native packages such as `gpkg`, `gtop`, and other curated packages that are not available from sid.
+
+If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly as a secondary source. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:
 
 ```text
 https://repo.creitingameplays.com
@@ -167,21 +180,21 @@ https://repo.creitingameplays.com
 Typical flow inside GeminiOS:
 
 ```bash
-sudo gpkg add-repo https://repo.creitingameplays.com
 gpkg list-repos
 sudo gpkg update
 gpkg show nano
 gpkg search nano
 sudo gpkg install nano
+sudo gpkg add-repo https://repo.creitingameplays.com
 ```
 
 What each step verifies:
-- `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable.
-- `gpkg list-repos`: Confirms the repo was written into `/etc/gpkg/sources.list.d/`.
-- `gpkg update`: Downloads and merges package indices from all configured repositories.
-- `gpkg show <pkg>`: Displays the package metadata, source repository, and dependency list.
-- `gpkg search <query>`: Searches the merged local cache and now shows which repository each result came from.
-- `gpkg install <pkg>`: Downloads the package from the repository that provided that package, not just the first configured repo.
+- `gpkg list-repos`: Shows the built-in Debian sid backend plus any configured S2 repos.
+- `gpkg update`: Downloads and merges Debian sid metadata with all configured `.gpkg` repository indices.
+- `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
+- `gpkg search <query>`: Searches the merged local cache and shows where the chosen candidate comes from.
+- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from sid, converts sid packages to `.gpkg`, and installs the prepared archive.
+- `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
 
 Manual configuration is also supported by writing one repository URL per line into:
 
@@ -191,14 +204,14 @@ Manual configuration is also supported by writing one repository URL per line in
 ```
 
 Important:
+- Debian sid is configured through `/etc/gpkg/debian.conf`; the v1 default backend is `main/binary-amd64`.
+- The sid importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt*`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through sid import.
 - The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
-- The repository layout must contain `x86_64/Packages.json.zst` and package files referenced by that index underneath the same base URL.
-- `gpkg update` now merges multiple repositories into one local cache instead of overwriting the previous index.
-- `gpkg` no longer contains a hardcoded fallback repository URL. The default repo is seeded into the image at build time under `/etc/gpkg/sources.list.d/`.
-- `gpkg` also reads `/etc/gpkg/system-provides.list` for base-system packages and capabilities that GeminiOS should treat as already installed during dependency resolution.
-- `gpkg` also reads `/etc/gpkg/upgradeable-system.list` for base runtimes that may exist in the image but should still be upgraded from the repository when a matching package is available. Entries there are also treated as base-provided automatically, so they do not need to be duplicated in `system-provides.list`.
+- Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
+- `gpkg update` merges Debian sid metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
+- `gpkg` still reads `/etc/gpkg/system-provides.list` and `/etc/gpkg/upgradeable-system.list` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
 
-By default, `builder.py` writes a repo file like:
+By default, `builder.py` still writes a secondary repo file like:
 
 ```text
 /etc/gpkg/sources.list.d/repo_<timestamp>.list
@@ -226,6 +239,20 @@ The upgradeable base-runtime list is taken from `build_system/gpkg_upgradeable_s
 
 Use that file for things like `dbus`, `elogind`, PAM/libcap runtimes, Python, and graphics stacks where GeminiOS may boot with a base copy, but userland packages should still be allowed to pull in a newer repository version to avoid ABI mismatches.
 
+The default Debian backend config is taken from `build_system/gpkg_debian.conf` and copied into the image as:
+
+```text
+/etc/gpkg/debian.conf
+```
+
+The default import policy is taken from `build_system/gpkg_import_policy.json` and copied into the image as:
+
+```text
+/etc/gpkg/import-policy.json
+```
+
+That policy file is shared with the Debian import/publisher tooling so the sid importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, and rewrite defaults.
+
 ## Ginit (Init System)
 
 Ginit is modularized for easier development. It provides `init`, `login`, and `getty`.
@@ -242,7 +269,7 @@ For more information, see [ginit/README.md](https://github.com/CreitinGameplays/
 - `/etc/gpkg/system-provides.list`: packages or capabilities GeminiOS should treat as already present
 - `/etc/gpkg/upgradeable-system.list`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
 
-This split is important for a Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
+This split is important for a sid-first Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
 
 To build the package manager standalone:
 

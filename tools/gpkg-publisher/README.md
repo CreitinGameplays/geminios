@@ -1,8 +1,14 @@
 # GPKG Publisher
 
-This directory contains a bulk importer and publisher for growing a GeminiOS package repository from Debian 13 packages.
+This directory contains the secondary bulk importer and publisher for growing a GeminiOS `.gpkg` repository from Debian packages.
 
-It is designed for the current GeminiOS model: a Debian-compatible userland with GeminiOS-specific boot, init, and package-management policy.
+It is no longer the primary way GeminiOS consumes ordinary Debian userland packages.
+`gpkg` now imports Debian sid packages on-device.
+This tool remains useful for:
+
+- curating GeminiOS-native/S2 packages
+- prebuilding mirrors for offline or bandwidth-constrained systems
+- keeping publisher behavior aligned with the on-device sid importer policy
 
 The model is simple:
 
@@ -43,7 +49,7 @@ This is the right default for "grow the repo fast without bricking the design".
 - `common.py`: shared helpers.
 - `config.env.example`: sample runtime configuration.
 - `packages.txt.example`: sample seed list.
-- `overrides.example.json`: built-in baseline policy plus a template for site-local overrides.
+- `build_system/gpkg_import_policy.json`: built-in baseline policy shared with the on-device sid importer.
 - `systemd/`: timer and service units for unattended runs.
 
 ## VPS Prerequisites
@@ -94,9 +100,9 @@ sudo cp /opt/geminios/tools/gpkg-publisher/config.env.example /etc/gpkg-publishe
 sudo cp /opt/geminios/tools/gpkg-publisher/packages.txt.example /etc/gpkg-publisher/packages.txt
 ```
 
-`overrides.example.json` is loaded automatically as the baseline policy. Copy it to
-`/etc/gpkg-publisher/overrides.json` only if you want site-local additions or
-replacements.
+`build_system/gpkg_import_policy.json` is loaded automatically as the baseline
+policy. Copy only site-local deltas to `/etc/gpkg-publisher/overrides.json`
+if you want additions or replacements.
 
 ### 4. Configure `rclone` for Cloudflare R2
 
@@ -335,9 +341,9 @@ Supported top-level keys:
 
 The publisher already merges the base defaults from `SYSTEM_PROVIDES_FILE` into `provided_by_system_patterns`, but it subtracts anything listed in `SYSTEM_UPGRADEABLE_FILE`. Use that second file for base runtimes that may exist in the image yet should still be imported and upgraded from the repo when available.
 
-The repo's own `overrides.example.json` is also loaded automatically before the
-site-local `OVERRIDES_FILE`, so local overrides only need to carry your
-delta from the GeminiOS baseline.
+The repo's own `build_system/gpkg_import_policy.json` is also loaded
+automatically before the site-local `OVERRIDES_FILE`, so local overrides only
+need to carry your delta from the GeminiOS baseline.
 
 Supported `package_overrides.<name>` keys:
 

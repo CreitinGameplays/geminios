@@ -81,6 +81,14 @@ GPKG_UPGRADE_COMPANIONS_FILE = os.environ.get(
     "GPKG_UPGRADE_COMPANIONS_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgrade_companions.conf"),
 )
+GPKG_DEBIAN_CONFIG_FILE = os.environ.get(
+    "GPKG_DEBIAN_CONFIG_FILE",
+    os.path.join(BUILD_SYSTEM_DIR, "gpkg_debian.conf"),
+)
+GPKG_IMPORT_POLICY_FILE = os.environ.get(
+    "GPKG_IMPORT_POLICY_FILE",
+    os.path.join(BUILD_SYSTEM_DIR, "gpkg_import_policy.json"),
+)
 
 # Load Manifests
 try:
@@ -917,6 +925,22 @@ def finalize_rootfs():
     else:
         with open(upgrade_companions_dest, "w") as f:
             f.write("")
+
+    debian_config_dest = os.path.join(gpkg_dir, "debian.conf")
+    if os.path.exists(GPKG_DEBIAN_CONFIG_FILE):
+        shutil.copy2(GPKG_DEBIAN_CONFIG_FILE, debian_config_dest)
+        print_success(f"  ✓ Added gpkg Debian backend config: {debian_config_dest}")
+    else:
+        with open(debian_config_dest, "w") as f:
+            f.write("")
+
+    import_policy_dest = os.path.join(gpkg_dir, "import-policy.json")
+    if os.path.exists(GPKG_IMPORT_POLICY_FILE):
+        shutil.copy2(GPKG_IMPORT_POLICY_FILE, import_policy_dest)
+        print_success(f"  ✓ Added gpkg import policy: {import_policy_dest}")
+    else:
+        with open(import_policy_dest, "w") as f:
+            f.write("{}\n")
 
     # 6. Versioning
     version = get_geminios_version()
