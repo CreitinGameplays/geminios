@@ -67,7 +67,6 @@ PORTS_DIR = os.path.join(ROOT_DIR, "ports")
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
-DEFAULT_GPKG_REPO = os.environ.get("GPKG_DEFAULT_REPO", "https://repo.creitingameplays.com").rstrip("/")
 VERIFY_SOURCES_SCRIPT = os.path.join(ROOT_DIR, "tools", "verify_source_urls.py")
 GPKG_SYSTEM_PROVIDES_FILE = os.environ.get(
     "GPKG_SYSTEM_PROVIDES_FILE",
@@ -881,7 +880,8 @@ def finalize_rootfs():
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
         f.write("1")
 
-    # 5. Seed default gpkg repositories from the image build, not from gpkg itself.
+    # 5. Seed gpkg configuration files. Debian sid is built-in; secondary repos
+    # are left empty by default and can be added later with gpkg add-repo.
     print_info("[*] Seeding gpkg repository configuration...")
     gpkg_dir = os.path.join(ROOT_DIR, "rootfs/etc/gpkg")
     gpkg_sources_dir = os.path.join(gpkg_dir, "sources.list.d")
@@ -895,12 +895,7 @@ def finalize_rootfs():
     for entry in os.listdir(gpkg_sources_dir):
         if entry.endswith(".list"):
             os.remove(os.path.join(gpkg_sources_dir, entry))
-
-    repo_list_name = f"repo_{int(time.time())}.list"
-    repo_list_path = os.path.join(gpkg_sources_dir, repo_list_name)
-    with open(repo_list_path, "w") as f:
-        f.write(DEFAULT_GPKG_REPO + "\n")
-    print_success(f"  ✓ Added default gpkg repo: {DEFAULT_GPKG_REPO}")
+    print_success("  ✓ Cleared default secondary gpkg repositories")
 
     system_provides_dest = os.path.join(gpkg_dir, "system-provides.list")
     if os.path.exists(GPKG_SYSTEM_PROVIDES_FILE):

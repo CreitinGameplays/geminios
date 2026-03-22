@@ -211,17 +211,18 @@ Important:
 - `gpkg update` merges Debian sid metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
 - `gpkg` still reads `/etc/gpkg/system-provides.list` and `/etc/gpkg/upgradeable-system.list` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
 
-By default, `builder.py` still writes a secondary repo file like:
-
-```text
-/etc/gpkg/sources.list.d/repo_<timestamp>.list
-```
-
-using `https://repo.creitingameplays.com`. You can override that at build time with:
+Per-transaction optional dependency control is also available for sid-backed installs, upgrades, and repairs:
 
 ```bash
-GPKG_DEFAULT_REPO=https://your-repo.example.com python3 builder.py geminios_core geminios_complex --force
+sudo gpkg install fastfetch --recommended-no
+sudo gpkg upgrade --recommended-yes
+sudo gpkg repair --suggested-yes
 ```
+
+`--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
+
+By default, `builder.py` leaves `/etc/gpkg/sources.list` and `/etc/gpkg/sources.list.d/` empty.
+That means a fresh image uses only the built-in Debian sid backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
 
 The default system-provided package list is taken from `build_system/gpkg_system_provides.txt` and copied into the image as:
 
