@@ -24,11 +24,13 @@ from common import (  # noqa: E402
     DEFAULT_SYSTEM_UPGRADEABLE_FILE,
     apt_candidate_version,
     build_provider_resolver,
+    collect_dependency_relation_text,
     choose_first_matching_stanza,
     ensure_directory,
     hash_file,
     load_env_file,
     matches_any,
+    merge_system_provided_patterns,
     normalize_dependency_field,
     parse_control_stanzas,
     read_pattern_file,
@@ -63,6 +65,7 @@ DEFAULT_CONFIG = {
     "INDEX_ZSTD_LEVEL": "19",
     "UPLOAD_ENABLED": "1",
     "INCLUDE_MAINTAINER_SCRIPTS": "0",
+    "INCLUDE_RECOMMENDS": "1",
     "ALLOW_ESSENTIAL": "0",
     "RCLONE_DEST": "",
     "RCLONE_CONFIG": "",
@@ -90,6 +93,7 @@ class AptResolver:
         blocklist_patterns: list[str],
         system_provided_patterns: list[str],
         allow_essential: bool,
+        include_recommends: bool,
         verbose: bool,
     ) -> None:
         self.apt_arch = apt_arch
@@ -97,6 +101,7 @@ class AptResolver:
         self.blocklist_patterns = blocklist_patterns
         self.system_provided_patterns = system_provided_patterns
         self.allow_essential = allow_essential
+        self.include_recommends = include_recommends
         self.verbose = verbose
         self.package_cache: dict[str, ResolvedPackage | None] = {}
         self.resolved: dict[str, ResolvedPackage] = {}
@@ -104,6 +109,7 @@ class AptResolver:
         self.failures: dict[str, str] = {}
         self.skipped: dict[str, str] = {}
         self.active: set[str] = set()
+        self.explicit_packages: set[str] = set()
         self.provider_resolver = build_provider_resolver(
             apt_arch=self.apt_arch,
             overrides=self.overrides,
@@ -122,6 +128,7 @@ class AptResolver:
         return self._provider_target_exists(provider_name)
 
     def resolve_all(self, packages: list[str]) -> tuple[list[ResolvedPackage], dict[str, str], dict[str, str]]:
+        self.explicit_packages = set(packages)
         for package_name in packages:
             self._resolve_one(package_name, parent=None)
         return self.order, self.failures, self.skipped
@@ -210,10 +217,9 @@ class AptResolver:
         skip_patterns.extend(self.overrides.get("skip_dependency_patterns", []))
         drop_patterns = self.overrides.get("provided_by_system_patterns", [])
         depends = normalize_dependency_field(
-            ", ".join(
-                value
-                for value in [fields.get("Pre-Depends", ""), fields.get("Depends", "")]
-                if value
+            collect_dependency_relation_text(
+                fields,
+                include_recommends=self.include_recommends and package_name in self.explicit_packages,
             ),
             package_name=package_name,
             apt_arch=self.apt_arch,
@@ -374,6 +380,7 @@ def build_fingerprint(
     system_provided_patterns: list[str],
     zstd_level: int,
     include_maintainer_scripts: bool,
+    include_recommends: bool,
 ) -> str:
     package_override = overrides.get("package_overrides", {}).get(package.name, {})
     payload = {
@@ -382,6 +389,7 @@ def build_fingerprint(
         "deb_sha256": deb_sha256,
         "zstd_level": zstd_level,
         "include_maintainer_scripts": include_maintainer_scripts,
+        "include_recommends": include_recommends,
         "package_override": package_override,
         "dependency_choices": overrides.get("dependency_choices", {}),
         "dependency_rewrites": overrides.get("dependency_rewrites", {}),
@@ -516,12 +524,12 @@ def main() -> int:
     system_upgradeable_file = Path(config["SYSTEM_UPGRADEABLE_FILE"]).expanduser()
     system_upgradeable_patterns = read_pattern_file(system_upgradeable_file)
     extra_system_patterns = overrides.get("provided_by_system_patterns", [])
-    system_provided_patterns = list(dict.fromkeys(system_provided_patterns + extra_system_patterns))
-    if system_upgradeable_patterns:
-        system_provided_patterns = [
-            pattern for pattern in system_provided_patterns
-            if not matches_any(pattern, system_upgradeable_patterns)
-        ]
+    system_provided_patterns = merge_system_provided_patterns(
+        base_patterns=system_provided_patterns,
+        extra_patterns=extra_system_patterns,
+        upgradeable_patterns=system_upgradeable_patterns,
+        verbose=args.verbose,
+    )
     overrides["provided_by_system_patterns"] = system_provided_patterns
     blocklist_patterns = split_patterns(config["BLOCKLIST_PATTERNS"])
 
@@ -533,6 +541,7 @@ def main() -> int:
     report_file = Path(config["REPORT_FILE"]).expanduser()
     seed_file = Path(config["SEED_FILE"]).expanduser()
     include_maintainer_scripts = parse_bool(config["INCLUDE_MAINTAINER_SCRIPTS"])
+    include_recommends = parse_bool(config["INCLUDE_RECOMMENDS"])
     allow_essential = parse_bool(config["ALLOW_ESSENTIAL"])
     upload_enabled = parse_bool(config["UPLOAD_ENABLED"]) and not args.skip_upload
     zstd_level = int(config["ZSTD_LEVEL"])
@@ -579,6 +588,7 @@ def main() -> int:
         blocklist_patterns=blocklist_patterns,
         system_provided_patterns=system_provided_patterns,
         allow_essential=allow_essential,
+        include_recommends=include_recommends,
         verbose=args.verbose,
     )
     packages, failures, skipped = resolver.resolve_all(seeds)
@@ -623,6 +633,7 @@ def main() -> int:
                 system_provided_patterns=system_provided_patterns,
                 zstd_level=zstd_level,
                 include_maintainer_scripts=include_maintainer_scripts,
+                include_recommends=include_recommends,
             )
             expected_output_path = get_output_path_for_fields(
                 package.fields,
@@ -740,6 +751,7 @@ def main() -> int:
                 apt_arch=config["APT_ARCH"],
                 forced_depends=package.depends,
                 include_maintainer_scripts=include_maintainer_scripts,
+                include_recommends=include_recommends,
                 allow_essential=allow_essential,
                 compression_level=zstd_level,
                 temp_root=temp_dir,

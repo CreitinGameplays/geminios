@@ -22,10 +22,12 @@ from common import (  # noqa: E402
     apt_candidate_version,
     build_provider_resolver,
     build_gpkg,
+    collect_dependency_relation_text,
     ensure_directory,
     legacy_repo_filename_component,
     load_env_file,
     matches_any,
+    merge_system_provided_patterns,
     normalize_architecture,
     normalize_dependency_field,
     normalize_relation_field,
@@ -101,6 +103,7 @@ def convert_deb_to_gpkg(
     apt_arch: str,
     forced_depends: list[str] | None = None,
     include_maintainer_scripts: bool,
+    include_recommends: bool,
     allow_essential: bool,
     compression_level: int,
     temp_root: Path | None = None,
@@ -173,10 +176,9 @@ def convert_deb_to_gpkg(
 
         if forced_depends is None:
             depends = normalize_dependency_field(
-                ", ".join(
-                    value
-                    for value in [fields.get("Pre-Depends", ""), fields.get("Depends", "")]
-                    if value
+                collect_dependency_relation_text(
+                    fields,
+                    include_recommends=include_recommends,
                 ),
                 package_name=original_name,
                 apt_arch=apt_arch,
@@ -289,6 +291,7 @@ def main() -> int:
     parser.add_argument("--system-upgradeable-file", help="Optional list of base runtimes that should still be imported when repo candidates exist")
     parser.add_argument("--apt-arch", default="amd64", help="APT architecture to use when normalizing dependencies")
     parser.add_argument("--include-maintainer-scripts", action="store_true", help="Copy Debian maintainer scripts into the gpkg")
+    parser.add_argument("--no-include-recommends", action="store_true", help="Do not promote Debian Recommends to gpkg dependencies")
     parser.add_argument("--allow-essential", action="store_true", help="Allow importing Essential: yes packages")
     parser.add_argument("--zstd-level", type=int, default=10, help="zstd compression level for generated packages")
     parser.add_argument("--temp-dir", help="Directory to use for large temporary files instead of /tmp")
@@ -305,13 +308,17 @@ def main() -> int:
     system_provided_patterns = read_pattern_file(Path(system_provides_value).expanduser())
     system_upgradeable_patterns = read_pattern_file(Path(system_upgradeable_value).expanduser())
     extra_system_patterns = overrides.get("provided_by_system_patterns", [])
-    merged_patterns = list(dict.fromkeys(system_provided_patterns + extra_system_patterns))
-    if system_upgradeable_patterns:
-        merged_patterns = [
-            pattern for pattern in merged_patterns
-            if not matches_any(pattern, system_upgradeable_patterns)
-        ]
+    merged_patterns = merge_system_provided_patterns(
+        base_patterns=system_provided_patterns,
+        extra_patterns=extra_system_patterns,
+        upgradeable_patterns=system_upgradeable_patterns,
+        verbose=args.verbose,
+    )
     overrides["provided_by_system_patterns"] = merged_patterns
+
+    include_recommends = not args.no_include_recommends
+    if "INCLUDE_RECOMMENDS" in config and not args.no_include_recommends:
+        include_recommends = config["INCLUDE_RECOMMENDS"].strip().lower() in {"1", "true", "yes", "on"}
 
     try:
         for deb_name in args.deb:
@@ -322,6 +329,7 @@ def main() -> int:
                 apt_arch=args.apt_arch,
                 forced_depends=None,
                 include_maintainer_scripts=args.include_maintainer_scripts,
+                include_recommends=include_recommends,
                 allow_essential=args.allow_essential,
                 compression_level=args.zstd_level,
                 temp_root=Path(args.temp_dir).expanduser() if args.temp_dir else None,

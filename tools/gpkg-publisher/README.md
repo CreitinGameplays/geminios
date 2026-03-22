@@ -141,6 +141,14 @@ PACKAGE_LIMIT=500
 
 If you want seed mode instead, set `DISCOVERY_MODE=seeds` and edit `/etc/gpkg-publisher/packages.txt`.
 
+For desktop task packages, keep:
+
+```text
+INCLUDE_RECOMMENDS=1
+```
+
+That makes Debian `Recommends` get resolved and encoded as gpkg dependencies for explicitly seeded packages, so installs such as `task-mate-desktop` pull the expected companion apps instead of only the strict `Depends` set.
+
 ### 6. Run a dry run first
 
 ```bash
@@ -254,6 +262,7 @@ If all of the following are unchanged, the package is reused:
 - package-specific override policy
 - zstd level
 - maintainer script policy
+- recommends policy
 
 It also writes a small sidecar file next to each generated `.gpkg`, so a rerun can recover reuse even if the state file was incomplete.
 

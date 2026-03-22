@@ -214,9 +214,9 @@ def split_top_level(value: str, separator: str) -> list[str]:
             bracket_depth += 1
         elif char == "]" and bracket_depth > 0:
             bracket_depth -= 1
-        elif char == "<":
+        elif char == "<" and paren_depth == 0 and bracket_depth == 0:
             angle_depth += 1
-        elif char == ">" and angle_depth > 0:
+        elif char == ">" and paren_depth == 0 and bracket_depth == 0 and angle_depth > 0:
             angle_depth -= 1
 
         if (
@@ -287,6 +287,26 @@ def choose_first_matching_stanza(
     return None
 
 
+def dependency_relation_fields(*, include_recommends: bool) -> tuple[str, ...]:
+    fields = ["Pre-Depends", "Depends"]
+    if include_recommends:
+        fields.append("Recommends")
+    return tuple(fields)
+
+
+def collect_dependency_relation_text(
+    fields: dict[str, str],
+    *,
+    include_recommends: bool,
+) -> str:
+    return ", ".join(
+        value
+        for key in dependency_relation_fields(include_recommends=include_recommends)
+        for value in [fields.get(key, "")]
+        if value
+    )
+
+
 def dependency_applies_to_arch(restriction: str, apt_arch: str) -> bool:
     tokens = [token.strip() for token in restriction.split() if token.strip()]
     positives = {token for token in tokens if not token.startswith("!")}
@@ -341,6 +361,47 @@ def unique_items(values: list[str]) -> list[str]:
 
 def matches_any(name: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+
+def pattern_has_globs(pattern: str) -> bool:
+    return any(char in pattern for char in "*?[]")
+
+
+def should_keep_upgradeable_system_pattern(
+    pattern: str,
+    *,
+    verbose: bool,
+) -> bool:
+    if pattern_has_globs(pattern):
+        return True
+    return apt_candidate_version(pattern, verbose=verbose) is None
+
+
+def merge_system_provided_patterns(
+    *,
+    base_patterns: list[str],
+    extra_patterns: list[str],
+    upgradeable_patterns: list[str],
+    verbose: bool,
+) -> list[str]:
+    merged = list(dict.fromkeys(base_patterns + extra_patterns))
+    if not upgradeable_patterns:
+        return merged
+
+    filtered: list[str] = []
+    for pattern in merged:
+        if matches_any(pattern, upgradeable_patterns) and not should_keep_upgradeable_system_pattern(
+            pattern,
+            verbose=verbose,
+        ):
+            continue
+        filtered.append(pattern)
+
+    for pattern in upgradeable_patterns:
+        if should_keep_upgradeable_system_pattern(pattern, verbose=verbose) and pattern not in filtered:
+            filtered.append(pattern)
+
+    return filtered
 
 
 def apply_dependency_rewrite(
