@@ -8,7 +8,7 @@ The project now follows a clear model:
 
 - Debian-compatible userland and package ecosystem
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
-- `gpkg` as a sid-first package manager with GeminiOS/S2 packages layered on top
+- `gpkg` as a testing-first package manager with GeminiOS/S2 packages layered on top
 
 Versioning now follows a rolling `stream + snapshot` model:
 
@@ -162,16 +162,16 @@ The implementation roadmap for closing that gap is tracked in [GNOME_WAYLAND_SUP
 
 ## Package Sources
 
-`gpkg` now uses Debian sid as its primary package source and merges that metadata with any configured GeminiOS/S2 `.gpkg` repositories.
+`gpkg` now uses Debian testing as its primary package source and merges that metadata with any configured GeminiOS/S2 `.gpkg` repositories.
 
 The default image seeds:
 
-- `/etc/gpkg/debian.conf`: built-in Debian sid backend configuration
-- `/etc/gpkg/import-policy.json`: sid import blocklist, dependency/provider policy, and base-system ownership rules
+- `/etc/gpkg/debian.conf`: built-in Debian testing backend configuration
+- `/etc/gpkg/import-policy.json`: testing import blocklist, dependency/provider policy, and base-system ownership rules
 - `/etc/gpkg/sources.list.d/*.list`: optional secondary `.gpkg` repositories
 
-Debian sid is the main source for `search`, `show`, `install`, and `upgrade`.
-Public `.gpkg` repositories are still supported for GeminiOS-native packages such as `gpkg`, `gtop`, and other curated packages that are not available from sid.
+Debian testing is the main source for `search`, `show`, `install`, and `upgrade`.
+Public `.gpkg` repositories are still supported for GeminiOS-native packages such as `gpkg`, `gtop`, and other curated packages that are not available from testing.
 
 If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly as a secondary source. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:
 
@@ -193,11 +193,11 @@ sudo gpkg add-repo https://repo.creitingameplays.com
 ```
 
 What each step verifies:
-- `gpkg list-repos`: Shows the built-in Debian sid backend plus any configured S2 repos.
-- `gpkg update`: Downloads and merges Debian sid metadata with all configured `.gpkg` repository indices.
+- `gpkg list-repos`: Shows the built-in Debian testing backend plus any configured S2 repos.
+- `gpkg update`: Downloads and merges Debian testing metadata with all configured `.gpkg` repository indices.
 - `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
 - `gpkg search <query>`: Searches the merged local cache and shows where the chosen candidate comes from.
-- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from sid, converts sid packages to `.gpkg`, and installs the prepared archive.
+- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, converts testing packages to `.gpkg`, and installs the prepared archive.
 - `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
 - `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
 
@@ -209,14 +209,14 @@ Manual configuration is also supported by writing one repository URL per line in
 ```
 
 Important:
-- Debian sid is configured through `/etc/gpkg/debian.conf`; the v1 default backend is `main/binary-amd64`.
-- The sid importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through sid import.
+- Debian testing is configured through `/etc/gpkg/debian.conf`; the v1 default backend is `main/binary-amd64`.
+- The testing importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through testing import.
 - The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
 - Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
-- `gpkg update` merges Debian sid metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
+- `gpkg update` merges Debian testing metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
 - `gpkg` reads `system_provides` and `upgradeable_system` from `/etc/gpkg/import-policy.json` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
 
-Per-transaction optional dependency control is also available for sid-backed installs, upgrades, and repairs:
+Per-transaction optional dependency control is also available for testing-backed installs, upgrades, and repairs:
 
 ```bash
 sudo gpkg install fastfetch --recommended-no
@@ -229,7 +229,7 @@ sudo gpkg repair --suggested-yes
 `--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. `--reinstall` is valid with `install` and `upgrade`; it forces the selected transaction targets back through download/prepare/install even when the installed version is already current. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
 
 By default, `builder.py` leaves `/etc/gpkg/sources.list` and `/etc/gpkg/sources.list.d/` empty.
-That means a fresh image uses only the built-in Debian sid backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
+That means a fresh image uses only the built-in Debian testing backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
 
 The default Debian backend config is taken from `build_system/gpkg_debian.conf` and copied into the image as:
 
@@ -243,7 +243,7 @@ The default import policy is taken from `build_system/gpkg_import_policy.json` a
 /etc/gpkg/import-policy.json
 ```
 
-That policy file is shared with the Debian import/publisher tooling so the sid importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, rewrite defaults, and base-runtime ownership lists.
+That policy file is shared with the Debian import/publisher tooling so the testing importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, rewrite defaults, and base-runtime ownership lists.
 
 ## Ginit (Init System)
 
@@ -261,7 +261,8 @@ For more information, see [ginit/README.md](https://github.com/CreitinGameplays/
 - `system_provides`: packages or capabilities GeminiOS should treat as already present
 - `upgradeable_system`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
 
-This split is important for a sid-first Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
+This split is important for a testing-first Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
+When a transaction pulls in one of those upgradeable runtime packages, `gpkg` also expands the configured companion stack (for example `libc6` with its related libc runtime packages) and verifies the live runtime aliases before committing the install, so partial base-library upgrades are rolled back instead of being left half-applied.
 
 To build the package manager standalone:
 

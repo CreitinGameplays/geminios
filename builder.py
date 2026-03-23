@@ -919,7 +919,7 @@ def finalize_rootfs():
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
         f.write("1")
 
-    # 5. Seed gpkg configuration files. Debian sid is built-in; secondary repos
+    # 5. Seed gpkg configuration files. Debian testing is built-in; secondary repos
     # are left empty by default and can be added later with gpkg add-repo.
     print_info("[*] Seeding gpkg repository configuration...")
     gpkg_dir = os.path.join(ROOT_DIR, "rootfs/etc/gpkg")
