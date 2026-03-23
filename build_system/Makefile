@@ -56,7 +56,7 @@ setup: $(TARGET)
 	@echo 'ROOTFS="$$ROOT_DIR/rootfs"' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo '' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo 'export PKG_CONFIG_DIR=""' >> $(WRAP_BIN_DIR)/pkg-config
-	@echo 'export PKG_CONFIG_LIBDIR="$$ROOTFS/usr/lib64/pkgconfig:$$ROOTFS/usr/share/pkgconfig"' >> $(WRAP_BIN_DIR)/pkg-config
+	@echo 'export PKG_CONFIG_LIBDIR="$$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$$ROOTFS/usr/share/pkgconfig"' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo 'export PKG_CONFIG_SYSROOT_DIR="$$ROOTFS"' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo '' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo 'exec /usr/bin/pkg-config "$$@"' >> $(WRAP_BIN_DIR)/pkg-config

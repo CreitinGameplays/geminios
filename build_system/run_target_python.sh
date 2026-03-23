@@ -14,8 +14,8 @@ export PYTHONHOME="$ROOTFS/usr"
 
 # Explicitly invoke the dynamic loader from the rootfs
 # This avoids using the host's loader which might be incompatible with the target's libc
-LOADER="$ROOTFS/lib64/ld-linux-x86-64.so.2"
-LIBRARY_PATH="$ROOTFS/usr/lib64:$ROOTFS/usr/lib:$ROOTFS/lib64"
+LOADER="$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+LIBRARY_PATH="$ROOTFS/usr/lib/x86_64-linux-gnu:$ROOTFS/lib/x86_64-linux-gnu"
 
 if [ ! -x "$LOADER" ]; then
     echo "Error: Loader not found at $LOADER"

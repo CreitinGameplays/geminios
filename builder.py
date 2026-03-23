@@ -697,6 +697,9 @@ def normalize_dev_environment():
         os.path.join(ROOT_DIR, "rootfs", "usr", "local", "include"),
     ]
     candidate_paths.extend(
+        glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "gcc", "*", "*", "include"))
+    )
+    candidate_paths.extend(
         glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib64", "gcc", "*", "*", "include"))
     )
 
@@ -706,9 +709,11 @@ def normalize_dev_environment():
 def prepare_rootfs():
     print_section("\n=== Preparing Rootfs Structure ===")
     dirs = [
-        "bin", "boot", "proc", "sys", "dev", "etc", "tmp", "mnt", "run", "sbin", "lib64",
+        "bin", "boot", "proc", "sys", "dev", "etc", "tmp", "mnt", "run", "sbin",
+        "lib", "lib/x86_64-linux-gnu", "lib64", "lib64/x86_64-linux-gnu",
         "var/repo", "var/log", "var/tmp",
-        "usr/bin", "usr/share", "usr/local", "usr/lib64", "usr/include",
+        "usr/bin", "usr/share", "usr/local", "usr/lib", "usr/lib/x86_64-linux-gnu",
+        "usr/lib64", "usr/lib64/x86_64-linux-gnu", "usr/include",
         "bin/apps/system"
     ]
     for d in dirs:
@@ -719,28 +724,35 @@ def prepare_rootfs():
     # Install Dev Environment
     copy_dev_environment()
 
-    # Standardize library paths
-    # /lib -> lib64 and /usr/lib -> lib64
-    lib_links = [
-        ("rootfs/lib", "lib64"),
-        ("rootfs/usr/lib", "lib64")
+    # Canonical runtime layout is now Debian-style multiarch. Keep lib64 trees
+    # as compatibility directories populated with symlinks later.
+    migration_specs = [
+        (
+            os.path.join(ROOT_DIR, "rootfs", "lib64"),
+            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
+            {"x86_64-linux-gnu"},
+        ),
+        (
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
+            {"x86_64-linux-gnu"},
+        ),
     ]
-    for link_path, target in lib_links:
-        full_link_path = os.path.join(ROOT_DIR, link_path)
-        if not os.path.islink(full_link_path):
-            if os.path.isdir(full_link_path):
-                # Move contents if directory exists
-                for item in os.listdir(full_link_path):
-                    s = os.path.join(full_link_path, item)
-                    d = os.path.join(ROOT_DIR, "rootfs", "lib64", item)
-                    subprocess.run(
-                        f"cp -a --no-preserve=ownership -n {s} {d}",
-                        shell=True,
-                        executable="/usr/bin/bash",
-                    )
-                subprocess.run(f"rm -rf {full_link_path}", shell=True, executable="/usr/bin/bash")
-            os.symlink(target, full_link_path)
-            print_info(f"[*] Linked {link_path} to {target}")
+
+    for legacy_dir, canonical_dir, reserved_entries in migration_specs:
+        if not os.path.isdir(legacy_dir):
+            continue
+        os.makedirs(canonical_dir, exist_ok=True)
+
+        for entry in os.listdir(legacy_dir):
+            if entry in reserved_entries:
+                continue
+            source_path = os.path.join(legacy_dir, entry)
+            dest_path = os.path.join(canonical_dir, entry)
+            if os.path.lexists(dest_path):
+                continue
+            shutil.move(source_path, dest_path)
+            print_info(f"[*] Migrated legacy library entry {source_path} -> {dest_path}")
 
     # Remove problematic .la files
     subprocess.run(f"find {os.path.join(ROOT_DIR, 'rootfs')} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
@@ -758,15 +770,15 @@ def verify_rootfs_integrity():
         "usr/share/terminfo/l/linux",
         "etc/passwd",
         "bin/apps/system/gtop",
-        "lib64/libcrypt.so.1",
-        "usr/lib64/libstdc++.so.6",
-        "usr/lib64/libgcc_s.so.1",
+        "lib/x86_64-linux-gnu/libcrypt.so.1",
+        "usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+        "usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
         "usr/bin/python3",
-        "usr/lib64/libglib-2.0.so",
-        "usr/lib64/libgtk-3.so",
-        "usr/lib64/libjson-glib-1.0.so",
-        "usr/lib64/libdconf.so",
-        "usr/lib64/libinput.so",
+        "usr/lib/x86_64-linux-gnu/libglib-2.0.so",
+        "usr/lib/x86_64-linux-gnu/libgtk-3.so",
+        "usr/lib/x86_64-linux-gnu/libjson-glib-1.0.so",
+        "usr/lib/x86_64-linux-gnu/libdconf.so",
+        "usr/lib/x86_64-linux-gnu/libinput.so",
         "usr/share/mime/magic",
         "bin/apps/system/gpkg-worker",
         "usr/share/glib-2.0/schemas/gschemas.compiled",
@@ -791,15 +803,15 @@ def verify_rootfs_integrity():
         return False
 
     required_runtime_libs = [
-        "usr/lib64/libpam.so.0",
-        "usr/lib64/libpam_misc.so.0",
-        "usr/lib64/libelogind.so.0",
-        "usr/lib64/libsystemd.so.0",
-        "usr/lib64/libGLX.so.0",
-        "usr/lib64/libEGL_mesa.so.0",
-        "usr/lib64/libGLX_mesa.so.0",
-        "usr/lib64/libgbm.so.1",
-        "usr/lib64/dri/swrast_dri.so",
+        "usr/lib/x86_64-linux-gnu/libpam.so.0",
+        "usr/lib/x86_64-linux-gnu/libpam_misc.so.0",
+        "usr/lib/x86_64-linux-gnu/libelogind.so.0",
+        "usr/lib/x86_64-linux-gnu/libsystemd.so.0",
+        "usr/lib/x86_64-linux-gnu/libGLX.so.0",
+        "usr/lib/x86_64-linux-gnu/libEGL_mesa.so.0",
+        "usr/lib/x86_64-linux-gnu/libGLX_mesa.so.0",
+        "usr/lib/x86_64-linux-gnu/libgbm.so.1",
+        "usr/lib/x86_64-linux-gnu/dri/swrast_dri.so",
         "usr/share/glvnd/egl_vendor.d/50_mesa.json",
     ]
     for rel_path in required_runtime_libs:
@@ -824,7 +836,7 @@ def verify_rootfs_integrity():
         return versions
 
     dbus_launch_path = os.path.join(ROOT_DIR, "rootfs/usr/bin/dbus-launch")
-    dbus_lib_path = os.path.join(ROOT_DIR, "rootfs/usr/lib64/libdbus-1.so.3")
+    dbus_lib_path = os.path.join(ROOT_DIR, "rootfs/usr/lib/x86_64-linux-gnu/libdbus-1.so.3")
     if os.path.exists(dbus_launch_path) and os.path.exists(dbus_lib_path):
         required_versions = extract_dbus_private_versions(dbus_launch_path)
         provided_versions = extract_dbus_private_versions(dbus_lib_path)
@@ -843,7 +855,10 @@ def verify_rootfs_integrity():
     print_info("[*] Verifying Python runtime...")
     env = os.environ.copy()
     env["PYTHONHOME"] = os.path.join(ROOT_DIR, "rootfs/usr")
-    env["LD_LIBRARY_PATH"] = f"{os.path.join(ROOT_DIR, 'rootfs/usr/lib64')}:{os.path.join(ROOT_DIR, 'rootfs/usr/lib')}"
+    env["LD_LIBRARY_PATH"] = (
+        f"{os.path.join(ROOT_DIR, 'rootfs/usr/lib/x86_64-linux-gnu')}:"
+        f"{os.path.join(ROOT_DIR, 'rootfs/lib/x86_64-linux-gnu')}"
+    )
     
     python_bin = os.path.join(ROOT_DIR, "rootfs/usr/bin/python3")
     if os.path.exists(python_bin):
@@ -899,7 +914,10 @@ def finalize_rootfs():
     # 3. Database Updates
     print_info("[*] Updating system databases (Mime/Schemas)...")
     env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = os.path.join(ROOT_DIR, "rootfs/usr/lib64")
+    env["LD_LIBRARY_PATH"] = (
+        f"{os.path.join(ROOT_DIR, 'rootfs/usr/lib/x86_64-linux-gnu')}:"
+        f"{os.path.join(ROOT_DIR, 'rootfs/lib/x86_64-linux-gnu')}"
+    )
     
     # Glib Schemas
     schema_tool = os.path.join(ROOT_DIR, "rootfs/usr/bin/glib-compile-schemas")
@@ -1074,7 +1092,14 @@ def get_elf_interpreter(binary_path):
 
 def find_rootfs_library(rootfs_dir, lib_filename):
     """Find a library within the target rootfs."""
-    for search_path in ["lib64", "usr/lib64", "lib", "usr/lib"]:
+    for search_path in [
+        "lib/x86_64-linux-gnu",
+        "usr/lib/x86_64-linux-gnu",
+        "lib64",
+        "usr/lib64",
+        "lib",
+        "usr/lib",
+    ]:
         candidate = os.path.join(rootfs_dir, search_path, lib_filename)
         if os.path.exists(candidate):
             return candidate
@@ -1085,10 +1110,10 @@ def iter_rootfs_elf_files(rootfs_dir):
     candidate_dirs = [
         "bin",
         "sbin",
-        "lib64",
+        "lib/x86_64-linux-gnu",
         "usr/bin",
         "usr/sbin",
-        "usr/lib64",
+        "usr/lib/x86_64-linux-gnu",
         "usr/libexec",
     ]
 
@@ -1124,8 +1149,8 @@ def prune_unused_host_runtime_libs():
 
     rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
     host_multiarch_dirs = [
-        os.path.join(rootfs_dir, "lib64", "x86_64-linux-gnu"),
-        os.path.join(rootfs_dir, "usr", "lib64", "x86_64-linux-gnu"),
+        os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu"),
+        os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu"),
     ]
     candidate_families = [
         {"label": "PAM", "soname": "libpam.so.0", "prefix": "libpam.so"},
@@ -1217,33 +1242,45 @@ def prune_unused_host_runtime_libs():
         print_success("  ✓ No unused host-overlay runtime libraries needed pruning.")
 
 def ensure_multiarch_dev_compat():
-    """Recreate lightweight multiarch symlinks expected by GCC/ld inside the OS."""
-    print_info("[*] Restoring multiarch toolchain compatibility links...")
+    """Collapse lib64 trees into Debian-style multiarch with compatibility symlinks."""
+    print_info("[*] Restoring multiarch compatibility trees...")
+
+    def replace_with_symlink(path, target):
+        if os.path.islink(path):
+            if os.readlink(path) == target:
+                return False
+            os.unlink(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+        elif os.path.lexists(path):
+            os.unlink(path)
+        os.symlink(target, path)
+        return True
 
     link_specs = [
-        (os.path.join(ROOT_DIR, "rootfs", "lib64"), os.path.join(ROOT_DIR, "rootfs", "lib64", "x86_64-linux-gnu")),
-        (os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"), os.path.join(ROOT_DIR, "rootfs", "usr", "lib64", "x86_64-linux-gnu")),
+        (
+            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
+            os.path.join(ROOT_DIR, "rootfs", "lib64"),
+            "lib/x86_64-linux-gnu",
+        ),
+        (
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
+            "lib/x86_64-linux-gnu",
+        ),
     ]
 
     linked_count = 0
-    for source_dir, compat_dir in link_specs:
+    for source_dir, compat_link, compat_target in link_specs:
         if not os.path.isdir(source_dir):
             continue
-        os.makedirs(compat_dir, exist_ok=True)
 
-        for entry in os.listdir(source_dir):
-            if not (entry.startswith("lib") or entry.startswith("ld-linux-")):
-                continue
-            if ".so" not in entry:
-                continue
+        nested_compat = os.path.join(source_dir, "x86_64-linux-gnu")
+        if not os.path.lexists(nested_compat):
+            os.symlink(".", nested_compat)
+            linked_count += 1
 
-            source_path = os.path.join(source_dir, entry)
-            compat_path = os.path.join(compat_dir, entry)
-            if not os.path.exists(source_path) or os.path.lexists(compat_path):
-                continue
-
-            rel_target = os.path.relpath(source_path, compat_dir)
-            os.symlink(rel_target, compat_path)
+        if replace_with_symlink(compat_link, compat_target):
             linked_count += 1
 
     if linked_count:
@@ -1378,7 +1415,7 @@ def create_minimal_initramfs():
             shutil.copy2(real_src, dest_file)
             os.chmod(dest_file, 0o755)
 
-            # Copy dependencies - ALWAYS copy to work_dir root so libs land in /lib64 or /usr/lib64
+            # Copy dependencies into the initramfs root so the canonical loader/lib dirs exist there.
             copy_with_libs(real_src, work_dir, rootfs, copy_bin=False)
 
         # Create init script
