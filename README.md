@@ -198,6 +198,7 @@ What each step verifies:
 - `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
 - `gpkg search <query>`: Searches the merged local cache and shows where the chosen candidate comes from.
 - `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from sid, converts sid packages to `.gpkg`, and installs the prepared archive.
+- `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
 - `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
 
 Manual configuration is also supported by writing one repository URL per line into:
@@ -209,7 +210,7 @@ Manual configuration is also supported by writing one repository URL per line in
 
 Important:
 - Debian sid is configured through `/etc/gpkg/debian.conf`; the v1 default backend is `main/binary-amd64`.
-- The sid importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt*`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through sid import.
+- The sid importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through sid import.
 - The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
 - Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
 - `gpkg update` merges Debian sid metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
@@ -219,11 +220,13 @@ Per-transaction optional dependency control is also available for sid-backed ins
 
 ```bash
 sudo gpkg install fastfetch --recommended-no
+sudo gpkg install python3 --reinstall
 sudo gpkg upgrade --recommended-yes
+sudo gpkg upgrade --reinstall
 sudo gpkg repair --suggested-yes
 ```
 
-`--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
+`--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. `--reinstall` is valid with `install` and `upgrade`; it forces the selected transaction targets back through download/prepare/install even when the installed version is already current. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
 
 By default, `builder.py` leaves `/etc/gpkg/sources.list` and `/etc/gpkg/sources.list.d/` empty.
 That means a fresh image uses only the built-in Debian sid backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
