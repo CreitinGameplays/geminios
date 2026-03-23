@@ -114,6 +114,7 @@
     "libinput",
     "libinput10",
     "xorg-server",
+    "libc-bin",
     "libc6",
     "xwayland"
   ],

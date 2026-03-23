@@ -262,7 +262,7 @@ For more information, see [ginit/README.md](https://github.com/CreitinGameplays/
 - `upgradeable_system`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
 
 This split is important for a testing-first Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
-When a transaction pulls in one of those upgradeable runtime packages, `gpkg` also expands the configured companion stack (for example `libc6` with its related libc runtime packages) and verifies the live runtime aliases before committing the install, so partial base-library upgrades are rolled back instead of being left half-applied.
+When a transaction pulls in one of those upgradeable runtime packages, `gpkg` also expands the configured companion stack for already-present or base-provided runtime peers (for example `libc6` pulling in `libc-bin`, but not the libc development stack during a normal app install) and verifies the live runtime aliases before committing the install, so partial base-library upgrades are rolled back instead of being left half-applied. Shared directory anchors such as `/usr/lib -> /usr/lib64` are treated as system topology, not as package-owned files to back up or remove.
 
 To build the package manager standalone:
 
