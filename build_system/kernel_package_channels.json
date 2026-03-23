@@ -1,0 +1,18 @@
+{
+  "default_repo_base_url": "https://repo.creitingameplays.com",
+  "default_repo_subdir": "kernels",
+  "channels": {
+    "stable": {
+      "meta_package": "geminios-kernel-stable",
+      "description": "GeminiOS stable kernel channel"
+    },
+    "mainline": {
+      "meta_package": "geminios-kernel-mainline",
+      "description": "GeminiOS mainline kernel channel"
+    },
+    "next": {
+      "meta_package": "geminios-kernel-next",
+      "description": "GeminiOS linux-next kernel channel"
+    }
+  }
+}

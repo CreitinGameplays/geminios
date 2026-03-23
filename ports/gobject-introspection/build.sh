@@ -18,35 +18,41 @@ fi
 # Unset PYTHONHOME to avoid conflicts with host python
 unset PYTHONHOME
 
-# Create a wrapper for the target python that uses the target loader and libraries
-# This is crucial to avoid ABI mismatches (segfaults) when running target binaries on host.
-cat <<EOF > target_python_wrapper.sh
-#!/bin/bash
-export PYTHONHOME="$ROOTFS/usr"
-LOADER="$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
-LIBRARY_PATH="$ROOTFS/usr/lib/x86_64-linux-gnu:$ROOTFS/lib/x86_64-linux-gnu"
-exec "\$LOADER" --library-path "\$LIBRARY_PATH" "$ROOTFS/usr/bin/python3" "\$@"
-EOF
-chmod +x target_python_wrapper.sh
+# Meson probes the configured interpreter very early and expects a fully working
+# distutils-capable Python. Running the staged target interpreter here is brittle
+# because the rootfs libc/runtime may not be self-consistent yet. Use a host-side
+# Python 3.11 instead so the build ABI matches the target Python package without
+# executing partially staged target binaries during configure.
+BUILD_PYTHON="${TARGET_BUILD_PYTHON:-$HOME/.pyenv/versions/3.11.9/bin/python3.11}"
+if [ ! -x "$BUILD_PYTHON" ]; then
+    BUILD_PYTHON="$(command -v python3.11 || true)"
+fi
+if [ -z "$BUILD_PYTHON" ] || [ ! -x "$BUILD_PYTHON" ]; then
+    echo "ERROR: Python 3.11 build interpreter not found. Set TARGET_BUILD_PYTHON." >&2
+    exit 1
+fi
 
-# Create a local bin directory to expose the wrapper as 'python3'
+# Create a local bin directory to expose the selected interpreter as 'python3'
 mkdir -p local_bin
-ln -sf "$(pwd)/target_python_wrapper.sh" local_bin/python3
+ln -sf "$BUILD_PYTHON" local_bin/python3
 
 # Configure pkg-config to look into rootfs
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
+export XDG_CACHE_HOME="$(pwd)/.cache"
+mkdir -p "$XDG_CACHE_HOME"
 
-# Prepend local_bin to PATH so 'env python3' (used by g-ir-scanner) finds our wrapper.
+# Prepend local_bin to PATH so 'env python3' (used by g-ir-scanner) finds the
+# same interpreter Meson configured with.
 # We do NOT add rootfs/usr/bin to PATH to ensure we don't shadow other host tools (like meson).
 # Host meson uses /usr/bin/python3 (absolute), so it is unaffected by PATH.
 export PATH="$(pwd)/local_bin:$PATH"
 
 rm -rf build
 
-# Run meson pointing to our python wrapper.
+# Run meson pointing to the host-side Python 3.11 interpreter.
 meson setup build --prefix=/usr --libdir=lib/x86_64-linux-gnu \
-    -Dpython="$(pwd)/target_python_wrapper.sh" \
+    -Dpython="$BUILD_PYTHON" \
     -Ddoctool=disabled \
     -Dwerror=false
 

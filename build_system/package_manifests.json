@@ -31,7 +31,7 @@
     "python": [
         "usr/bin/python3.11",
         "usr/include/python3.11/Python.h",
-        "usr/lib/x86_64-linux-gnu/libpython3.11.so"
+        "usr/lib/x86_64-linux-gnu/libpython3.11.so*"
     ],
     "pkg-config": [
         "usr/bin/pkg-config"

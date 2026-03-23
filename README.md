@@ -168,7 +168,7 @@ The default image seeds:
 
 - `/etc/gpkg/debian.conf`: built-in Debian testing backend configuration
 - `/etc/gpkg/import-policy.json`: testing import blocklist, dependency/provider policy, and base-system ownership rules
-- `/etc/gpkg/sources.list.d/*.list`: optional secondary `.gpkg` repositories
+- `/etc/gpkg/sources.list.d/*.list`: optional secondary `.gpkg` repositories, with defaults taken from `build_system/gpkg_default_sources.list`
 
 Debian testing is the main source for `search`, `show`, `install`, and `upgrade`.
 Public `.gpkg` repositories are still supported for GeminiOS-native packages such as `gpkg`, `gtop`, and other curated packages that are not available from testing.
@@ -239,8 +239,8 @@ sudo gpkg repair --suggested-yes
 
 `gpkg clean` clears the local package cache under `/var/repo/`: cached `.deb` archives, cached `.gpkg` archives, converted Debian-to-`.gpkg` imports, partial downloads, and merged/package-list indices. That makes it behave closer to `apt` archive cleanup while still resetting gpkg’s merged repository cache in one step.
 
-By default, `builder.py` leaves `/etc/gpkg/sources.list` and `/etc/gpkg/sources.list.d/` empty.
-That means a fresh image uses only the built-in Debian testing backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
+`builder.py` now seeds `/etc/gpkg/sources.list.d/00-default.list` from `build_system/gpkg_default_sources.list` when that file exists.
+That keeps the default GeminiOS-native repository policy in build config instead of hardcoding it into `gpkg` itself.
 
 The default Debian backend config is taken from `build_system/gpkg_debian.conf` and copied into the image as:
 
@@ -252,6 +252,12 @@ The default import policy is taken from `build_system/gpkg_import_policy.json` a
 
 ```text
 /etc/gpkg/import-policy.json
+```
+
+The default secondary repository list is taken from `build_system/gpkg_default_sources.list` and copied into the image as:
+
+```text
+/etc/gpkg/sources.list.d/00-default.list
 ```
 
 That policy file is shared with the Debian import/publisher tooling so the testing importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, rewrite defaults, and base-runtime ownership lists.
@@ -337,6 +343,56 @@ make x86_64_defconfig
 make olddefconfig
 make -j$(nproc) bzImage
 ```
+
+## Kernel Packages
+
+GeminiOS now has a structured path for shipping kernels as native `.gpkg` packages from your own repository, instead of mixing them into the Debian importer.
+
+The intended layout follows the same general shape Debian uses for kernels:
+
+- a versioned image package, for example `geminios-kernel-image-6.19.9`
+- an optional channel/meta package, for example `geminios-kernel-stable` or `geminios-kernel-mainline`
+- a public repository index under `x86_64/Packages.json.zst`
+
+The release defaults live in:
+
+```text
+build_system/kernel_package_channels.json
+build_system/gpkg_default_sources.list
+```
+
+`tools/build_kernel_gpkg.py` generates SDK-compatible package source trees, builds `.gpkg` archives through the GeminiOS SDK, and can refresh a repository index in one pass.
+
+Typical flow:
+
+```bash
+# 1. Build the kernel and modules
+cd external_dependencies/linux-6.19.9
+make -j"$(nproc)" bzImage modules
+rm -rf /tmp/geminios-kernel-stage
+make modules_install INSTALL_MOD_PATH=/tmp/geminios-kernel-stage
+
+# 2. Build GeminiOS kernel packages
+cd /home/creitin/Documents/geminios
+python3 tools/build_kernel_gpkg.py \
+  --kernel-release "$(make -s -C external_dependencies/linux-6.19.9 kernelrelease)" \
+  --bzimage external_dependencies/linux-6.19.9/arch/x86/boot/bzImage \
+  --modules-dir /tmp/geminios-kernel-stage/lib/modules/"$(make -s -C external_dependencies/linux-6.19.9 kernelrelease)" \
+  --config-file external_dependencies/linux-6.19.9/.config \
+  --channel stable \
+  --repo-root /tmp/geminios-kernel-repo
+
+# 3. Publish /tmp/geminios-kernel-repo/x86_64 to your bucket or custom domain
+```
+
+What the tool does:
+
+- builds a versioned package that installs `/boot/kernel-<release>` and `lib/modules/<release>/...`
+- adds maintainer scripts that repoint `/boot/kernel` to the installed version
+- optionally builds a channel/meta package like `geminios-kernel-stable`
+- optionally copies the packages into `<repo-root>/x86_64/<subdir>/` and refreshes `Packages.json.zst`
+
+That keeps GeminiOS boot compatibility intact today, because the installer and GRUB config still use `/boot/kernel`, while letting the repository behave more like an apt-managed kernel channel.
 
 ---
 

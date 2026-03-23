@@ -80,6 +80,10 @@ GPKG_IMPORT_POLICY_FILE = os.environ.get(
     "GPKG_IMPORT_POLICY_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_import_policy.json"),
 )
+GPKG_DEFAULT_SOURCES_FILE = os.environ.get(
+    "GPKG_DEFAULT_SOURCES_FILE",
+    os.path.join(BUILD_SYSTEM_DIR, "gpkg_default_sources.list"),
+)
 
 # Load Manifests
 try:
@@ -415,32 +419,49 @@ def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False)
 
 def is_built(pkg_name):
     """Checks if a package is already built and installed correctly"""
-    
-    # Check against Manifest (Strong Verification)
-    if pkg_name in PACKAGE_MANIFESTS:
-        artifacts = PACKAGE_MANIFESTS[pkg_name]
-        missing_artifacts = []
-        for artifact in artifacts:
-            # Handle absolute paths vs relative paths
-            if artifact.startswith("/"):
-                 # Paths starting with / are assumed to be relative to rootfs
-                 check_path = os.path.join(ROOT_DIR, "rootfs", artifact.lstrip("/"))
-            else:
-                 # Try rootfs first, then project root
-                 check_path = os.path.join(ROOT_DIR, "rootfs", artifact)
-                 if not os.path.exists(check_path):
-                     check_path = os.path.join(ROOT_DIR, artifact)
+    if pkg_name not in PACKAGE_MANIFESTS:
+        return False
+    return not get_missing_manifest_artifacts(pkg_name)
 
-            if not os.path.exists(check_path):
-                missing_artifacts.append(artifact)
-        
-        if not missing_artifacts:
-            return True
+def expand_manifest_artifact_paths(artifact):
+    """Return candidate paths for a manifest artifact, supporting exact paths and globs."""
+    project_relative = artifact.lstrip("/") if artifact.startswith("/") else artifact
+    rootfs_pattern = os.path.join(ROOT_DIR, "rootfs", project_relative)
+    project_pattern = os.path.join(ROOT_DIR, artifact)
+
+    patterns = [rootfs_pattern]
+    if not artifact.startswith("/"):
+        patterns.append(project_pattern)
+
+    matched = []
+    for pattern in patterns:
+        if any(ch in pattern for ch in "*?["):
+            matched.extend(glob.glob(pattern))
         else:
-            # If manifest exists but files are missing, it's definitely NOT built correctly.
-            return False
+            matched.append(pattern)
+    return matched
 
+def artifact_exists_from_manifest(artifact):
+    """Check whether a manifest artifact exists, allowing glob patterns."""
+    matched_paths = expand_manifest_artifact_paths(artifact)
+    if not matched_paths:
+        return False
+
+    for path in matched_paths:
+        if os.path.exists(path) or os.path.islink(path):
+            return True
     return False
+
+def get_missing_manifest_artifacts(pkg_name):
+    """Return missing manifest entries for a package."""
+    if pkg_name not in PACKAGE_MANIFESTS:
+        return []
+
+    missing_artifacts = []
+    for artifact in PACKAGE_MANIFESTS[pkg_name]:
+        if not artifact_exists_from_manifest(artifact):
+            missing_artifacts.append(artifact)
+    return missing_artifacts
 
 def remove_path(path):
     """Remove a file, symlink, or directory tree if it exists."""
@@ -626,11 +647,8 @@ def build_package(pkg_name, index, total, force=False, debug=False):
             print(color(f" [FAILED VERIFICATION]", Colors.RED + Colors.BOLD) + " (Artifacts missing)")
             if pkg_name in PACKAGE_MANIFESTS:
                  print_error("    Missing files from manifest:")
-                 artifacts = PACKAGE_MANIFESTS[pkg_name]
-                 for artifact in artifacts:
-                     check_path = os.path.join(ROOT_DIR, "rootfs", artifact)
-                     if not os.path.exists(check_path):
-                         print_error(f"     - {artifact}")
+                 for artifact in get_missing_manifest_artifacts(pkg_name):
+                     print_error(f"     - {artifact}")
             return False
     else:
         print(color(f" [FAILED]", Colors.RED + Colors.BOLD) + f" (Check {log_file})")
@@ -1025,8 +1043,8 @@ def finalize_rootfs():
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
         f.write("1")
 
-    # 5. Seed gpkg configuration files. Debian testing is built-in; secondary repos
-    # are left empty by default and can be added later with gpkg add-repo.
+    # 5. Seed gpkg configuration files. Debian testing is built-in; optional
+    # GeminiOS-native repositories can be preseeded from build config.
     print_info("[*] Seeding gpkg repository configuration...")
     gpkg_dir = os.path.join(ROOT_DIR, "rootfs/etc/gpkg")
     gpkg_sources_dir = os.path.join(gpkg_dir, "sources.list.d")
@@ -1040,7 +1058,14 @@ def finalize_rootfs():
     for entry in os.listdir(gpkg_sources_dir):
         if entry.endswith(".list"):
             os.remove(os.path.join(gpkg_sources_dir, entry))
-    print_success("  ✓ Cleared default secondary gpkg repositories")
+    print_success("  ✓ Cleared staged secondary gpkg repositories")
+
+    default_sources_dest = os.path.join(gpkg_sources_dir, "00-default.list")
+    if os.path.exists(GPKG_DEFAULT_SOURCES_FILE):
+        shutil.copy2(GPKG_DEFAULT_SOURCES_FILE, default_sources_dest)
+        print_success(f"  ✓ Added default gpkg secondary repositories: {default_sources_dest}")
+    else:
+        print_success("  ✓ No default secondary gpkg repositories configured")
 
     for legacy_name in ("system-provides.list", "upgradeable-system.list"):
         legacy_path = os.path.join(gpkg_dir, legacy_name)

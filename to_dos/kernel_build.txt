@@ -1,0 +1,19 @@
+Command:
+
+# stable
+python3 tools/build_kernel_gpkg.py \
+  --kernel-release 6.19.9 \
+  --bzimage external_dependencies/linux-6.19.9/arch/x86/boot/bzImage \
+  --modules-dir /tmp/geminios-kernel-stage/lib/modules/6.19.9 \
+  --config-file external_dependencies/linux-6.19.9/.config \
+  --channel stable \
+  --repo-root /tmp/geminios-kernel-repo
+
+# beta
+python3 tools/build_kernel_gpkg.py \
+  --kernel-release 7.0-rc5 \
+  --bzimage external_dependencies/linux-7.0-rc5/arch/x86/boot/bzImage \
+  --modules-dir /tmp/geminios-kernel-stage/lib/modules/7.0-rc5 \
+  --config-file external_dependencies/linux-7.0-rc5/.config \
+  --channel mainline \
+  --repo-root /tmp/geminios-kernel-repo
