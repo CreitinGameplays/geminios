@@ -155,6 +155,7 @@
   },
   "dependency_rewrites": {
     "gpg": "gpg-from-sq",
+    "libpam-ck-connector": "libpam-elogind",
     "libpam-systemd": "libpam-elogind",
     "systemd": "elogind"
   },
