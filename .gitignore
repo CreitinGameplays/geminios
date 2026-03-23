@@ -75,6 +75,7 @@ __pycache__/
 .aiexclude
 initramfs_build/*
 initramfs_build*/
+.cache/
 
 
 .vscode/
