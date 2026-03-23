@@ -61,13 +61,13 @@ def print_status(msg):
 
 # Configuration
 ROOT_DIR = os.getcwd()
-VERSION_FILE = os.path.join(ROOT_DIR, "VERSION")
 BUILD_SYSTEM_DIR = os.path.join(ROOT_DIR, "build_system")
 PORTS_DIR = os.path.join(ROOT_DIR, "ports")
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
 VERIFY_SOURCES_SCRIPT = os.path.join(ROOT_DIR, "tools", "verify_source_urls.py")
+SYS_INFO_HEADER = os.path.join(ROOT_DIR, "src", "sys_info.h")
 GPKG_UPGRADE_COMPANIONS_FILE = os.environ.get(
     "GPKG_UPGRADE_COMPANIONS_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgrade_companions.conf"),
@@ -319,20 +319,66 @@ def resolve_requested_packages(requested_packages):
 
     return [pkg_name for pkg_name in PACKAGES if pkg_name in needed]
 
-def get_geminios_version():
-    """Generates auto-version according to README"""
-    base_version = "0.0.1-alpha"
-    if os.path.exists(VERSION_FILE):
-        with open(VERSION_FILE, "r") as f:
-            base_version = f.read().strip()
-    
-    # date-and-time in mm/dd/yyyy and h:m 24h-format, must convert to UTC+0 time!!!
-    # example: 0.0.1-alpha-01252026-1307
+def load_os_identity():
+    """Reads GeminiOS identity macros from src/sys_info.h."""
+    identity = {
+        "OS_NAME": "GeminiOS",
+        "OS_VERSION": "Rolling",
+        "OS_VERSION_ID": "rolling",
+        "OS_RELEASE_TRACK": "rolling",
+        "OS_CODENAME": "Castor",
+        "OS_ARCH": "x86_64",
+        "OS_ID": "geminios",
+        "OS_ID_LIKE": "debian",
+        "OS_ANSI_COLOR": "0;34",
+    }
+
+    define_re = re.compile(r'^\s*#define\s+([A-Z0-9_]+)\s+"([^"]*)"\s*$')
+    if not os.path.exists(SYS_INFO_HEADER):
+        return identity
+
+    with open(SYS_INFO_HEADER, "r") as f:
+        for line in f:
+            match = define_re.match(line)
+            if match:
+                identity[match.group(1)] = match.group(2)
+
+    return identity
+
+
+def slugify_release_token(value):
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "rolling"
+
+
+def get_geminios_release_info():
+    """Builds rolling-release identity and snapshot metadata."""
+    identity = load_os_identity()
     now = datetime.now(timezone.utc)
-    date_str = now.strftime("%m%d%Y")
-    time_str = now.strftime("%H%M")
-    
-    return f"{base_version}-{date_str}-{time_str}"
+    snapshot_date = now.strftime("%Y.%m.%d")
+    snapshot_compact = now.strftime("%Y%m%d")
+    build_id = now.strftime("%Y%m%d.%H%M")
+    build_slug = build_id.replace(".", "-")
+    codename_slug = slugify_release_token(identity["OS_CODENAME"])
+    display_version = f'{identity["OS_VERSION"]} {snapshot_date}'
+
+    return {
+        "name": identity["OS_NAME"],
+        "id": identity["OS_ID"],
+        "id_like": identity["OS_ID_LIKE"],
+        "ansi_color": identity["OS_ANSI_COLOR"],
+        "codename": identity["OS_CODENAME"],
+        "track": identity["OS_RELEASE_TRACK"],
+        "version_label": identity["OS_VERSION"],
+        "version_id": identity["OS_VERSION_ID"],
+        "display_version": display_version,
+        "pretty_name": f'{identity["OS_NAME"]} {display_version}',
+        "snapshot_date": snapshot_date,
+        "snapshot_compact": snapshot_compact,
+        "build_id": build_id,
+        "image_id": f'{identity["OS_ID"]}-{codename_slug}',
+        "iso_name": f'{identity["OS_NAME"]}-{codename_slug}-{identity["OS_VERSION_ID"]}-{build_slug}.iso',
+    }
 
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
     """Runs a shell command and captures output to log"""
@@ -921,17 +967,28 @@ def finalize_rootfs():
             f.write("{}\n")
 
     # 6. Versioning
-    version = get_geminios_version()
-    print_info(f"[*] Setting system version: {version}")
+    release = get_geminios_release_info()
+    print_info(f"[*] Setting system version: {release['display_version']} (build {release['build_id']})")
     with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-version"), "w") as f:
-        f.write(version + "\n")
+        f.write(release["display_version"] + "\n")
+    with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-build-id"), "w") as f:
+        f.write(release["build_id"] + "\n")
     
     with open(os.path.join(ROOT_DIR, "rootfs/etc/os-release"), "w") as f:
-        f.write(f'NAME="GeminiOS"\n')
-        f.write(f'VERSION="{version}"\n')
-        f.write(f'ID=geminios\n')
-        f.write(f'PRETTY_NAME="GeminiOS {version}"\n')
-        f.write(f'VERSION_ID="{version}"\n')
+        f.write(f'NAME="{release["name"]}"\n')
+        f.write(f'ID={release["id"]}\n')
+        f.write(f'ID_LIKE="{release["id_like"]}"\n')
+        f.write(f'VERSION="{release["display_version"]}"\n')
+        f.write(f'PRETTY_NAME="{release["pretty_name"]}"\n')
+        f.write(f'VERSION_ID="{release["version_id"]}"\n')
+        f.write(f'VERSION_CODENAME="{release["codename"]}"\n')
+        f.write(f'BUILD_ID="{release["build_id"]}"\n')
+        f.write(f'IMAGE_ID="{release["image_id"]}"\n')
+        f.write(f'IMAGE_VERSION="{release["snapshot_date"]}"\n')
+        f.write(f'ANSI_COLOR="{release["ansi_color"]}"\n')
+        f.write('HOME_URL="https://github.com/CreitinGameplays/geminios"\n')
+        f.write('SUPPORT_URL="https://github.com/CreitinGameplays/geminios/issues"\n')
+        f.write('BUG_REPORT_URL="https://github.com/CreitinGameplays/geminios/issues"\n')
 
     # 7. D-Bus Machine ID
     print_info("[*] Generating D-Bus machine-id...")
@@ -1466,8 +1523,8 @@ menuentry "GeminiOS Live" {
         f.write(grub_conf)
 
     # 5. Build ISO
-    version = get_geminios_version()
-    iso_name = f"GeminiOS-{version}.iso"
+    release = get_geminios_release_info()
+    iso_name = release["iso_name"]
     print_info(f"[*] Building {iso_name}...")
     iso_cmd = f"grub-mkrescue -o {iso_name} isodir"
     if run_command(iso_cmd) != 0:

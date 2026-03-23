@@ -111,6 +111,7 @@
     "libinput",
     "libinput10",
     "xorg-server",
+    "libc6",
     "xwayland"
   ],
   "skip_dependency_patterns": [

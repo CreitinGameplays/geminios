@@ -10,6 +10,12 @@ The project now follows a clear model:
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
 - `gpkg` as a sid-first package manager with GeminiOS/S2 packages layered on top
 
+Versioning now follows a rolling `stream + snapshot` model:
+
+- the named stream is kept in [`src/sys_info.h`](/home/creitin/Documents/geminios/src/sys_info.h) as the human release line, for example `Castor Rolling`
+- each built image gets a UTC snapshot date like `2026.03.23`
+- `/etc/os-release` keeps `VERSION_ID="rolling"` and uses `BUILD_ID` / `IMAGE_VERSION` for the exact image snapshot
+
 Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
 ## Setup and Build
@@ -328,10 +334,3 @@ Current patches included:
 - `xorg-server-1.20.14-glxdri2.patch`: Fixes `bool` type conflict in GLX DRI2.
 
 ---
-
-Versioning:
-major.minor.patch-(alpha-beta-stable)-(date-and-time in mm/dd/yyyy and h:m 24h-format, must convert to UTC+0 time!!!):
-
-example:
-(jan 25 2026, 01:07 PM) 
-0.0.1-alpha-01252026-1307
