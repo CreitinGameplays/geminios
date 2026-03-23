@@ -161,9 +161,7 @@ The implementation roadmap for closing that gap is tracked in [GNOME_WAYLAND_SUP
 The default image seeds:
 
 - `/etc/gpkg/debian.conf`: built-in Debian sid backend configuration
-- `/etc/gpkg/import-policy.json`: sid import blocklist and dependency/provider policy
-- `/etc/gpkg/system-provides.list`: base packages/capabilities GeminiOS already provides
-- `/etc/gpkg/upgradeable-system.list`: base runtimes that may still be upgraded from sid or S2
+- `/etc/gpkg/import-policy.json`: sid import blocklist, dependency/provider policy, and base-system ownership rules
 - `/etc/gpkg/sources.list.d/*.list`: optional secondary `.gpkg` repositories
 
 Debian sid is the main source for `search`, `show`, `install`, and `upgrade`.
@@ -209,7 +207,7 @@ Important:
 - The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
 - Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
 - `gpkg update` merges Debian sid metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
-- `gpkg` still reads `/etc/gpkg/system-provides.list` and `/etc/gpkg/upgradeable-system.list` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
+- `gpkg` reads `system_provides` and `upgradeable_system` from `/etc/gpkg/import-policy.json` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
 
 Per-transaction optional dependency control is also available for sid-backed installs, upgrades, and repairs:
 
@@ -224,22 +222,6 @@ sudo gpkg repair --suggested-yes
 By default, `builder.py` leaves `/etc/gpkg/sources.list` and `/etc/gpkg/sources.list.d/` empty.
 That means a fresh image uses only the built-in Debian sid backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
 
-The default system-provided package list is taken from `build_system/gpkg_system_provides.txt` and copied into the image as:
-
-```text
-/etc/gpkg/system-provides.list
-```
-
-That is where non-upgradeable base entries like `libc6` and `libgcc-s1` should live if GeminiOS already ships their runtime equivalents.
-
-The upgradeable base-runtime list is taken from `build_system/gpkg_upgradeable_system.txt` and copied into the image as:
-
-```text
-/etc/gpkg/upgradeable-system.list
-```
-
-Use that file for things like `dbus`, `elogind`, PAM/libcap runtimes, Python, and graphics stacks where GeminiOS may boot with a base copy, but userland packages should still be allowed to pull in a newer repository version to avoid ABI mismatches.
-
 The default Debian backend config is taken from `build_system/gpkg_debian.conf` and copied into the image as:
 
 ```text
@@ -252,7 +234,7 @@ The default import policy is taken from `build_system/gpkg_import_policy.json` a
 /etc/gpkg/import-policy.json
 ```
 
-That policy file is shared with the Debian import/publisher tooling so the sid importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, and rewrite defaults.
+That policy file is shared with the Debian import/publisher tooling so the sid importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, rewrite defaults, and base-runtime ownership lists.
 
 ## Ginit (Init System)
 
@@ -265,10 +247,10 @@ For more information, see [ginit/README.md](https://github.com/CreitinGameplays/
 
 ## GPKG (Package Manager)
 
-`gpkg` now supports two different kinds of base-system knowledge:
+`gpkg` keeps its base-system knowledge in `/etc/gpkg/import-policy.json`:
 
-- `/etc/gpkg/system-provides.list`: packages or capabilities GeminiOS should treat as already present
-- `/etc/gpkg/upgradeable-system.list`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
+- `system_provides`: packages or capabilities GeminiOS should treat as already present
+- `upgradeable_system`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
 
 This split is important for a sid-first Debian-compatible userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
 

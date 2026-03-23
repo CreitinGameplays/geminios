@@ -167,7 +167,7 @@ Definition of done:
 
 Only after the above runtime stack is working:
 
-- [ ] Add the GNOME runtime/system packages to `gpkg_system_provides.txt` only when GeminiOS actually ships them.
+- [ ] Add the GNOME runtime/system packages to `system_provides` or `upgradeable_system` in `build_system/gpkg_import_policy.json` only when GeminiOS actually ships them.
 - [ ] Add publisher overrides for GNOME-specific virtual/system dependencies.
 - [ ] Publish GNOME packages in a staged order:
   - core libraries

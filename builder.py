@@ -68,14 +68,6 @@ LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
 VERIFY_SOURCES_SCRIPT = os.path.join(ROOT_DIR, "tools", "verify_source_urls.py")
-GPKG_SYSTEM_PROVIDES_FILE = os.environ.get(
-    "GPKG_SYSTEM_PROVIDES_FILE",
-    os.path.join(BUILD_SYSTEM_DIR, "gpkg_system_provides.txt"),
-)
-GPKG_UPGRADEABLE_SYSTEM_FILE = os.environ.get(
-    "GPKG_UPGRADEABLE_SYSTEM_FILE",
-    os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgradeable_system.txt"),
-)
 GPKG_UPGRADE_COMPANIONS_FILE = os.environ.get(
     "GPKG_UPGRADE_COMPANIONS_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgrade_companions.conf"),
@@ -898,21 +890,11 @@ def finalize_rootfs():
             os.remove(os.path.join(gpkg_sources_dir, entry))
     print_success("  ✓ Cleared default secondary gpkg repositories")
 
-    system_provides_dest = os.path.join(gpkg_dir, "system-provides.list")
-    if os.path.exists(GPKG_SYSTEM_PROVIDES_FILE):
-        shutil.copy2(GPKG_SYSTEM_PROVIDES_FILE, system_provides_dest)
-        print_success(f"  ✓ Added gpkg system provides: {system_provides_dest}")
-    else:
-        with open(system_provides_dest, "w") as f:
-            f.write("")
-
-    upgradeable_system_dest = os.path.join(gpkg_dir, "upgradeable-system.list")
-    if os.path.exists(GPKG_UPGRADEABLE_SYSTEM_FILE):
-        shutil.copy2(GPKG_UPGRADEABLE_SYSTEM_FILE, upgradeable_system_dest)
-        print_success(f"  ✓ Added gpkg upgradeable runtimes: {upgradeable_system_dest}")
-    else:
-        with open(upgradeable_system_dest, "w") as f:
-            f.write("")
+    for legacy_name in ("system-provides.list", "upgradeable-system.list"):
+        legacy_path = os.path.join(gpkg_dir, legacy_name)
+        if os.path.exists(legacy_path):
+            os.remove(legacy_path)
+            print_success(f"  ✓ Removed legacy gpkg config: {legacy_path}")
 
     upgrade_companions_dest = os.path.join(gpkg_dir, "upgrade-companions.conf")
     if os.path.exists(GPKG_UPGRADE_COMPANIONS_FILE):
