@@ -75,6 +75,9 @@
     "libzstd1",
     "libcap2",
     "libcap2-bin",
+    "libcrypt1",
+    "libgcc-s1",
+    "libstdc++6",
     "python3",
     "python3-minimal",
     "xz-utils",
@@ -114,6 +117,10 @@
     "libc6",
     "xwayland"
   ],
+  "allow_essential_packages": [
+    "libc6",
+    "libc-bin"
+  ],
   "skip_dependency_patterns": [
     "debconf-2.0"
   ],
@@ -130,12 +137,16 @@
     "libpam-systemd",
     "linux-image-*",
     "mount",
-    "openssh-server",
     "passwd",
+    "systemd*",
     "sysvinit*",
     "udev",
     "util-linux"
   ],
+  "package_aliases": {
+    "gpg": "gpg-from-sq",
+    "libreoffice-core-nogui": "libreoffice-core"
+  },
   "dependency_choices": {
     "debconf | debconf-2.0": "debconf",
     "libgtk-3-0::dconf-gsettings-backend | gsettings-backend": "dconf-gsettings-backend",
@@ -143,6 +154,7 @@
     "policykit-1-gnome | polkit-1-auth-agent": "polkit-1-auth-agent"
   },
   "dependency_rewrites": {
+    "gpg": "gpg-from-sq",
     "libpam-systemd": "libpam-elogind",
     "systemd": "elogind"
   },
@@ -156,6 +168,9 @@
         "gpg"
       ],
       "conflicts_add": [
+        "gpg"
+      ],
+      "provides_add": [
         "gpg"
       ]
     },
