@@ -228,6 +228,10 @@ sudo gpkg repair --suggested-yes
 
 `--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. `--reinstall` is valid with `install` and `upgrade`; it forces the selected transaction targets back through download/prepare/install even when the installed version is already current. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
 
+`gpkg` now also maintains a dpkg-style status ledger at `/var/lib/gpkg/status` alongside `/var/lib/gpkg/info/`. Installations transition through `half-installed`, `unpacked`, `half-configured`, and `installed`; removals currently land in a dpkg-like `config-files` status; and retirements forget the package entry entirely after success. The worker restores the previous status automatically if a transaction rolls back. This is package-state tracking, not full dpkg conffile retention yet: `gpkg remove` still does not implement a separate purge-only conffile phase.
+
+`gpkg clean` clears the local package cache under `/var/repo/`: cached `.deb` archives, cached `.gpkg` archives, converted Debian-to-`.gpkg` imports, partial downloads, and merged/package-list indices. That makes it behave closer to `apt` archive cleanup while still resetting gpkg’s merged repository cache in one step.
+
 By default, `builder.py` leaves `/etc/gpkg/sources.list` and `/etc/gpkg/sources.list.d/` empty.
 That means a fresh image uses only the built-in Debian testing backend until you add a secondary `.gpkg` repository explicitly with `gpkg add-repo` or by writing those files yourself.
 
