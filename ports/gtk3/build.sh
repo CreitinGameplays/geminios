@@ -10,7 +10,7 @@ rm -rf build
 # for Meson's compiler sanity checks.
 export CC="${CC:-cc}"
 export CXX="${CXX:-c++}"
-export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export CFLAGS="-O2 -fPIC -Wno-error"
@@ -57,20 +57,20 @@ for module in "${required_modules[@]}"; do
     fi
 done
 
-meson setup build --prefix=/usr --libdir=lib64 -Ddefault_library=shared -Dintrospection=false -Ddemos=false -Dexamples=false -Dtests=false -Dwayland_backend=true -Dx11_backend=true -Dwerror=false
+meson setup build --prefix=/usr --libdir=lib/x86_64-linux-gnu -Ddefault_library=shared -Dintrospection=false -Ddemos=false -Dexamples=false -Dtests=false -Dwayland_backend=true -Dx11_backend=true -Dwerror=false
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install
 
 rm -f "$PKG_CONFIG_FILTER"
 
 for pc in gdk-wayland-3.0.pc gtk+-wayland-3.0.pc; do
-    if [ ! -f "$ROOTFS/usr/lib64/pkgconfig/$pc" ]; then
+    if [ ! -f "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/$pc" ]; then
         echo "ERROR: GTK3 build is missing $pc; Wayland backend was not enabled correctly."
         exit 1
     fi
 done
 
-if ! nm -D "$ROOTFS/usr/lib64/libgdk-3.so" | grep -q ' gdk_wayland_seat_get_wl_seat$'; then
+if ! nm -D "$ROOTFS/usr/lib/x86_64-linux-gnu/libgdk-3.so" | grep -q ' gdk_wayland_seat_get_wl_seat$'; then
     echo "ERROR: GTK3 build is missing GDK Wayland symbols."
     exit 1
 fi

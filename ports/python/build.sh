@@ -13,7 +13,7 @@ cd "$DEP_DIR/Python-$PYTHON_VER"
 # 2. Cleanup
 echo "Cleaning stale Python build artifacts..."
 rm -f Modules/Setup.local
-rm -f "$ROOTFS/usr/lib64/libpython*"
+rm -f "$ROOTFS/usr/lib/x86_64-linux-gnu/libpython*"
 make distclean || true
 
 # 3. Configure
@@ -24,12 +24,12 @@ unset CFLAGS CXXFLAGS LDFLAGS
 # We use --with-build-python to use the host's python for freezing modules
 # We use --host=x86_64-gemini-linux-gnu to trigger cross-compilation mode
 # The shim wrapper will automatically handle --sysroot
-./configure --prefix=/usr --enable-shared --without-ensurepip --disable-test-modules \
+./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-shared --without-ensurepip --disable-test-modules \
     --with-openssl="$ROOTFS/usr" \
     --build=x86_64-linux-gnu \
     --host=x86_64-gemini-linux-gnu \
     ac_cv_file__dev_ptmx=yes ac_cv_file__dev_ptc=no \
-    PLATLIBDIR=lib64 \
+    PLATLIBDIR=lib \
     --disable-ipv6 \
     --with-build-python=$HOME/.pyenv/versions/3.11.9/bin/python3.11
 

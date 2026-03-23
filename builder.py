@@ -442,6 +442,87 @@ def is_built(pkg_name):
 
     return False
 
+def remove_path(path):
+    """Remove a file, symlink, or directory tree if it exists."""
+    if os.path.islink(path) or os.path.isfile(path):
+        os.unlink(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        os.unlink(path)
+
+def resolve_rootfs_copy_destination(dest_path):
+    """Follow an existing rootfs symlink destination so host overlay copies land on the canonical path."""
+    if os.path.islink(dest_path):
+        target_path = os.path.realpath(dest_path)
+        rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+        try:
+            common_root = os.path.commonpath([rootfs_dir, target_path])
+        except ValueError:
+            common_root = ""
+        if common_root == rootfs_dir:
+            return target_path
+    return dest_path
+
+def merge_rootfs_entry(source_path, dest_path):
+    """Move a rootfs entry into place, merging directories when needed."""
+    if os.path.isdir(source_path) and not os.path.islink(source_path):
+        if os.path.lexists(dest_path) and not (os.path.isdir(dest_path) and not os.path.islink(dest_path)):
+            remove_path(dest_path)
+        os.makedirs(dest_path, exist_ok=True)
+        moved_count = 0
+        for entry in sorted(os.listdir(source_path)):
+            moved_count += merge_rootfs_entry(
+                os.path.join(source_path, entry),
+                os.path.join(dest_path, entry),
+            )
+        if os.path.isdir(source_path) and not os.listdir(source_path):
+            os.rmdir(source_path)
+        return moved_count
+
+    if os.path.lexists(dest_path):
+        remove_path(dest_path)
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    shutil.move(source_path, dest_path)
+    return 1
+
+def normalize_rootfs_multiarch_layout(report=False):
+    """Fold legacy lib64 installs back into the canonical Debian multiarch layout."""
+    migration_specs = [
+        (
+            os.path.join(ROOT_DIR, "rootfs", "lib64"),
+            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
+            {"x86_64-linux-gnu"},
+        ),
+        (
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
+            {"x86_64-linux-gnu"},
+        ),
+    ]
+
+    migrated_entries = []
+    for legacy_dir, canonical_dir, reserved_entries in migration_specs:
+        if os.path.islink(legacy_dir) or not os.path.isdir(legacy_dir):
+            continue
+
+        os.makedirs(canonical_dir, exist_ok=True)
+        for entry in sorted(os.listdir(legacy_dir)):
+            if entry in reserved_entries:
+                continue
+            source_path = os.path.join(legacy_dir, entry)
+            dest_path = os.path.join(canonical_dir, entry)
+            merge_rootfs_entry(source_path, dest_path)
+            migrated_entries.append((source_path, dest_path))
+
+    if report and migrated_entries:
+        print_info("[*] Normalizing staged library layout back to Debian multiarch...")
+        for source_path, dest_path in migrated_entries:
+            print_info(f"  Migrated {source_path} -> {dest_path}")
+
+    ensure_multiarch_dev_compat(report=report)
+    return migrated_entries
+
 def clean_system():
     print_section("=== Cleaning GeminiOS Build Environment ===")
     dirs_to_remove = ["rootfs", "glibc-build", "logs", "isodir", "initramfs_build"]
@@ -536,6 +617,7 @@ def build_package(pkg_name, index, total, force=False, debug=False):
     
     duration = time.time() - start_time
     if ret == 0:
+        normalize_rootfs_multiarch_layout(report=debug)
         # Post-build Verification
         if is_built(pkg_name):
             print(color(f" [DONE]", Colors.GREEN + Colors.BOLD) + f" ({duration:.2f}s)")
@@ -604,8 +686,34 @@ def copy_dev_environment():
         if in_include_section:
             path = line.strip()
             if os.path.exists(path):
-                if "/include/c++/" in path or "/lib/gcc/" in path or path == "/usr/local/include":
+                if (
+                    "/include/c++/" in path
+                    or re.search(r"/include/[^/]+/c\+\+/", path)
+                    or "/lib/gcc/" in path
+                    or path == "/usr/local/include"
+                ):
                     include_paths.append(path)
+
+    # Ensure the architecture-specific libstdc++ headers are staged even if the
+    # host compiler's verbose search output format changes.
+    gcc_multiarch = subprocess.run(
+        "g++ -print-multiarch",
+        shell=True,
+        capture_output=True,
+        text=True,
+        executable="/usr/bin/bash",
+    ).stdout.strip()
+    gcc_version = subprocess.run(
+        "g++ -dumpversion",
+        shell=True,
+        capture_output=True,
+        text=True,
+        executable="/usr/bin/bash",
+    ).stdout.strip()
+    if gcc_multiarch and gcc_version:
+        multiarch_cpp_include = os.path.join("/usr/include", gcc_multiarch, "c++", gcc_version)
+        if os.path.exists(multiarch_cpp_include):
+            include_paths.append(multiarch_cpp_include)
 
     # Ensure GCC internal headers are staged even if the search list omits them.
     gcc_internal_paths = [
@@ -620,6 +728,7 @@ def copy_dev_environment():
 
     for path in include_paths:
         dest = os.path.join(ROOT_DIR, "rootfs", path.lstrip("/"))
+        dest = resolve_rootfs_copy_destination(dest)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         print_info(f"  Copying {path} -> {dest}")
         subprocess.run(
@@ -660,6 +769,7 @@ def copy_dev_environment():
                 # Determine where it should go in rootfs
                 # We try to preserve the original path structure for development files
                 dest = os.path.join(ROOT_DIR, "rootfs", item_path.lstrip("/"))
+                dest = resolve_rootfs_copy_destination(dest)
                 
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 if not os.path.exists(dest):
@@ -700,6 +810,9 @@ def normalize_dev_environment():
         glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "gcc", "*", "*", "include"))
     )
     candidate_paths.extend(
+        glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "include", "*", "c++", "*"))
+    )
+    candidate_paths.extend(
         glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib64", "gcc", "*", "*", "include"))
     )
 
@@ -724,35 +837,10 @@ def prepare_rootfs():
     # Install Dev Environment
     copy_dev_environment()
 
-    # Canonical runtime layout is now Debian-style multiarch. Keep lib64 trees
-    # as compatibility directories populated with symlinks later.
-    migration_specs = [
-        (
-            os.path.join(ROOT_DIR, "rootfs", "lib64"),
-            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
-            {"x86_64-linux-gnu"},
-        ),
-        (
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
-            {"x86_64-linux-gnu"},
-        ),
-    ]
-
-    for legacy_dir, canonical_dir, reserved_entries in migration_specs:
-        if not os.path.isdir(legacy_dir):
-            continue
-        os.makedirs(canonical_dir, exist_ok=True)
-
-        for entry in os.listdir(legacy_dir):
-            if entry in reserved_entries:
-                continue
-            source_path = os.path.join(legacy_dir, entry)
-            dest_path = os.path.join(canonical_dir, entry)
-            if os.path.lexists(dest_path):
-                continue
-            shutil.move(source_path, dest_path)
-            print_info(f"[*] Migrated legacy library entry {source_path} -> {dest_path}")
+    # Make Debian multiarch canonical before any package build runs so legacy
+    # --libdir=/usr/lib64 installs still land in the right place via the
+    # compatibility symlink instead of creating a second real tree.
+    normalize_rootfs_multiarch_layout(report=True)
 
     # Remove problematic .la files
     subprocess.run(f"find {os.path.join(ROOT_DIR, 'rootfs')} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
@@ -1031,7 +1119,7 @@ def finalize_rootfs():
     prune_unused_host_runtime_libs()
 
     # 9. Restore multiarch compatibility symlinks for the in-OS toolchain.
-    ensure_multiarch_dev_compat()
+    normalize_rootfs_multiarch_layout(report=True)
 
     # 10. Final Integrity Check
     if not verify_rootfs_integrity():
@@ -1241,9 +1329,10 @@ def prune_unused_host_runtime_libs():
     if removed_count == 0 and duplicate_removed == 0:
         print_success("  ✓ No unused host-overlay runtime libraries needed pruning.")
 
-def ensure_multiarch_dev_compat():
+def ensure_multiarch_dev_compat(report=True):
     """Collapse lib64 trees into Debian-style multiarch with compatibility symlinks."""
-    print_info("[*] Restoring multiarch compatibility trees...")
+    if report:
+        print_info("[*] Restoring multiarch compatibility trees...")
 
     def replace_with_symlink(path, target):
         if os.path.islink(path):
@@ -1283,9 +1372,9 @@ def ensure_multiarch_dev_compat():
         if replace_with_symlink(compat_link, compat_target):
             linked_count += 1
 
-    if linked_count:
+    if report and linked_count:
         print_success(f"  ✓ Restored {linked_count} multiarch compatibility symlinks.")
-    else:
+    elif report:
         print_success("  ✓ Multiarch toolchain compatibility links already present.")
 
 def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):

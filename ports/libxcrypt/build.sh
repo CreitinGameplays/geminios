@@ -18,7 +18,9 @@ fi
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
-# Ensure libcrypt.so.1 is in lib64 if it ended up in lib
-if [ -f "$ROOTFS/usr/lib/libcrypt.so.1" ] && [ ! -f "$ROOTFS/lib64/libcrypt.so.1" ]; then
-    cp -d "$ROOTFS/usr/lib/libcrypt.so.1"* "$ROOTFS/lib64/"
+# Ensure libcrypt.so.1 is in the canonical runtime directory if upstream
+# leaves it under /usr/lib.
+if [ -f "$ROOTFS/usr/lib/libcrypt.so.1" ] && [ ! -f "$ROOTFS/lib/x86_64-linux-gnu/libcrypt.so.1" ]; then
+    mkdir -p "$ROOTFS/lib/x86_64-linux-gnu"
+    cp -d "$ROOTFS/usr/lib/libcrypt.so.1"* "$ROOTFS/lib/x86_64-linux-gnu/"
 fi

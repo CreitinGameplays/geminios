@@ -11,6 +11,6 @@ if ! grep -q "open_temp_exec_file" src/tramp.c; then
     patch -p1 < "$ROOT_DIR/patches/libffi-3.4.4.patch"
 fi
 
-./configure --prefix=/usr --libdir=/usr/lib64 --disable-static --host=x86_64-linux-gnu
+./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --disable-static --host=x86_64-linux-gnu
 make -j$JOBS
 make install DESTDIR="$ROOTFS"

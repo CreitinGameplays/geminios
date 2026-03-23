@@ -50,14 +50,14 @@ if [ -f "$THREAD_BITS_HEADER" ] && [ -f "$PTHREAD_HEADER" ]; then
 fi
 
 # 2. Ensure critical static libraries are in the expected location
-cp -v libc_nonshared.a "$ROOTFS/usr/lib64/" || true
-cp -v libc.a "$ROOTFS/usr/lib64/" || true
-cp -v math/libm.a "$ROOTFS/usr/lib64/" || true
+cp -v libc_nonshared.a "$ROOTFS/usr/lib/x86_64-linux-gnu/" || true
+cp -v libc.a "$ROOTFS/usr/lib/x86_64-linux-gnu/" || true
+cp -v math/libm.a "$ROOTFS/usr/lib/x86_64-linux-gnu/" || true
 
 # Fixup linker scripts
 echo "Ensuring glibc linker scripts are correct..."
-if [ -f "$ROOTFS/usr/lib64/libc.so" ]; then
-    cat > "$ROOTFS/usr/lib64/libc.so" <<EOF
+if [ -f "$ROOTFS/usr/lib/x86_64-linux-gnu/libc.so" ]; then
+    cat > "$ROOTFS/usr/lib/x86_64-linux-gnu/libc.so" <<EOF
 /* GNU ld script
    Use the shared library, but some functions are only in
    the static library, so try that secondarily.  */
@@ -65,8 +65,8 @@ OUTPUT_FORMAT(elf64-x86-64)
 GROUP ( libc.so.6 libc_nonshared.a AS_NEEDED ( ld-linux-x86-64.so.2 ) )
 EOF
 fi
-if [ -f "$ROOTFS/usr/lib64/libm.so" ]; then
-    cat > "$ROOTFS/usr/lib64/libm.so" <<EOF
+if [ -f "$ROOTFS/usr/lib/x86_64-linux-gnu/libm.so" ]; then
+    cat > "$ROOTFS/usr/lib/x86_64-linux-gnu/libm.so" <<EOF
 /* GNU ld script */
 OUTPUT_FORMAT(elf64-x86-64)
 GROUP ( libm.so.6 AS_NEEDED ( libmvec.so.1 ) )

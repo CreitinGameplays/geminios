@@ -14,7 +14,7 @@ export PATH="$DEP_DIR/bin_shim:$PATH"
 # of the in-progress target libc.
 export CC="${CC:-cc}"
 export CXX="${CXX:-c++}"
-export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export CFLAGS="-O2 -fPIC -Wno-error -idirafter $ROOTFS/usr/include"
@@ -70,7 +70,7 @@ done
 
 rm -rf build
 if [ ! -d "build" ]; then
-    meson setup build --prefix=/usr --libdir=lib64 -Dplatforms=x11,wayland -Dgallium-drivers=swrast,virgl -Dvulkan-drivers= -Dopengl=true -Dglx=dri -Degl=enabled -Dgles1=enabled -Dgles2=enabled -Dglvnd=true -Dllvm=disabled -Dshared-glapi=enabled -Dgbm=enabled -Dbuildtype=release -Dwerror=false
+    meson setup build --prefix=/usr --libdir=lib/x86_64-linux-gnu -Dplatforms=x11,wayland -Dgallium-drivers=swrast,virgl -Dvulkan-drivers= -Dopengl=true -Dglx=dri -Degl=enabled -Dgles1=enabled -Dgles2=enabled -Dglvnd=true -Dllvm=disabled -Dshared-glapi=enabled -Dgbm=enabled -Dbuildtype=release -Dwerror=false
 fi
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install
@@ -82,10 +82,10 @@ rm -f "$PKG_CONFIG_FILTER"
 mkdir -p "$ROOTFS/usr/include/GL/internal"
 cp include/GL/internal/dri_interface.h "$ROOTFS/usr/include/GL/internal/"
 
-mkdir -p "$ROOTFS/usr/lib64/pkgconfig"
-cat <<EOF > "$ROOTFS/usr/lib64/pkgconfig/dri.pc"
+mkdir -p "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig"
+cat <<EOF > "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dri.pc"
 prefix=/usr
-libdir=\${prefix}/lib64
+libdir=\${prefix}/lib/x86_64-linux-gnu
 includedir=\${prefix}/include
 
 Name: dri

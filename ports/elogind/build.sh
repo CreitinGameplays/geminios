@@ -12,13 +12,13 @@ rm -rf build
 
 export CC="${CC:-cc}"
 export CXX="${CXX:-c++}"
-export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export CFLAGS="-O2 -fPIC -Wno-error"
 export CXXFLAGS="-O2 -fPIC -Wno-error"
 export LDFLAGS=""
-export PYTHONPATH="$ROOTFS/usr/lib64/python3.11/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$ROOTFS/usr/lib/x86_64-linux-gnu/python3.11/site-packages${PYTHONPATH:+:$PYTHONPATH}"
 
 # Meson helper scripts use /usr/bin/env python3. Keep a real host python ahead of
 # the shim, because the shim intentionally clears PYTHONPATH.
@@ -55,7 +55,7 @@ export PKG_CONFIG="$PKG_CONFIG_FILTER"
 
 meson setup build \
     --prefix=/usr \
-    --libdir=lib64 \
+    --libdir=lib/x86_64-linux-gnu \
     --sysconfdir=/etc \
     --localstatedir=/var \
     --buildtype=release \
@@ -69,13 +69,13 @@ meson setup build \
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install
 
-mkdir -p "$ROOTFS/usr/lib64/pkgconfig" "$ROOTFS/usr/include"
-ln -sf libelogind.pc "$ROOTFS/usr/lib64/pkgconfig/libsystemd.pc"
+mkdir -p "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig" "$ROOTFS/usr/include"
+ln -sf libelogind.pc "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/libsystemd.pc"
 ln -sf elogind "$ROOTFS/usr/include/systemd"
 
-if [ -e "$ROOTFS/usr/lib64/libelogind.so" ]; then
-    ln -sf libelogind.so "$ROOTFS/usr/lib64/libsystemd.so"
+if [ -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libelogind.so" ]; then
+    ln -sf libelogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/libsystemd.so"
 fi
-if [ -e "$ROOTFS/usr/lib64/libelogind.so.0" ]; then
-    ln -sf libelogind.so.0 "$ROOTFS/usr/lib64/libsystemd.so.0"
+if [ -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libelogind.so.0" ]; then
+    ln -sf libelogind.so.0 "$ROOTFS/usr/lib/x86_64-linux-gnu/libsystemd.so.0"
 fi

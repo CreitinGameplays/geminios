@@ -12,7 +12,7 @@ cd "$DEP_DIR/$DIR"
 
 ./configure --prefix=/usr \
             --exec-prefix= \
-            --libdir=/usr/lib64 \
+            --libdir=/usr/lib/x86_64-linux-gnu \
             --docdir=/usr/share/doc/procps-ng-$PKG_VER \
             --disable-static \
             --disable-kill \
@@ -28,5 +28,4 @@ cd "$DEP_DIR/$DIR"
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
-# Move essential libraries to /lib64 if they ended up in /usr/lib64 and are needed for boot (not strictly necessary with merged usr, but safe)
-# procps 4.x puts libs in /usr/lib64 usually.
+# procps-ng now installs into the canonical Debian multiarch library tree.

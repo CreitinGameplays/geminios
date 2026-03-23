@@ -11,7 +11,7 @@ export LDFLAGS="--sysroot=$ROOTFS"
 export PKG_CONFIG="/bin/false"
 
 ./configure --prefix=/usr \
-            --libdir=/usr/lib64 \
+            --libdir=/usr/lib/x86_64-linux-gnu \
             --with-openssl \
             --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
             --with-ca-path=/etc/ssl/certs \

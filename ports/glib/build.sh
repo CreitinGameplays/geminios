@@ -14,7 +14,7 @@ unset PYTHONHOME
 # at the in-progress sysroot libc directly.
 export CC="${CC:-cc}"
 export CXX="${CXX:-c++}"
-export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export CFLAGS="-O2 -fPIC -Wno-error"
@@ -41,7 +41,7 @@ chmod 755 "$PKG_CONFIG_FILTER"
 export PKG_CONFIG="$PKG_CONFIG_FILTER"
 
 rm -rf build
-meson setup build --prefix=/usr --libdir=lib64 \
+meson setup build --prefix=/usr --libdir=lib/x86_64-linux-gnu \
     -Ddefault_library=shared \
     -Dselinux=disabled \
     -Dlibmount=disabled \

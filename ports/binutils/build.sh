@@ -19,7 +19,7 @@ cd build
 if [ ! -f "Makefile" ]; then
     "$DEP_DIR/$SRC_DIR/configure" \
         --prefix=/usr \
-        --libdir=/usr/lib64 \
+        --libdir=/usr/lib/x86_64-linux-gnu \
         --disable-nls \
         --disable-werror \
         --with-system-zlib \

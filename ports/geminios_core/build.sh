@@ -340,13 +340,8 @@ EOF
 chmod 755 "$ROOTFS/etc/lightdm/Xsession"
 
 cat > "$ROOTFS/etc/ld.so.conf" <<EOF
-/lib64/x86_64-linux-gnu
-/usr/lib64/x86_64-linux-gnu
 /lib/x86_64-linux-gnu
 /usr/lib/x86_64-linux-gnu
-/lib64
-/usr/lib64
-/usr/local/lib64
 /lib
 /usr/lib
 /usr/local/lib
@@ -357,14 +352,10 @@ mkdir -p "$ROOTFS/etc/ld.so.conf.d"
 # Debian-style PAM compatibility for packages that expect pam_systemd.so while
 # GeminiOS provides elogind instead of the full systemd init/session stack.
 mkdir -p \
-    "$ROOTFS/usr/lib64/security" \
-    "$ROOTFS/lib64/security" \
     "$ROOTFS/lib/x86_64-linux-gnu/security" \
     "$ROOTFS/usr/lib/x86_64-linux-gnu/security"
-ln -sfn pam_elogind.so "$ROOTFS/usr/lib64/security/pam_systemd.so"
-ln -sfn ../../usr/lib64/security/pam_elogind.so "$ROOTFS/lib64/security/pam_systemd.so"
-ln -sfn ../../../usr/lib64/security/pam_elogind.so "$ROOTFS/lib/x86_64-linux-gnu/security/pam_systemd.so"
-ln -sfn ../../../../usr/lib64/security/pam_elogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/security/pam_systemd.so"
+ln -sfn pam_elogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/security/pam_systemd.so"
+ln -sfn ../../../usr/lib/x86_64-linux-gnu/security/pam_elogind.so "$ROOTFS/lib/x86_64-linux-gnu/security/pam_systemd.so"
 
 mkdir -p "$ROOTFS/usr/libexec/geminios"
 cat > "$ROOTFS/usr/libexec/geminios/elogind-launch" <<'EOF'
@@ -373,7 +364,7 @@ for candidate in \
     /usr/libexec/elogind \
     /usr/lib/elogind/elogind \
     /usr/libexec/elogind/elogind \
-    /usr/lib64/elogind/elogind
+    /usr/lib/x86_64-linux-gnu/elogind/elogind
 do
     if [ -x "$candidate" ]; then
         exec "$candidate" "$@"
@@ -434,9 +425,9 @@ EOF
 
 # Compatibility shim for Debian desktop packages linked against GTK Wayland
 # helpers when GeminiOS is still running an X11 session stack.
-mkdir -p "$ROOTFS/usr/lib64"
+mkdir -p "$ROOTFS/usr/lib/x86_64-linux-gnu"
 gcc -shared -fPIC "$ROOT_DIR/build_system/gdk_wayland_compat.c" \
-    -o "$ROOTFS/usr/lib64/libgdk-wayland-compat.so"
+    -o "$ROOTFS/usr/lib/x86_64-linux-gnu/libgdk-wayland-compat.so"
 
 cat > "$ROOTFS/usr/libexec/geminios/session-common" <<'EOF'
 #!/bin/sh
@@ -873,8 +864,8 @@ if [ ! -x "$REAL_STARTXFCE4" ]; then
     exit 1
 fi
 
-if [ ! -f /usr/lib64/pkgconfig/gdk-wayland-3.0.pc ] && [ -r /usr/lib64/libgdk-wayland-compat.so ]; then
-    export LD_PRELOAD="/usr/lib64/libgdk-wayland-compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
+if [ ! -f /usr/lib/x86_64-linux-gnu/pkgconfig/gdk-wayland-3.0.pc ] && [ -r /usr/lib/x86_64-linux-gnu/libgdk-wayland-compat.so ]; then
+    export LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libgdk-wayland-compat.so${LD_PRELOAD:+:$LD_PRELOAD}"
 fi
 
 exec /usr/libexec/geminios/session-launch x11 XFCE "$REAL_STARTXFCE4" "$@"
@@ -972,8 +963,8 @@ chmod 1777 "$ROOTFS/tmp/.X11-unix"
 cat > "$ROOTFS/etc/X11/xorg.conf" <<EOF
 Section "Files"
     ModulePath "/usr/lib/xorg/modules"
-    ModulePath "/usr/lib64/xorg/modules"
-    ModulePath "/usr/lib64/dri"
+    ModulePath "/usr/lib/x86_64-linux-gnu/xorg/modules"
+    ModulePath "/usr/lib/x86_64-linux-gnu/dri"
     XkbDir "/usr/share/X11/xkb"
     FontPath "/usr/share/fonts/X11/misc"
     FontPath "/usr/share/fonts/X11/TTF"

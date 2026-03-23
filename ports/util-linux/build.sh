@@ -8,7 +8,7 @@ cd "$DEP_DIR/util-linux-$UTIL_LINUX_VER"
 make distclean || true
 export CC="gcc"
 export LDFLAGS="--sysroot=$ROOTFS"
-./configure --prefix=/usr --libdir=/usr/lib64 \
+./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu \
     --bindir=/bin \
     --sbindir=/sbin \
     --enable-libuuid \

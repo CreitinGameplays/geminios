@@ -6,7 +6,7 @@ download_and_extract "https://tukaani.org/xz/xz-$XZ_VER.tar.xz" "xz-$XZ_VER.tar.
 
 cd "$DEP_DIR/xz-$XZ_VER"
 
-./configure --prefix=/usr --libdir=/usr/lib64
+./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu
 
 make -j$JOBS
 make install DESTDIR="$ROOTFS"

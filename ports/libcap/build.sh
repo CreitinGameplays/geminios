@@ -17,12 +17,12 @@ make clean || true
 unset CC CXX CFLAGS CXXFLAGS LDFLAGS CPPFLAGS
 make -j"$JOBS" \
     prefix=/usr \
-    lib=lib64 \
+    lib=lib/x86_64-linux-gnu \
     RAISE_SETFCAP=no \
     PAM_CAP=no
 make \
     prefix=/usr \
-    lib=lib64 \
+    lib=lib/x86_64-linux-gnu \
     RAISE_SETFCAP=no \
     PAM_CAP=no \
     DESTDIR="$ROOTFS" \

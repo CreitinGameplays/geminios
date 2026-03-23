@@ -11,7 +11,7 @@ cd "$DEP_DIR/json-glib-$JSON_GLIB_VER"
 rm -rf build
 meson setup build \
     --prefix=/usr \
-    --libdir=lib64 \
+    --libdir=lib/x86_64-linux-gnu \
     -Ddefault_library=shared \
     -Dgtk_doc=disabled \
     -Dman=false \

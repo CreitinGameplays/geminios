@@ -17,8 +17,10 @@ ROOTFS="\${ROOTFS:?ROOTFS is not set}"
 
 "$ROOTFS/usr/bin/curl-config" "\$@" | sed \
     -e "s#-I/usr/include##g" \
+    -e "s#-L/usr/lib/x86_64-linux-gnu##g" \
     -e "s#-L/usr/lib64##g" \
     -e "s#-L/usr/lib##g" \
+    -e "s#-L/lib/x86_64-linux-gnu##g" \
     -e "s#-L/lib64##g"
 EOF
 chmod +x "$TOOLS_DIR/curl-config"
@@ -28,7 +30,7 @@ export CC="gcc"
 export LDFLAGS="--sysroot=$ROOTFS"
 
 if [ -f configure ]; then
-    ./configure --prefix=/usr --libdir=/usr/lib64
+    ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu
 fi
 
 make -j$JOBS \

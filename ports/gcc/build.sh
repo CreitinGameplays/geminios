@@ -24,7 +24,7 @@ for lib in $DEPS; do
     fi
     
     echo "  Copying $libname..."
-    cp -L "$lib" "$ROOTFS/usr/lib64/$libname"
+    cp -L "$lib" "$ROOTFS/usr/lib/x86_64-linux-gnu/$libname"
 done
 
 # 2. Install Binaries
@@ -78,7 +78,7 @@ if [[ "$HOST_INCLUDE_DIR" == /usr/* ]]; then
     REL_INC_DIR=${HOST_INCLUDE_DIR#/usr/}
     TARGET_INC_DIR="$ROOTFS/usr/$REL_INC_DIR"
 else
-    TARGET_INC_DIR="$ROOTFS/usr/lib64/gcc/include"
+    TARGET_INC_DIR="$ROOTFS/usr/lib/gcc/include"
 fi
 
 mkdir -p "$(dirname "$TARGET_INC_DIR")"

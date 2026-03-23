@@ -16,7 +16,7 @@ cd build
 ../configure --prefix=/usr \
              --bindir=/bin \
              --sbindir=/sbin \
-             --libdir=/usr/lib64 \
+             --libdir=/usr/lib/x86_64-linux-gnu \
              --enable-elf-shlibs \
              --disable-uuidd \
              --disable-fsck
@@ -26,4 +26,4 @@ cd build
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
-# Install libs to /lib64/ as well if needed? usually install puts them in /usr/lib64 as configured.
+# e2fsprogs now installs into the canonical Debian multiarch library tree.

@@ -9,26 +9,26 @@ if [ -z "$ROOT_DIR" ]; then
 fi
 
 # Fix broken libXfont2.la path if it exists
-if [ -f "$ROOT_DIR/rootfs/usr/lib64/libXfont2.la" ]; then
-    sed -i "s|/usr/lib/libfontenc.la|$ROOT_DIR/rootfs/usr/lib64/libfontenc.la|g" "$ROOT_DIR/rootfs/usr/lib64/libXfont2.la"
+if [ -f "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libXfont2.la" ]; then
+    sed -i "s|/usr/lib/libfontenc.la|$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libfontenc.la|g" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libXfont2.la"
 fi
 
 # Fix missing libudev.la
-if [ ! -f "$ROOT_DIR/rootfs/usr/lib64/libudev.la" ]; then
+if [ ! -f "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la" ]; then
     echo "libudev.la not found in rootfs. Attempting to recover..."
     # Try to find it in external_dependencies
     FOUND_LA=$(find "$DEP_DIR" -name "libudev.la" 2>/dev/null | grep "src/libudev/libudev.la" | head -n 1)
     if [ -n "$FOUND_LA" ]; then
         echo "Found libudev.la at $FOUND_LA. Installing to rootfs..."
-        cp "$FOUND_LA" "$ROOT_DIR/rootfs/usr/lib64/libudev.la"
-        sed -i "s/installed=no/installed=yes/g" "$ROOT_DIR/rootfs/usr/lib64/libudev.la"
+        cp "$FOUND_LA" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la"
+        sed -i "s/installed=no/installed=yes/g" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la"
     else
         echo "Warning: libudev.la not found in dependencies. Build might fail."
     fi
 fi
 
-if [ -f "$ROOT_DIR/rootfs/usr/lib64/libudev.la" ]; then
-    sed -i "s|^dependency_libs=.*$|dependency_libs=''|" "$ROOT_DIR/rootfs/usr/lib64/libudev.la"
+if [ -f "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la" ]; then
+    sed -i "s|^dependency_libs=.*$|dependency_libs=''|" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la"
 fi
 
 XORG_SERVER_VER="1.20.14"
@@ -45,7 +45,7 @@ fi
 # pulls in the kernel's stddef.h and breaks glibc headers during compile.
 export CC="${CC:-cc}"
 export CXX="${CXX:-c++}"
-export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib64/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export CFLAGS="-O2 -fPIC -Wno-error -Wno-redundant-decls -Dbool=xorg_bool"
@@ -73,10 +73,10 @@ chmod 755 "$PKG_CONFIG_FILTER"
 export PKG_CONFIG="$PKG_CONFIG_FILTER"
 
 sanitize_generated_la() {
-    find . -name '*.la' -type f -exec sed -i "s| -L$ROOTFS/lib64||g" {} +
+    find . -name '*.la' -type f -exec sed -i "s| -L$ROOTFS/lib/x86_64-linux-gnu||g" {} +
 }
 
-./configure --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
+./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --sysconfdir=/etc --localstatedir=/var \
     --disable-static --enable-xorg --enable-xwayland --disable-xephyr --disable-xvfb \
     --disable-xnest --enable-config-udev --disable-config-udev-kms --disable-config-hal \
     --disable-systemd-logind --enable-glx --enable-dri --enable-dri2 --enable-dri3 \

@@ -7,8 +7,8 @@ cd "$DEP_DIR/atk-$ATK_VER"
 rm -rf build
 
 # Ensure g-ir-scanner can find the giscanner python module in rootfs
-export PYTHONPATH="$ROOTFS/usr/lib64/gobject-introspection:$PYTHONPATH"
+export PYTHONPATH="$ROOTFS/usr/lib/x86_64-linux-gnu/gobject-introspection:$PYTHONPATH"
 
-meson setup build --prefix=/usr --libdir=lib64 -Dintrospection=false -Dwerror=false
+meson setup build --prefix=/usr --libdir=lib/x86_64-linux-gnu -Dintrospection=false -Dwerror=false
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install

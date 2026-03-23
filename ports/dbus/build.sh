@@ -9,7 +9,7 @@ cd "$DEP_DIR/dbus-$DBUS_VER"
 # compiler probes. That can bypass the libc linker script and make autoconf
 # fail with GLIBC_PRIVATE symbol errors before the actual build starts.
 ./configure --prefix=/usr \
-            --libdir=/usr/lib64 \
+            --libdir=/usr/lib/x86_64-linux-gnu \
             --sysconfdir=/etc \
             --localstatedir=/var \
             --disable-static \
@@ -25,6 +25,6 @@ make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
 # FIX: Remove empty Libs.private from .pc file
-if [ -f "$ROOTFS/usr/lib64/pkgconfig/dbus-1.pc" ]; then
-    sed -i '/^Libs.private: *$/d' "$ROOTFS/usr/lib64/pkgconfig/dbus-1.pc"
+if [ -f "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc" ]; then
+    sed -i '/^Libs.private: *$/d' "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"
 fi

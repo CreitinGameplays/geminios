@@ -2,7 +2,7 @@
 set -e
 
 VER="3.1.4"
-SITE_PACKAGES="$ROOTFS/usr/lib64/python3.11/site-packages"
+SITE_PACKAGES="$ROOTFS/usr/lib/x86_64-linux-gnu/python3.11/site-packages"
 EGG_INFO="$SITE_PACKAGES/Jinja2-$VER-py3.11.egg-info"
 
 download_and_extract \
