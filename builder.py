@@ -10,7 +10,10 @@ import re
 import tempfile
 import gzip
 import fnmatch
+import shlex
+import socket
 import urllib.request
+import urllib.error
 from urllib.parse import urljoin
 from datetime import datetime, timezone
 
@@ -67,7 +70,7 @@ def print_status(msg):
 ROOT_DIR = os.getcwd()
 BUILD_SYSTEM_DIR = os.path.join(ROOT_DIR, "build_system")
 PORTS_DIR = os.path.join(ROOT_DIR, "ports")
-LOG_DIR = os.path.join(ROOT_DIR, "logs")
+LOG_DIR = os.environ.get("GEMINIOS_LOG_DIR", os.path.join(ROOT_DIR, "logs"))
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
 PORT_BUILD_MODES_FILE = os.path.join(BUILD_SYSTEM_DIR, "port_build_modes.json")
@@ -79,9 +82,18 @@ BOOTSTRAP_ROOTFS_DIR = os.path.join(ROOT_DIR, "bootstrap_rootfs")
 BUILD_SYSROOT_DIR = os.path.join(ROOT_DIR, "build_sysroot")
 FINAL_ROOTFS_DIR = os.path.join(ROOT_DIR, "rootfs")
 ROOTFS_DIR = BUILD_SYSROOT_DIR
-OUTPUT_DIR = os.path.join(ROOT_DIR, "output")
-BOOTSTRAP_CACHE_DIR = os.path.join(ROOT_DIR, "external_dependencies", "debian-bootstrap")
+OUTPUT_DIR = os.environ.get("GEMINIOS_OUTPUT_DIR", os.path.join(ROOT_DIR, "output"))
+BOOTSTRAP_CACHE_DIR = os.environ.get(
+    "GEMINIOS_BOOTSTRAP_CACHE_DIR",
+    os.path.join(ROOT_DIR, "external_dependencies", "debian-bootstrap"),
+)
+ISO_WORK_DIR = os.environ.get("GEMINIOS_ISO_WORK_DIR", os.path.join(ROOT_DIR, "isodir"))
+ISO_OUTPUT_DIR = os.environ.get("GEMINIOS_ISO_OUTPUT_DIR", ROOT_DIR)
+ISO_SYMLINK_PATH = os.path.join(ROOT_DIR, "GeminiOS.iso")
 RUNTIME_CLOSURE_REPORT = os.path.join(OUTPUT_DIR, "runtime-closure.json")
+BOOTSTRAP_DOWNLOAD_RETRIES = 6
+BOOTSTRAP_DOWNLOAD_TIMEOUT = 60
+BOOTSTRAP_DOWNLOAD_CHUNK_SIZE = 1024 * 256
 GPKG_UPGRADE_COMPANIONS_FILE = os.environ.get(
     "GPKG_UPGRADE_COMPANIONS_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgrade_companions.conf"),
@@ -439,15 +451,124 @@ def load_debian_bootstrap_config():
     base_url = config.get("BASE_URL", "https://deb.debian.org/debian")
     return base_url.rstrip("/") + "/", packages_url
 
-def fetch_url_cached(url, dest_path):
-    """Download a URL into the local cache unless already present."""
+def format_bytes(num_bytes):
+    """Render a byte count in a compact human-readable format."""
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    value = float(max(num_bytes, 0))
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)}{unit}"
+            return f"{value:.1f}{unit}"
+        value /= 1024.0
+    return f"{value:.1f}TiB"
+
+def format_duration(seconds):
+    """Render a duration in a compact HH:MM:SS or MM:SS format."""
+    seconds = max(int(seconds), 0)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+def print_dynamic_status(message, done=False):
+    """Print a dynamic single-line status when attached to a TTY."""
+    stream = sys.stdout
+    if stream.isatty():
+        padded = message.ljust(110)
+        stream.write(("\r" if not done else "\r") + padded)
+        if done:
+            stream.write("\n")
+        stream.flush()
+    else:
+        if done:
+            print(message)
+
+def render_download_progress(label, downloaded_bytes, total_bytes, start_time):
+    """Render a download-progress line with throughput and ETA."""
+    elapsed = max(time.time() - start_time, 0.001)
+    speed = downloaded_bytes / elapsed
+    if total_bytes:
+        percent = min(downloaded_bytes / total_bytes, 1.0) * 100.0
+        eta_seconds = (total_bytes - downloaded_bytes) / speed if speed > 0 else 0
+        return (
+            f"[*] {label}: {percent:5.1f}% "
+            f"({format_bytes(downloaded_bytes)}/{format_bytes(total_bytes)}) "
+            f"{format_bytes(speed)}/s eta {format_duration(eta_seconds)}"
+        )
+    return f"[*] {label}: {format_bytes(downloaded_bytes)} downloaded at {format_bytes(speed)}/s"
+
+def fetch_url_cached(url, dest_path, label=None, retries=BOOTSTRAP_DOWNLOAD_RETRIES):
+    """Download a URL into the local cache with resume/retry support."""
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
         return dest_path
 
-    with urllib.request.urlopen(url) as response, open(dest_path, "wb") as output:
-        shutil.copyfileobj(response, output)
-    return dest_path
+    part_path = dest_path + ".part"
+    label = label or os.path.basename(dest_path)
+    last_error = None
+
+    for attempt in range(1, retries + 1):
+        resume_from = os.path.getsize(part_path) if os.path.exists(part_path) else 0
+        request = urllib.request.Request(url)
+        if resume_from > 0:
+            request.add_header("Range", f"bytes={resume_from}-")
+
+        try:
+            with urllib.request.urlopen(request, timeout=BOOTSTRAP_DOWNLOAD_TIMEOUT) as response:
+                status = getattr(response, "status", response.getcode())
+                content_length = response.headers.get("Content-Length")
+                if resume_from > 0 and status != 206:
+                    # Server ignored resume support; restart the partial download cleanly.
+                    if os.path.exists(part_path):
+                        os.remove(part_path)
+                    resume_from = 0
+
+                total_bytes = None
+                if content_length is not None:
+                    try:
+                        total_bytes = int(content_length)
+                        if status == 206:
+                            total_bytes += resume_from
+                    except ValueError:
+                        total_bytes = None
+
+                start_time = time.time()
+                downloaded_bytes = resume_from
+                last_update = 0.0
+                mode = "ab" if resume_from > 0 and status == 206 else "wb"
+                with open(part_path, mode) as output:
+                    while True:
+                        chunk = response.read(BOOTSTRAP_DOWNLOAD_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        now = time.time()
+                        if now - last_update >= 0.1:
+                            print_dynamic_status(
+                                render_download_progress(label, downloaded_bytes, total_bytes, start_time),
+                                done=False,
+                            )
+                            last_update = now
+
+                print_dynamic_status(
+                    render_download_progress(label, downloaded_bytes, total_bytes, start_time),
+                    done=True,
+                )
+                os.replace(part_path, dest_path)
+                return dest_path
+        except (urllib.error.URLError, urllib.error.HTTPError, ConnectionResetError, TimeoutError, socket.timeout, OSError) as exc:
+            last_error = exc
+            wait_seconds = min(2 ** (attempt - 1), 20)
+            print_warning(f"WARNING: Download failed for {label} (attempt {attempt}/{retries}): {exc}")
+            if attempt == retries:
+                break
+            print_info(f"[*] Retrying {label} in {wait_seconds}s using cached partial data...")
+            time.sleep(wait_seconds)
+
+    raise RuntimeError(f"Failed to download {label} after {retries} attempts: {last_error}")
 
 def parse_debian_packages_metadata(text):
     """Parse a Debian Packages file into a name->metadata map."""
@@ -486,10 +607,20 @@ def load_debian_package_index():
     packages_gz = os.path.join(BOOTSTRAP_CACHE_DIR, "Packages.gz")
     packages_txt = os.path.join(BOOTSTRAP_CACHE_DIR, "Packages")
 
-    fetch_url_cached(packages_url, packages_gz)
-    if not os.path.exists(packages_txt) or os.path.getmtime(packages_txt) < os.path.getmtime(packages_gz):
-        with gzip.open(packages_gz, "rb") as src, open(packages_txt, "wb") as dst:
-            shutil.copyfileobj(src, dst)
+    for attempt in range(2):
+        fetch_url_cached(packages_url, packages_gz, label="Debian package index")
+        try:
+            if not os.path.exists(packages_txt) or os.path.getmtime(packages_txt) < os.path.getmtime(packages_gz):
+                with gzip.open(packages_gz, "rb") as src, open(packages_txt, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            break
+        except (OSError, EOFError) as exc:
+            if attempt == 1:
+                raise RuntimeError(f"Failed to unpack cached Debian package index: {exc}") from exc
+            print_warning(f"WARNING: Cached Debian package index is corrupt, re-downloading: {exc}")
+            for stale_path in (packages_gz, packages_gz + ".part", packages_txt):
+                if os.path.exists(stale_path):
+                    os.remove(stale_path)
 
     with open(packages_txt, "r", encoding="utf-8", errors="replace") as f:
         index = parse_debian_packages_metadata(f.read())
@@ -556,13 +687,56 @@ def extract_deb_to_dir(deb_path, dest_dir):
     if result.returncode != 0:
         raise RuntimeError(f"Failed to extract {deb_path}: {result.stderr.strip()}")
 
+def load_bootstrap_stage_progress(progress_path):
+    """Load resumable bootstrap stage progress from disk."""
+    if not os.path.exists(progress_path):
+        return {}
+    try:
+        with open(progress_path, "r") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+def save_bootstrap_stage_progress(progress_path, payload):
+    """Persist bootstrap stage progress atomically."""
+    temp_path = progress_path + ".tmp"
+    with open(temp_path, "w") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
+    os.replace(temp_path, progress_path)
+
 def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
-    """Populate a stage directory from Debian .deb packages."""
+    """Populate a stage directory from Debian .deb packages with resume support."""
+    stage_name = os.path.basename(stage_dir)
+    plan_path = os.path.join(stage_dir, ".bootstrap-plan.json")
+    progress_path = os.path.join(stage_dir, ".bootstrap-progress.json")
+    desired_plan = {"packages": package_names}
+    expected_set = set(package_names)
+
     if os.path.exists(stage_dir):
-        shutil.rmtree(stage_dir)
+        existing_plan = load_bootstrap_stage_progress(plan_path)
+        if existing_plan.get("packages") != package_names:
+            print_warning(f"WARNING: Bootstrap plan changed for {stage_name}; resetting staged directory.")
+            shutil.rmtree(stage_dir)
     os.makedirs(stage_dir, exist_ok=True)
 
-    for package_name in package_names:
+    existing_progress = load_bootstrap_stage_progress(progress_path)
+    completed = set(existing_progress.get("completed", [])) & expected_set
+    save_bootstrap_stage_progress(plan_path, desired_plan)
+    save_bootstrap_stage_progress(
+        progress_path,
+        {
+            "stage": stage_name,
+            "total": len(package_names),
+            "completed": sorted(completed),
+        },
+    )
+
+    if completed:
+        print_info(f"[*] Resuming {stage_name} from cache: {len(completed)}/{len(package_names)} packages already staged.")
+
+    total_packages = len(package_names)
+    for index, package_name in enumerate(package_names, 1):
         entry = package_index.get(package_name)
         if not entry:
             raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Debian metadata")
@@ -571,8 +745,39 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
             raise RuntimeError(f"Bootstrap package '{package_name}' is missing a Filename entry")
         deb_url = urljoin(base_url, filename)
         deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
-        fetch_url_cached(deb_url, deb_path)
-        extract_deb_to_dir(deb_path, stage_dir)
+        fetch_url_cached(
+            deb_url,
+            deb_path,
+            label=f"{stage_name} [{index}/{total_packages}] {package_name}",
+        )
+        if package_name in completed:
+            continue
+        print_info(f"[*] Extracting {stage_name} [{index}/{total_packages}] {package_name}...")
+        try:
+            extract_deb_to_dir(deb_path, stage_dir)
+        except RuntimeError as exc:
+            print_warning(f"WARNING: Cached package for {package_name} looks invalid, re-fetching once: {exc}")
+            for stale_path in (deb_path, deb_path + ".part"):
+                if os.path.exists(stale_path):
+                    os.remove(stale_path)
+            fetch_url_cached(
+                deb_url,
+                deb_path,
+                label=f"{stage_name} [{index}/{total_packages}] {package_name} (retry)",
+            )
+            extract_deb_to_dir(deb_path, stage_dir)
+        completed.add(package_name)
+        save_bootstrap_stage_progress(
+            progress_path,
+            {
+                "stage": stage_name,
+                "total": total_packages,
+                "completed": sorted(completed),
+            },
+        )
+
+    if os.path.exists(progress_path):
+        os.remove(progress_path)
 
 def ensure_debian_bootstrap():
     """Ensure bootstrap_rootfs and build_sysroot are seeded from Debian packages."""
@@ -1298,16 +1503,32 @@ def cleanup_transient_workspace_artifacts(report=True):
 def clean_system():
     print_section("=== Cleaning GeminiOS Build Environment ===")
     cleanup_transient_workspace_artifacts(report=True)
-    dirs_to_remove = ["bootstrap_rootfs", "build_sysroot", "rootfs", "glibc-build", "logs", "output", "isodir", "initramfs_build"]
-    for d in dirs_to_remove:
-        path = os.path.join(ROOT_DIR, d)
+    dirs_to_remove = [
+        BOOTSTRAP_ROOTFS_DIR,
+        BUILD_SYSROOT_DIR,
+        FINAL_ROOTFS_DIR,
+        os.path.join(ROOT_DIR, "glibc-build"),
+        LOG_DIR,
+        OUTPUT_DIR,
+        ISO_WORK_DIR,
+        os.path.join(ROOT_DIR, "initramfs_build"),
+    ]
+    seen = set()
+    for path in dirs_to_remove:
+        if path in seen:
+            continue
+        seen.add(path)
         if os.path.exists(path):
-            print_info(f"[*] Removing {d}...")
-            subprocess.run(f"rm -rf {path}", shell=True, executable="/usr/bin/bash")
+            print_info(f"[*] Removing {path}...")
+            subprocess.run(["rm", "-rf", path], check=False)
     
     # Remove ISOs
-    if os.path.exists("GeminiOS.iso"):
-        os.remove("GeminiOS.iso")
+    if os.path.lexists(ISO_SYMLINK_PATH):
+        os.remove(ISO_SYMLINK_PATH)
+    if os.path.isdir(ISO_OUTPUT_DIR):
+        for iso_path in glob.glob(os.path.join(ISO_OUTPUT_DIR, "GeminiOS-*.iso")):
+            if os.path.exists(iso_path):
+                os.remove(iso_path)
     if os.path.exists(HOST_DEV_OVERLAY_FILE):
         os.remove(HOST_DEV_OVERLAY_FILE)
     
@@ -2826,12 +3047,12 @@ exec switch_root /new_root /bin/init
 
         # Pack it
         print_info("[*] Compressing minimal initramfs...")
-        os.makedirs(os.path.join(ROOT_DIR, "isodir/boot"), exist_ok=True)
-        initramfs_out = os.path.join(ROOT_DIR, "isodir/boot/initramfs.cpio.lz4")
+        os.makedirs(os.path.join(ISO_WORK_DIR, "boot"), exist_ok=True)
+        initramfs_out = os.path.join(ISO_WORK_DIR, "boot", "initramfs.cpio.lz4")
 
         pack_cmd = (
-            f"cd {work_dir} && "
-            f"find . -print0 | cpio --null -o --format=newc | lz4 -l -T0 > {initramfs_out}"
+            f"cd {shlex.quote(work_dir)} && "
+            f"find . -print0 | cpio --null -o --format=newc | lz4 -l -T0 > {shlex.quote(initramfs_out)}"
         )
         run_command(pack_cmd)
         return True
@@ -2844,17 +3065,20 @@ def create_iso():
     
     # 0. Clean isodir
     # Always ensure the directory structure exists
-    os.makedirs("isodir/boot/grub", exist_ok=True)
+    os.makedirs(os.path.join(ISO_WORK_DIR, "boot", "grub"), exist_ok=True)
         
     # 1. Create SquashFS of Rootfs
     print_info("[*] Creating root.sfs (SquashFS)...")
-    sfs_path = "isodir/root.sfs"
+    sfs_path = os.path.join(ISO_WORK_DIR, "root.sfs")
     if os.path.exists(sfs_path):
         os.remove(sfs_path)
         
     # Using zstd with level 1 for maximum speed/compression balance during development
     # Disabling xattrs also gives a bit of speedup
-    mksquashfs_cmd = f"mksquashfs {FINAL_ROOTFS_DIR} {sfs_path} -comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root -e staging"
+    mksquashfs_cmd = (
+        f"mksquashfs {shlex.quote(FINAL_ROOTFS_DIR)} {shlex.quote(sfs_path)} "
+        "-comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root -e staging"
+    )
     if run_command(mksquashfs_cmd) != 0:
         print_error(" [FAILED] (mksquashfs)")
         return False
@@ -2866,7 +3090,7 @@ def create_iso():
     # 3. Prepare Kernel
     print_info("[*] Preparing kernel...")
     kernel_src = os.path.join(FINAL_ROOTFS_DIR, "boot", "kernel")
-    kernel_dest = "isodir/boot/kernel"
+    kernel_dest = os.path.join(ISO_WORK_DIR, "boot", "kernel")
     if not os.path.exists(kernel_src):
         # Fallback to source
         kernel_src = os.path.join(ROOT_DIR, "external_dependencies/linux-6.6.14/arch/x86/boot/bzImage")
@@ -2887,24 +3111,26 @@ menuentry "GeminiOS Live" {
     initrd /boot/initramfs.cpio.lz4
 }
 """
-    with open("isodir/boot/grub/grub.cfg", "w") as f:
+    with open(os.path.join(ISO_WORK_DIR, "boot", "grub", "grub.cfg"), "w") as f:
         f.write(grub_conf)
 
     # 5. Build ISO
     release = get_geminios_release_info()
     iso_name = release["iso_name"]
-    print_info(f"[*] Building {iso_name}...")
-    iso_cmd = f"grub-mkrescue -o {iso_name} isodir"
+    os.makedirs(ISO_OUTPUT_DIR, exist_ok=True)
+    iso_path = os.path.join(ISO_OUTPUT_DIR, iso_name)
+    print_info(f"[*] Building {iso_path}...")
+    iso_cmd = f"grub-mkrescue -o {shlex.quote(iso_path)} {shlex.quote(ISO_WORK_DIR)}"
     if run_command(iso_cmd) != 0:
         print_error(" [FAILED] (grub-mkrescue)")
         return False
 
     # Create symlink for convenience
-    if os.path.lexists("GeminiOS.iso"):
-        os.remove("GeminiOS.iso")
-    os.symlink(iso_name, "GeminiOS.iso")
+    if os.path.lexists(ISO_SYMLINK_PATH):
+        os.remove(ISO_SYMLINK_PATH)
+    os.symlink(iso_path, ISO_SYMLINK_PATH)
 
-    print_success(f"[!] ISO built successfully: {iso_name}")
+    print_success(f"[!] ISO built successfully: {iso_path}")
     return True
 
 def main():
