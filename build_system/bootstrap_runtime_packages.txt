@@ -1,3 +1,6 @@
+# Minimal stage0 runtime seed.
+# This is only the coherent Debian base we need before GeminiOS-built packages
+# and gpkg-managed Debian packages layer on top later.
 base-files
 bash
 coreutils
@@ -5,38 +8,34 @@ diffutils
 findutils
 grep
 gzip
+sed
+tar
+xz-utils
+zstd
 libacl1
 libattr1
 libblkid1
-libbz2-*
+libbz2-1.0
 libc6
 libcap2
 libcom-err2
 libcrypt1
-libdb5.3*
-libffi*
+libffi8
 libgcc-s1
-libgmp*
+libgmp10
 libidn2-0
 liblz4-1
 liblzma5
 libmount1
 libncursesw6
 libpcre2-8-0
-libreadline8
+libreadline8t64
 libselinux1
 libsmartcols1
-libssl3*
+libssl3t64
 libstdc++6
 libtinfo6
 libuuid1
-libxml2
+libxml2-16
 libzstd1
 openssl
-pkgconf
-procps
-sed
-tar
-util-linux
-xz-utils
-zstd
