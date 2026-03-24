@@ -15,13 +15,13 @@ int main(int argc, char **argv) {
     }
     
     char *real_tool = NULL;
-    if (strcmp(tool_name, "x86_64-gemini-linux-gnu-gcc") == 0) real_tool = "/usr/bin/gcc";
-    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-g++") == 0) real_tool = "/usr/bin/g++";
-    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-ar") == 0) real_tool = "/usr/bin/ar";
-    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-ranlib") == 0) real_tool = "/usr/bin/ranlib";
-    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-readelf") == 0) real_tool = "/usr/bin/readelf";
-    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-objdump") == 0) real_tool = "/usr/bin/objdump";
-    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-strip") == 0) real_tool = "/usr/bin/strip";
+    if (strcmp(tool_name, "x86_64-gemini-linux-gnu-gcc") == 0 || strcmp(tool_name, "gcc") == 0) real_tool = "/usr/bin/gcc";
+    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-g++") == 0 || strcmp(tool_name, "g++") == 0) real_tool = "/usr/bin/g++";
+    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-ar") == 0 || strcmp(tool_name, "ar") == 0) real_tool = "/usr/bin/ar";
+    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-ranlib") == 0 || strcmp(tool_name, "ranlib") == 0) real_tool = "/usr/bin/ranlib";
+    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-readelf") == 0 || strcmp(tool_name, "readelf") == 0) real_tool = "/usr/bin/readelf";
+    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-objdump") == 0 || strcmp(tool_name, "objdump") == 0) real_tool = "/usr/bin/objdump";
+    else if (strcmp(tool_name, "x86_64-gemini-linux-gnu-strip") == 0 || strcmp(tool_name, "strip") == 0) real_tool = "/usr/bin/strip";
     else if (strcmp(tool_name, "msgfmt") == 0) real_tool = "/usr/bin/msgfmt";
     else if (strcmp(tool_name, "msginit") == 0) real_tool = "/usr/bin/msginit";
     else if (strcmp(tool_name, "msgmerge") == 0) real_tool = "/usr/bin/msgmerge";
@@ -50,15 +50,14 @@ int main(int argc, char **argv) {
         }
         if (!real_tool) real_tool = "/geminios/build_system/wrap_bin/ldd.sh";
     }
-    
+
     if (!real_tool) {
         fprintf(stderr, "Unknown tool: %s\n", tool_name);
         return 1;
     }
 
     // Inject --sysroot for cross-compilers
-    if (strstr(tool_name, "x86_64-gemini-linux-gnu-gcc") || strstr(tool_name, "x86_64-gemini-linux-gnu-g++")) {
-        char *rootfs = getenv("TARGET_SYSROOT");
+    if (strstr(tool_name, "gcc") || strstr(tool_name, "g++")) {        char *rootfs = getenv("TARGET_SYSROOT");
         if (!rootfs) {
              rootfs = getenv("BUILD_SYSROOT");
         }

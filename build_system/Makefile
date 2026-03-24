@@ -8,7 +8,7 @@ WRAP_BIN_DIR = wrap_bin
 
 # Tool lists
 TOOLS_LONG = ar g++ gcc objdump ranlib readelf strip
-TOOLS_SHORT = msgfmt msginit msgmerge xgettext python3
+TOOLS_SHORT = msgfmt msginit msgmerge xgettext python3 ar g++ gcc objdump ranlib readelf strip
 
 all: $(TARGET) setup
 
