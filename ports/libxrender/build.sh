@@ -11,7 +11,7 @@ if ! grep -q "BufAlloc (xGlyphElt \*, elt, SIZEOF(xGlyphElt));" src/Glyph.c; the
     patch -p1 < "$ROOT_DIR/patches/libXrender-0.9.11-glyph.patch"
 fi
 
-./configure --prefix=/usr --disable-static
+./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --disable-static --host=x86_64-linux-gnu
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 find "$ROOTFS" -name "*.la" -delete

@@ -84,6 +84,7 @@ GPKG_DEFAULT_SOURCES_FILE = os.environ.get(
     "GPKG_DEFAULT_SOURCES_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_default_sources.list"),
 )
+HOST_DEV_OVERLAY_FILE = os.path.join(ROOT_DIR, ".host_dev_overlay_paths.json")
 
 # Load Manifests
 try:
@@ -421,7 +422,7 @@ def is_built(pkg_name):
     """Checks if a package is already built and installed correctly"""
     if pkg_name not in PACKAGE_MANIFESTS:
         return False
-    return not get_missing_manifest_artifacts(pkg_name)
+    return not get_package_verification_issues(pkg_name)
 
 def expand_manifest_artifact_paths(artifact):
     """Return candidate paths for a manifest artifact, supporting exact paths and globs."""
@@ -441,14 +442,49 @@ def expand_manifest_artifact_paths(artifact):
             matched.append(pattern)
     return matched
 
+def fallback_manifest_artifact_paths(artifact):
+    """Return smart fallback candidates for manifest entries that describe shared libraries."""
+    project_relative = artifact.lstrip("/") if artifact.startswith("/") else artifact
+    rootfs_path = os.path.join(ROOT_DIR, "rootfs", project_relative)
+    dirname = os.path.dirname(rootfs_path)
+    basename = os.path.basename(rootfs_path)
+
+    if not os.path.isdir(dirname):
+        return []
+
+    fallback = []
+
+    # Treat linker-name expectations like libfoo.so as satisfied by a versioned runtime
+    # library such as libfoo.so.4 when the build intentionally omits the dev symlink.
+    if basename.endswith(".so"):
+        pattern = os.path.join(dirname, basename + ".*")
+        fallback.extend(glob.glob(pattern))
+
+    # If a glob like libpython3.11.so* is used, also accept the canonical versioned
+    # runtime soname if glob expansion happened before the file was staged.
+    if basename.endswith(".so*"):
+        pattern = os.path.join(dirname, basename[:-1] + ".*")
+        fallback.extend(glob.glob(pattern))
+
+    seen = set()
+    unique = []
+    for path in fallback:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
 def artifact_exists_from_manifest(artifact):
     """Check whether a manifest artifact exists, allowing glob patterns."""
     matched_paths = expand_manifest_artifact_paths(artifact)
     if not matched_paths:
+        matched_paths = fallback_manifest_artifact_paths(artifact)
+    if not matched_paths:
         return False
 
     for path in matched_paths:
-        if os.path.exists(path) or os.path.islink(path):
+        if os.path.exists(path):
             return True
     return False
 
@@ -462,6 +498,199 @@ def get_missing_manifest_artifacts(pkg_name):
         if not artifact_exists_from_manifest(artifact):
             missing_artifacts.append(artifact)
     return missing_artifacts
+
+def get_dbus_runtime_abi_issues():
+    """Return DBus runtime/library ABI mismatches inside the staged rootfs."""
+    dbus_launch_path = os.path.join(ROOT_DIR, "rootfs", "usr", "bin", "dbus-launch")
+    dbus_lib_path = os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "libdbus-1.so.3")
+
+    if not (os.path.exists(dbus_launch_path) and os.path.exists(dbus_lib_path)):
+        return []
+
+    def extract_dbus_private_versions(path):
+        result = subprocess.run(
+            ["objdump", "-T", path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None, result.stderr.strip()
+
+        versions = set(re.findall(r"LIBDBUS_PRIVATE_[A-Za-z0-9_.-]+", result.stdout))
+        return versions, None
+
+    required_versions, required_error = extract_dbus_private_versions(dbus_launch_path)
+    provided_versions, provided_error = extract_dbus_private_versions(dbus_lib_path)
+
+    issues = []
+    if required_error:
+        issues.append(f"could not inspect dbus-launch private ABI: {required_error}")
+        return issues
+    if provided_error:
+        issues.append(f"could not inspect libdbus private ABI: {provided_error}")
+        return issues
+
+    missing_versions = sorted(required_versions - provided_versions)
+    if missing_versions:
+        issues.append(
+            "dbus-launch expects private DBus symbols that the image library does not provide: "
+            + ", ".join(missing_versions)
+        )
+    return issues
+
+def load_host_dev_overlay_paths():
+    """Load the recorded set of host-dev-overlay paths inside rootfs."""
+    if not os.path.exists(HOST_DEV_OVERLAY_FILE):
+        return set()
+
+    try:
+        with open(HOST_DEV_OVERLAY_FILE, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+    if not isinstance(data, list):
+        return set()
+
+    return {str(path) for path in data if isinstance(path, str)}
+
+def save_host_dev_overlay_paths(paths):
+    """Persist the recorded set of host-dev-overlay paths inside rootfs."""
+    with open(HOST_DEV_OVERLAY_FILE, "w") as f:
+        json.dump(sorted(set(paths)), f, indent=2)
+        f.write("\n")
+
+def collect_missing_runtime_deps(rootfs_dir, start_paths):
+    """Return recursive DT_NEEDED dependencies that are missing from the staged rootfs."""
+    issues = []
+    visited = set()
+    to_process = [path for path in start_paths if os.path.exists(path)]
+
+    while to_process:
+        current = os.path.realpath(to_process.pop())
+        if current in visited:
+            continue
+        visited.add(current)
+
+        for lib_filename in get_elf_needed(current):
+            candidate = find_rootfs_library(rootfs_dir, lib_filename)
+            if not candidate:
+                current_rel = os.path.relpath(current, rootfs_dir).replace(os.sep, "/")
+                issues.append(f"{current_rel} is missing runtime dependency {lib_filename}")
+                continue
+            to_process.append(candidate)
+
+    return issues
+
+def get_glib_runtime_issues():
+    """Return GLib/GIO runtime mismatches inside the staged rootfs."""
+    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    libgio_path = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu", "libgio-2.0.so.0")
+    if not os.path.exists(libgio_path):
+        return []
+
+    issues = []
+    libgio_real = os.path.realpath(libgio_path)
+    libgio_needed = set(get_elf_needed(libgio_real))
+    unexpected_deps = sorted({"libmount.so.1", "libselinux.so.1", "libsepol.so.2"} & libgio_needed)
+    if unexpected_deps:
+        issues.append(
+            "libgio unexpectedly links against disabled runtime libraries: "
+            + ", ".join(unexpected_deps)
+        )
+
+    issues.extend(
+        collect_missing_runtime_deps(
+            rootfs_dir,
+            [
+                os.path.join(rootfs_dir, "usr", "bin", "glib-compile-schemas"),
+                libgio_real,
+            ],
+        )
+    )
+    return issues
+
+def get_libxml2_runtime_issues():
+    """Return libxml2 runtime mismatches inside the staged rootfs."""
+    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    libxml2_path = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu", "libxml2.so")
+    if not os.path.exists(libxml2_path):
+        return []
+
+    issues = []
+    libxml2_real = os.path.realpath(libxml2_path)
+    expected_basename = "libxml2.so.2.12.4"
+    if os.path.basename(libxml2_real) != expected_basename:
+        issues.append(
+            f"libxml2 runtime is {os.path.basename(libxml2_real)}, expected {expected_basename}"
+        )
+
+    issues.extend(
+        collect_missing_runtime_deps(
+            rootfs_dir,
+            [
+                os.path.join(rootfs_dir, "usr", "bin", "update-mime-database"),
+                libxml2_real,
+            ],
+        )
+    )
+    return issues
+
+def get_shared_mime_info_runtime_issues():
+    """Return shared-mime-info runtime mismatches inside the staged rootfs."""
+    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    update_mime_path = os.path.join(rootfs_dir, "usr", "bin", "update-mime-database")
+    if not os.path.exists(update_mime_path):
+        return []
+
+    return collect_missing_runtime_deps(rootfs_dir, [update_mime_path])
+
+def get_util_linux_runtime_issues():
+    """Return util-linux ABI/runtime mismatches inside the staged rootfs."""
+    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    libmount_path = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu", "libmount.so.1")
+    if not os.path.exists(libmount_path):
+        return []
+
+    issues = []
+    libmount_real = os.path.realpath(libmount_path)
+    libmount_needed = set(get_elf_needed(libmount_real))
+    unexpected_selinux_deps = sorted({"libselinux.so.1", "libsepol.so.2"} & libmount_needed)
+    if unexpected_selinux_deps:
+        issues.append(
+            "libmount unexpectedly links against SELinux runtime libraries: "
+            + ", ".join(unexpected_selinux_deps)
+        )
+    issues.extend(
+        collect_missing_runtime_deps(
+            rootfs_dir,
+            [
+                os.path.join(rootfs_dir, "bin", "mount"),
+                os.path.join(rootfs_dir, "bin", "umount"),
+                os.path.join(rootfs_dir, "sbin", "switch_root"),
+                libmount_real,
+            ],
+        )
+    )
+    return issues
+
+def get_package_verification_issues(pkg_name):
+    """Return manifest and semantic verification issues for a package."""
+    issues = []
+    issues.extend(f"missing artifact: {artifact}" for artifact in get_missing_manifest_artifacts(pkg_name))
+
+    if pkg_name == "dbus":
+        issues.extend(get_dbus_runtime_abi_issues())
+    elif pkg_name == "glib":
+        issues.extend(get_glib_runtime_issues())
+    elif pkg_name == "libxml2":
+        issues.extend(get_libxml2_runtime_issues())
+    elif pkg_name == "shared-mime-info":
+        issues.extend(get_shared_mime_info_runtime_issues())
+    elif pkg_name == "util-linux":
+        issues.extend(get_util_linux_runtime_issues())
+
+    return issues
 
 def remove_path(path):
     """Remove a file, symlink, or directory tree if it exists."""
@@ -520,6 +749,11 @@ def normalize_rootfs_multiarch_layout(report=False):
             os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
             {"x86_64-linux-gnu"},
         ),
+        (
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "pkgconfig"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
+            set(),
+        ),
     ]
 
     migrated_entries = []
@@ -541,11 +775,140 @@ def normalize_rootfs_multiarch_layout(report=False):
         for source_path, dest_path in migrated_entries:
             print_info(f"  Migrated {source_path} -> {dest_path}")
 
+    normalize_rootfs_usr_lib_top_level(report=report)
     ensure_multiarch_dev_compat(report=report)
     return migrated_entries
 
+def normalize_rootfs_usr_lib_top_level(report=False):
+    """Relocate top-level /usr/lib libraries into the canonical multiarch directory."""
+    usr_lib_dir = os.path.join(ROOT_DIR, "rootfs", "usr", "lib")
+    canonical_dir = os.path.join(usr_lib_dir, "x86_64-linux-gnu")
+    if not os.path.isdir(usr_lib_dir):
+        return []
+
+    os.makedirs(canonical_dir, exist_ok=True)
+
+    manifest_owned_artifacts = set()
+    for artifacts in PACKAGE_MANIFESTS.values():
+        for artifact in artifacts:
+            if any(ch in artifact for ch in "*?["):
+                continue
+            manifest_owned_artifacts.add(artifact.lstrip("/"))
+
+    relocated_entries = []
+
+    def library_family_prefix(name):
+        if ".so" in name:
+            return name.split(".so", 1)[0] + ".so"
+        if name.endswith(".a"):
+            return name[:-2]
+        return name
+
+    def is_linker_name(name):
+        return name.endswith(".so") or name.endswith(".a")
+
+    def is_soname_link(name):
+        return re.search(r"\.so\.\d+$", name) is not None
+
+    def preferred_family_target(family_matches):
+        exact_versions = [name for name in family_matches if re.search(r"\.so\.\d+\.", name)]
+        if exact_versions:
+            return sorted(exact_versions)[-1]
+        return sorted(family_matches)[-1] if family_matches else None
+
+    candidate_entries = [
+        entry for entry in sorted(os.listdir(usr_lib_dir))
+        if (
+            (entry.startswith("lib") or entry == "preloadable_libintl.so")
+            and not (os.path.isdir(os.path.join(usr_lib_dir, entry)) and not os.path.islink(os.path.join(usr_lib_dir, entry)))
+        )
+    ]
+
+    for entry in candidate_entries:
+        source_path = os.path.join(usr_lib_dir, entry)
+        rel_path = os.path.relpath(source_path, os.path.join(ROOT_DIR, "rootfs")).replace(os.sep, "/")
+        canonical_path = os.path.join(canonical_dir, entry)
+        family_prefix = library_family_prefix(entry)
+        canonical_family_matches = sorted(
+            candidate for candidate in os.listdir(canonical_dir)
+            if candidate != entry and library_family_prefix(candidate) == family_prefix
+        )
+        family_target = preferred_family_target(canonical_family_matches)
+
+        if os.path.islink(source_path):
+            if not os.path.lexists(canonical_path):
+                source_target = os.readlink(source_path)
+                target_basename = os.path.basename(source_target)
+                if os.path.lexists(os.path.join(canonical_dir, target_basename)):
+                    os.symlink(target_basename, canonical_path)
+                elif family_target:
+                    os.symlink(family_target, canonical_path)
+            remove_path(source_path)
+            relocated_entries.append((source_path, canonical_path, "removed-compat"))
+            continue
+
+        if os.path.lexists(canonical_path):
+            remove_path(source_path)
+            relocated_entries.append((source_path, canonical_path, "removed-compat"))
+            continue
+
+        if (
+            family_target
+            and rel_path not in manifest_owned_artifacts
+            and not is_linker_name(entry)
+            and not is_soname_link(entry)
+        ):
+            remove_path(source_path)
+            relocated_entries.append((source_path, canonical_path, "removed-stale"))
+            continue
+
+        shutil.move(source_path, canonical_path)
+        os.symlink(os.path.join("x86_64-linux-gnu", entry), source_path)
+        relocated_entries.append((source_path, canonical_path, "moved"))
+
+    if report and relocated_entries:
+        print_info("[*] Normalizing top-level /usr/lib libraries into multiarch...")
+        for source_path, canonical_path, action in relocated_entries:
+            if action == "removed-stale":
+                print_info(f"  Removed stale {source_path} (canonical family present in {canonical_dir})")
+            elif action == "removed-compat":
+                print_info(f"  Removed top-level compat entry {source_path}; canonical copy is {canonical_path}")
+            else:
+                print_info(f"  Migrated {source_path} -> {canonical_path}")
+
+    return relocated_entries
+
+def cleanup_transient_workspace_artifacts(report=True):
+    """Remove stale temp/cache artifacts that can accumulate in the workspace root."""
+    transient_patterns = [
+        "initramfs_build.*",
+        "initramfs-check.*",
+        "geminios-source-verify-*",
+        "__pycache__",
+        "*.root-owned-backup",
+        "*.root-owned-backup-*",
+    ]
+
+    removed_paths = []
+    for pattern in transient_patterns:
+        for path in sorted(glob.glob(os.path.join(ROOT_DIR, pattern))):
+            if not os.path.lexists(path):
+                continue
+            remove_path(path)
+            removed_paths.append(path)
+
+    if report and removed_paths:
+        print_info("[*] Removing stale temp/cache workspace artifacts...")
+        for path in removed_paths:
+            print_info(f"  Removed {path}")
+    elif report:
+        print_success("  ✓ No stale temp/cache workspace artifacts found.")
+
+    return removed_paths
+
 def clean_system():
     print_section("=== Cleaning GeminiOS Build Environment ===")
+    cleanup_transient_workspace_artifacts(report=True)
     dirs_to_remove = ["rootfs", "glibc-build", "logs", "isodir", "initramfs_build"]
     for d in dirs_to_remove:
         path = os.path.join(ROOT_DIR, d)
@@ -556,6 +919,8 @@ def clean_system():
     # Remove ISOs
     if os.path.exists("GeminiOS.iso"):
         os.remove("GeminiOS.iso")
+    if os.path.exists(HOST_DEV_OVERLAY_FILE):
+        os.remove(HOST_DEV_OVERLAY_FILE)
     
     print_success("[!] Clean completed.")
 
@@ -640,15 +1005,15 @@ def build_package(pkg_name, index, total, force=False, debug=False):
     if ret == 0:
         normalize_rootfs_multiarch_layout(report=debug)
         # Post-build Verification
-        if is_built(pkg_name):
+        verification_issues = get_package_verification_issues(pkg_name)
+        if not verification_issues:
             print(color(f" [DONE]", Colors.GREEN + Colors.BOLD) + f" ({duration:.2f}s)")
             return True
         else:
             print(color(f" [FAILED VERIFICATION]", Colors.RED + Colors.BOLD) + " (Artifacts missing)")
-            if pkg_name in PACKAGE_MANIFESTS:
-                 print_error("    Missing files from manifest:")
-                 for artifact in get_missing_manifest_artifacts(pkg_name):
-                     print_error(f"     - {artifact}")
+            print_error("    Verification issues:")
+            for issue in verification_issues:
+                print_error(f"     - {issue}")
             return False
     else:
         print(color(f" [FAILED]", Colors.RED + Colors.BOLD) + f" (Check {log_file})")
@@ -673,6 +1038,60 @@ def verify_source_urls(requested_packages):
 def copy_dev_environment():
     """Copies host C/C++ development environment (headers and libraries) to rootfs"""
     print_section("\n=== Installing C/C++ Development Environment ===")
+    overlay_paths = load_host_dev_overlay_paths()
+
+    def sanitize_overlay_destination(dest_path):
+        """Remove stale broken symlinks so host-overlay copies can replace them cleanly."""
+        if os.path.islink(dest_path) and not os.path.exists(dest_path):
+            remove_path(dest_path)
+            return True
+        return False
+
+    def cleanup_broken_overlay_symlinks():
+        """Remove stale broken symlinks under dev-overlay target directories before copying."""
+        candidate_dirs = [
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
+            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "gcc"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "include"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "local", "include"),
+        ]
+
+        removed = 0
+        for base_dir in candidate_dirs:
+            if not os.path.isdir(base_dir):
+                continue
+            for dirpath, dirnames, filenames in os.walk(base_dir, topdown=True, followlinks=False):
+                for name in filenames:
+                    if sanitize_overlay_destination(os.path.join(dirpath, name)):
+                        removed += 1
+                for name in list(dirnames):
+                    path = os.path.join(dirpath, name)
+                    if sanitize_overlay_destination(path):
+                        removed += 1
+                        dirnames.remove(name)
+
+        if removed:
+            print_info(f"[*] Removed {removed} stale broken overlay symlinks before host copy.")
+
+    cleanup_broken_overlay_symlinks()
+
+    def record_overlay_tree(source_root, dest_root):
+        source_root = os.path.realpath(source_root)
+        rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+        for dirpath, dirnames, filenames in os.walk(source_root, topdown=True, followlinks=False):
+            rel_dir = os.path.relpath(dirpath, source_root)
+            dest_dir = dest_root if rel_dir == "." else os.path.join(dest_root, rel_dir)
+            for dirname in list(dirnames):
+                source_dir = os.path.join(dirpath, dirname)
+                if os.path.islink(source_dir):
+                    overlay_paths.add(
+                        os.path.relpath(os.path.join(dest_dir, dirname), rootfs_dir).replace(os.sep, "/")
+                    )
+            for filename in filenames:
+                overlay_paths.add(
+                    os.path.relpath(os.path.join(dest_dir, filename), rootfs_dir).replace(os.sep, "/")
+                )
     
     # 1. Resolve and Copy Headers
     print_info("[*] Copying standard headers from host...")
@@ -754,6 +1173,7 @@ def copy_dev_environment():
             shell=True,
             executable="/usr/bin/bash",
         )
+        record_overlay_tree(path, dest)
 
     # 2. Resolve and Copy Development Libraries (Static, Shared, and Objects)
     print_info("[*] Copying C/C++ development libraries and objects from host...")
@@ -790,6 +1210,8 @@ def copy_dev_environment():
                 dest = resolve_rootfs_copy_destination(dest)
                 
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
+                sanitize_overlay_destination(dest)
+                overlay_paths.add(os.path.relpath(dest, os.path.join(ROOT_DIR, "rootfs")).replace(os.sep, "/"))
                 if not os.path.exists(dest):
                     if os.path.islink(item_path):
                          subprocess.run(f"cp -P {item_path} {dest}", shell=True, executable="/usr/bin/bash")
@@ -799,7 +1221,8 @@ def copy_dev_environment():
                              shell=True,
                              executable="/usr/bin/bash",
                          )
-                
+
+    save_host_dev_overlay_paths(overlay_paths)
     print_success("  ✓ Development environment installed.")
 
 def normalize_dev_tree(path):
@@ -839,6 +1262,7 @@ def normalize_dev_environment():
 
 def prepare_rootfs():
     print_section("\n=== Preparing Rootfs Structure ===")
+    cleanup_transient_workspace_artifacts(report=True)
     dirs = [
         "bin", "boot", "proc", "sys", "dev", "etc", "tmp", "mnt", "run", "sbin",
         "lib", "lib/x86_64-linux-gnu", "lib64", "lib64/x86_64-linux-gnu",
@@ -926,36 +1350,12 @@ def verify_rootfs_integrity():
             print_error(f"  [MISSING] {rel_path}")
             return False
 
-    def extract_dbus_private_versions(path):
-        result = subprocess.run(
-            ["objdump", "-T", path],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print_warning(f"  [WARNING] Could not inspect DBus symbols in {path}: {result.stderr.strip()}")
-            return None
-
-        versions = set()
-        for token in re.findall(r"LIBDBUS_PRIVATE_[A-Za-z0-9_.-]+", result.stdout):
-            versions.add(token)
-        return versions
-
-    dbus_launch_path = os.path.join(ROOT_DIR, "rootfs/usr/bin/dbus-launch")
-    dbus_lib_path = os.path.join(ROOT_DIR, "rootfs/usr/lib/x86_64-linux-gnu/libdbus-1.so.3")
-    if os.path.exists(dbus_launch_path) and os.path.exists(dbus_lib_path):
-        required_versions = extract_dbus_private_versions(dbus_launch_path)
-        provided_versions = extract_dbus_private_versions(dbus_lib_path)
-        if required_versions is not None and provided_versions is not None:
-            missing_versions = sorted(required_versions - provided_versions)
-            if missing_versions:
-                print_error(
-                    "  [FAILED] dbus-launch expects private DBus symbols that the image library does not provide: "
-                    + ", ".join(missing_versions)
-                )
-                print_error("           A staged package likely overwrote GeminiOS DBus binaries or libraries.")
-                return False
-            print_success("  [OK] DBus runtime ABI")
+    dbus_runtime_issues = get_dbus_runtime_abi_issues()
+    if dbus_runtime_issues:
+        print_error(f"  [FAILED] {dbus_runtime_issues[0]}")
+        print_error("           A staged package likely overwrote GeminiOS DBus binaries or libraries.")
+        return False
+    print_success("  [OK] DBus runtime ABI")
 
     # Verify Python functionality
     print_info("[*] Verifying Python runtime...")
@@ -1029,13 +1429,27 @@ def finalize_rootfs():
     schema_tool = os.path.join(ROOT_DIR, "rootfs/usr/bin/glib-compile-schemas")
     schema_dir = os.path.join(ROOT_DIR, "rootfs/usr/share/glib-2.0/schemas")
     if os.path.exists(schema_tool) and os.path.exists(schema_dir):
-        subprocess.run([schema_tool, schema_dir], env=env)
+        glib_issues = get_package_verification_issues("glib")
+        if glib_issues:
+            print_warning(
+                "  Skipping glib-compile-schemas because the staged GLib runtime is inconsistent: "
+                + glib_issues[0]
+            )
+        else:
+            subprocess.run([schema_tool, schema_dir], env=env)
 
     # Mime Database
     mime_tool = os.path.join(ROOT_DIR, "rootfs/usr/bin/update-mime-database")
     mime_dir = os.path.join(ROOT_DIR, "rootfs/usr/share/mime")
     if os.path.exists(mime_tool) and os.path.exists(mime_dir):
-        subprocess.run([mime_tool, mime_dir], env=env)
+        mime_issues = get_package_verification_issues("libxml2") + get_package_verification_issues("shared-mime-info")
+        if mime_issues:
+            print_warning(
+                "  Skipping update-mime-database because the staged MIME/libxml runtime is inconsistent: "
+                + mime_issues[0]
+            )
+        else:
+            subprocess.run([mime_tool, mime_dir], env=env)
 
     # 4. Create Live Marker
     # This file tells ginit that we are booting the Live CD (enabling autologin)
@@ -1143,10 +1557,13 @@ def finalize_rootfs():
     # packages or future native ports.
     prune_unused_host_runtime_libs()
 
-    # 9. Restore multiarch compatibility symlinks for the in-OS toolchain.
+    # 9. Strip host dev-overlay leftovers before packaging the final image.
+    prune_host_dev_overlay_artifacts()
+
+    # 10. Restore multiarch compatibility symlinks for the in-OS toolchain.
     normalize_rootfs_multiarch_layout(report=True)
 
-    # 10. Final Integrity Check
+    # 11. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)
@@ -1275,6 +1692,13 @@ def prune_unused_host_runtime_libs():
     family_paths = {}
     all_candidate_paths = set()
     excluded_paths = set()
+    manifest_owned_artifacts = set()
+
+    for artifacts in PACKAGE_MANIFESTS.values():
+        for artifact in artifacts:
+            if any(ch in artifact for ch in "*?["):
+                continue
+            manifest_owned_artifacts.add(artifact.lstrip("/"))
 
     for base_dir in host_multiarch_dirs:
         if not os.path.isdir(base_dir):
@@ -1307,6 +1731,25 @@ def prune_unused_host_runtime_libs():
             if not paths:
                 continue
 
+            manifest_owns_family = False
+            for path in paths:
+                rel_path = os.path.relpath(path, rootfs_dir).replace(os.sep, "/")
+                basename = os.path.basename(rel_path)
+                if (
+                    rel_path in manifest_owned_artifacts
+                    or any(
+                        os.path.basename(owned_artifact).startswith(family["prefix"])
+                        and os.path.dirname(owned_artifact) == os.path.dirname(rel_path)
+                        for owned_artifact in manifest_owned_artifacts
+                    )
+                ):
+                    manifest_owns_family = True
+                    break
+
+            if manifest_owns_family:
+                print_info(f"  Keeping {family['label']} libraries; managed by built packages.")
+                continue
+
             if soname in needed_libs:
                 print_info(f"  Keeping {family['label']} libraries; still required by rootfs.")
                 continue
@@ -1317,42 +1760,114 @@ def prune_unused_host_runtime_libs():
                     removed_count += 1
             print_success(f"  ✓ Removed unused {family['label']} library family.")
 
-    soname_groups = {}
-    soname_cache = {}
-    for base_dir in host_multiarch_dirs:
-        if not os.path.isdir(base_dir):
-            continue
-        for entry in os.listdir(base_dir):
-            if not entry.startswith("lib") or ".so" not in entry:
-                continue
-            path = os.path.join(base_dir, entry)
-            real_path = os.path.realpath(path)
-            soname = soname_cache.get(real_path)
-            if soname is None:
-                soname = get_elf_soname(real_path)
-                soname_cache[real_path] = soname
-            if not soname:
-                continue
-            soname_groups.setdefault(soname, set()).add(path)
-
-    duplicate_removed = 0
-    for soname, paths in sorted(soname_groups.items()):
-        runtime_copy = find_rootfs_library(rootfs_dir, soname)
-        if runtime_copy or soname not in needed_libs:
-            for path in sorted(paths):
-                if os.path.lexists(path):
-                    os.remove(path)
-                    duplicate_removed += 1
-
-    if duplicate_removed:
-        print_success(f"  ✓ Removed {duplicate_removed} duplicate host multiarch shared libraries.")
-
     if not excluded_paths:
         print_success("  ✓ No host multiarch runtime overlay found.")
         return
 
-    if removed_count == 0 and duplicate_removed == 0:
+    if removed_count == 0:
         print_success("  ✓ No unused host-overlay runtime libraries needed pruning.")
+
+def prune_host_dev_overlay_artifacts():
+    """Remove host-overlay files that are not owned by built packages or needed at runtime."""
+    print_info("[*] Pruning host development overlay artifacts...")
+
+    overlay_paths = load_host_dev_overlay_paths()
+    if not overlay_paths:
+        print_success("  ✓ No host development overlay record found.")
+        return
+
+    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    manifest_owned_artifacts = set()
+    manifest_owned_targets = set()
+    for artifacts in PACKAGE_MANIFESTS.values():
+        for artifact in artifacts:
+            if any(ch in artifact for ch in "*?["):
+                continue
+            rel_artifact = artifact.lstrip("/")
+            manifest_owned_artifacts.add(rel_artifact)
+            abs_artifact = os.path.join(rootfs_dir, rel_artifact)
+            if os.path.exists(abs_artifact):
+                real_artifact = os.path.realpath(abs_artifact)
+                try:
+                    if os.path.commonpath([rootfs_dir, real_artifact]) == rootfs_dir:
+                        manifest_owned_targets.add(
+                            os.path.relpath(real_artifact, rootfs_dir).replace(os.sep, "/")
+                        )
+                except ValueError:
+                    pass
+
+    needed_libs = collect_rootfs_needed_libs(rootfs_dir)
+    soname_cache = {}
+    kept_count = 0
+    removed_count = 0
+
+    protected_prefixes = (
+        "usr/lib/gcc/",
+        "usr/libexec/gcc/",
+        "usr/include/c++/",
+        "usr/include/x86_64-linux-gnu/c++/",
+    )
+
+    for rel_path in sorted(overlay_paths):
+        abs_path = os.path.join(rootfs_dir, rel_path)
+        if not os.path.lexists(abs_path):
+            continue
+
+        if rel_path in manifest_owned_artifacts:
+            kept_count += 1
+            continue
+
+        if rel_path in manifest_owned_targets:
+            kept_count += 1
+            continue
+
+        if rel_path.startswith(protected_prefixes):
+            kept_count += 1
+            continue
+
+        basename = os.path.basename(rel_path)
+        if basename in needed_libs:
+            kept_count += 1
+            continue
+
+        if os.path.isfile(abs_path) and not os.path.islink(abs_path):
+            soname = soname_cache.get(abs_path)
+            if soname is None:
+                soname = get_elf_soname(abs_path)
+                soname_cache[abs_path] = soname
+            if soname and soname in needed_libs:
+                kept_count += 1
+                continue
+
+        if rel_path.startswith("usr/include/"):
+            remove_path(abs_path)
+            removed_count += 1
+            continue
+
+        if rel_path.endswith((".a", ".la", ".o")):
+            remove_path(abs_path)
+            removed_count += 1
+            continue
+
+        if rel_path.startswith(("usr/lib/x86_64-linux-gnu/", "lib/x86_64-linux-gnu/", "usr/lib/", "lib/")):
+            remove_path(abs_path)
+            removed_count += 1
+            continue
+
+        kept_count += 1
+
+    for dirpath, _, _ in os.walk(rootfs_dir, topdown=False):
+        if dirpath == rootfs_dir:
+            continue
+        if os.path.isdir(dirpath) and not os.listdir(dirpath):
+            try:
+                os.rmdir(dirpath)
+            except OSError:
+                pass
+
+    print_success(f"  ✓ Removed {removed_count} unused host-overlay artifacts.")
+    if kept_count:
+        print_info(f"  Kept {kept_count} overlay artifacts because they are package-owned or still needed.")
 
 def ensure_multiarch_dev_compat(report=True):
     """Collapse lib64 trees into Debian-style multiarch with compatibility symlinks."""
@@ -1381,6 +1896,11 @@ def ensure_multiarch_dev_compat(report=True):
             os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
             os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
             "lib/x86_64-linux-gnu",
+        ),
+        (
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
+            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "pkgconfig"),
+            "x86_64-linux-gnu/pkgconfig",
         ),
     ]
 

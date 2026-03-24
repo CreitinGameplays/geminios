@@ -6,7 +6,7 @@ download_and_extract "https://github.com/westes/flex/releases/download/v$FLEX_VE
 
 cd "$DEP_DIR/flex-$FLEX_VER"
 if [ ! -f "Makefile" ]; then
-    ./configure --prefix=/usr --host=x86_64-linux-gnu
+    ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --host=x86_64-linux-gnu
 fi
 make -j$JOBS
 make install DESTDIR="$ROOTFS"

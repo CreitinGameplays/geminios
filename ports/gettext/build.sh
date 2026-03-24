@@ -6,7 +6,8 @@ download_and_extract "https://ftp.gnu.org/gnu/gettext/gettext-$GETTEXT_VER.tar.x
 
 cd "$DEP_DIR/gettext-$GETTEXT_VER"
 if [ ! -f "Makefile" ]; then
-    ./configure --prefix=/usr --disable-static --enable-shared --host=x86_64-linux-gnu
+    ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu \
+        --disable-static --enable-shared --host=x86_64-linux-gnu
 fi
 make -j$JOBS
 make install DESTDIR="$ROOTFS"

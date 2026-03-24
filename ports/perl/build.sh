@@ -20,8 +20,10 @@ sed -i "s|-Ilib|-I$(pwd)/lib|g" makefile
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
+mkdir -p "$ROOTFS/usr/lib/x86_64-linux-gnu"
 if [ -f "$ROOTFS/usr/lib/perl5/$PERL_VER/x86_64-linux/CORE/libperl.so" ]; then
-    cp -v "$ROOTFS/usr/lib/perl5/$PERL_VER/x86_64-linux/CORE/libperl.so" "$ROOTFS/usr/lib/"
+    cp -v "$ROOTFS/usr/lib/perl5/$PERL_VER/x86_64-linux/CORE/libperl.so" \
+        "$ROOTFS/usr/lib/x86_64-linux-gnu/libperl.so"
 fi
 
 # Cleanup symlink

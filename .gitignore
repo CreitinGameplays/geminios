@@ -76,6 +76,7 @@ __pycache__/
 initramfs_build/*
 initramfs_build*/
 .cache/
+.host_dev_overlay_paths.json
 
 
 .vscode/

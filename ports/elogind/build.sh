@@ -18,7 +18,21 @@ export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export CFLAGS="-O2 -fPIC -Wno-error"
 export CXXFLAGS="-O2 -fPIC -Wno-error"
 export LDFLAGS=""
-export PYTHONPATH="$ROOTFS/usr/lib/x86_64-linux-gnu/python3.11/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+PYTHON_SITE_PACKAGES=(
+    "$ROOTFS/usr/lib/x86_64-linux-gnu/python3.11/site-packages"
+    "$ROOTFS/usr/lib/python3.11/site-packages"
+)
+PYTHONPATH_PREFIX=""
+for candidate in "${PYTHON_SITE_PACKAGES[@]}"; do
+    if [ -d "$candidate" ]; then
+        if [ -n "$PYTHONPATH_PREFIX" ]; then
+            PYTHONPATH_PREFIX="$PYTHONPATH_PREFIX:$candidate"
+        else
+            PYTHONPATH_PREFIX="$candidate"
+        fi
+    fi
+done
+export PYTHONPATH="$PYTHONPATH_PREFIX${PYTHONPATH:+:$PYTHONPATH}"
 
 # Meson helper scripts use /usr/bin/env python3. Keep a real host python ahead of
 # the shim, because the shim intentionally clears PYTHONPATH.

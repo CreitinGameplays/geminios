@@ -87,6 +87,7 @@
     ],
     "libxml2": [
         "usr/lib/x86_64-linux-gnu/libxml2.so",
+        "usr/lib/x86_64-linux-gnu/libxml2.so.2.12.4",
         "usr/lib/x86_64-linux-gnu/pkgconfig/libxml-2.0.pc"
     ],
     "expat": [
@@ -149,7 +150,9 @@
     "dbus": [
         "usr/bin/dbus-daemon",
         "usr/bin/dbus-launch",
-        "usr/bin/dbus-run-session"
+        "usr/bin/dbus-run-session",
+        "usr/lib/x86_64-linux-gnu/libdbus-1.so.3.32.4",
+        "usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"
     ],
     "libffi": [
         "usr/lib/x86_64-linux-gnu/libffi.so",
@@ -161,6 +164,10 @@
     ],
     "glib": [
         "usr/lib/x86_64-linux-gnu/libglib-2.0.so",
+        "usr/lib/x86_64-linux-gnu/libgobject-2.0.so",
+        "usr/lib/x86_64-linux-gnu/libgmodule-2.0.so",
+        "usr/lib/x86_64-linux-gnu/libgio-2.0.so",
+        "usr/bin/glib-compile-schemas",
         "usr/lib/x86_64-linux-gnu/pkgconfig/glib-2.0.pc"
     ],
     "json-glib": [
@@ -464,7 +471,8 @@
         "usr/lib/x86_64-linux-gnu/pkgconfig/pango.pc"
     ],
     "shared-mime-info": [
-        "usr/share/mime/magic"
+        "usr/share/mime/magic",
+        "usr/bin/update-mime-database"
     ],
     "gdk-pixbuf": [
         "usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so",
@@ -524,7 +532,7 @@
         "usr/bin/bash"
     ],
     "ncurses": [
-        "usr/lib/libncursesw.a",
+        "usr/lib/x86_64-linux-gnu/libncursesw.a",
         "bin/clear"
     ],
     "nano": [
