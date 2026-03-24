@@ -1,5 +1,7 @@
 # --- Build Output & ISO ---
 GeminiOS*.iso
+bootstrap_rootfs/
+build_sysroot/
 rootfs/
 isodir/
 filelist.txt
