@@ -3,7 +3,10 @@
 # GeminiOS Global Build Configuration
 export ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export DEP_DIR="$ROOT_DIR/external_dependencies"
-export ROOTFS="$ROOT_DIR/rootfs"
+export BOOTSTRAP_ROOTFS="$ROOT_DIR/bootstrap_rootfs"
+export BUILD_SYSROOT="$ROOT_DIR/build_sysroot"
+export FINAL_ROOTFS="$ROOT_DIR/rootfs"
+export ROOTFS="$BUILD_SYSROOT"
 export LOG_DIR="$ROOT_DIR/logs"
 export OUTPUT_DIR="$ROOT_DIR/output"
 export PACKAGES_DIR="$ROOT_DIR/ports"

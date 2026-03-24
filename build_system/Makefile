@@ -53,11 +53,12 @@ setup: $(TARGET)
 	@echo '# Wrapper for pkg-config to look in rootfs' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo '' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo 'ROOT_DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")/../.." && pwd)"' >> $(WRAP_BIN_DIR)/pkg-config
-	@echo 'ROOTFS="$$ROOT_DIR/rootfs"' >> $(WRAP_BIN_DIR)/pkg-config
+	@echo 'BUILD_SYSROOT="${BUILD_SYSROOT:-$$ROOT_DIR/build_sysroot}"' >> $(WRAP_BIN_DIR)/pkg-config
+	@echo 'TARGET_SYSROOT="${TARGET_SYSROOT:-$$BUILD_SYSROOT}"' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo '' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo 'export PKG_CONFIG_DIR=""' >> $(WRAP_BIN_DIR)/pkg-config
-	@echo 'export PKG_CONFIG_LIBDIR="$$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$$ROOTFS/usr/share/pkgconfig"' >> $(WRAP_BIN_DIR)/pkg-config
-	@echo 'export PKG_CONFIG_SYSROOT_DIR="$$ROOTFS"' >> $(WRAP_BIN_DIR)/pkg-config
+	@echo 'export PKG_CONFIG_LIBDIR="$$TARGET_SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig:$$TARGET_SYSROOT/usr/share/pkgconfig"' >> $(WRAP_BIN_DIR)/pkg-config
+	@echo 'export PKG_CONFIG_SYSROOT_DIR="$$TARGET_SYSROOT"' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo '' >> $(WRAP_BIN_DIR)/pkg-config
 	@echo 'exec /usr/bin/pkg-config "$$@"' >> $(WRAP_BIN_DIR)/pkg-config
 	@chmod +x $(WRAP_BIN_DIR)/pkg-config

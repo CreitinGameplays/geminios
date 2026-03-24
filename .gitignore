@@ -75,6 +75,7 @@ __pycache__/
 .aiexclude
 initramfs_build/*
 initramfs_build*/
+initramfs-check.*
 .cache/
 .host_dev_overlay_paths.json
 

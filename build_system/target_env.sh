@@ -1,17 +1,41 @@
 #!/bin/bash
 # GeminiOS Target Environment (Apply after Glibc)
-export CFLAGS="--sysroot=$ROOTFS -O2 -fPIC -Wno-error"
-export CXXFLAGS="--sysroot=$ROOTFS -O2 -fPIC -Wno-error"
+TARGET_SYSROOT="${TARGET_SYSROOT:-${BUILD_SYSROOT:-$ROOTFS}}"
+FINAL_ROOTFS="${FINAL_ROOTFS:-$ROOTFS}"
+
+export BUILD_CC="/usr/bin/gcc"
+export BUILD_CXX="/usr/bin/g++"
+export BUILD_AR="/usr/bin/ar"
+export BUILD_RANLIB="/usr/bin/ranlib"
+export BUILD_PKG_CONFIG="/usr/bin/pkg-config"
+
+export TARGET_CC="x86_64-gemini-linux-gnu-gcc"
+export TARGET_CXX="x86_64-gemini-linux-gnu-g++"
+export TARGET_AR="x86_64-gemini-linux-gnu-ar"
+export TARGET_RANLIB="x86_64-gemini-linux-gnu-ranlib"
+export TARGET_READELF="x86_64-gemini-linux-gnu-readelf"
+export TARGET_OBJDUMP="x86_64-gemini-linux-gnu-objdump"
+export TARGET_STRIP="x86_64-gemini-linux-gnu-strip"
+export TARGET_PKG_CONFIG="$ROOT_DIR/build_system/wrap_bin/pkg-config"
+export TARGET_SYSROOT
+
+export CC="$TARGET_CC"
+export CXX="$TARGET_CXX"
+export AR="$TARGET_AR"
+export RANLIB="$TARGET_RANLIB"
+
+export CFLAGS="--sysroot=$TARGET_SYSROOT -O2 -fPIC -Wno-error"
+export CXXFLAGS="--sysroot=$TARGET_SYSROOT -O2 -fPIC -Wno-error"
 # Prefer the staged linker-script directory only. Adding legacy lib64
 # makes autoconf sanity checks bypass libc.so's linker script, which can fail
 # early with GLIBC_PRIVATE references from the staged libc.so.6.
-export LDFLAGS="--sysroot=$ROOTFS -L$ROOTFS/usr/lib/x86_64-linux-gnu"
-export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
-export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
+export LDFLAGS="--sysroot=$TARGET_SYSROOT -L$TARGET_SYSROOT/usr/lib/x86_64-linux-gnu -L$TARGET_SYSROOT/lib/x86_64-linux-gnu"
+export PKG_CONFIG_LIBDIR="$TARGET_SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig:$TARGET_SYSROOT/usr/share/pkgconfig"
+export PKG_CONFIG_SYSROOT_DIR="$TARGET_SYSROOT"
 
 # Python specific - Use the wrapper for the built python
 export TARGET_PYTHON="$ROOT_DIR/build_system/run_target_python.sh"
 
 # Paths
-export PATH="$ROOT_DIR/build_system/wrap_bin:$ROOT_DIR/build_system/shim:$PATH:$ROOTFS/usr/bin:$ROOTFS/bin"
-export PKG_CONFIG_PATH="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
+export PATH="$ROOT_DIR/build_system/wrap_bin:$ROOT_DIR/build_system/shim:$PATH:$TARGET_SYSROOT/usr/bin:$TARGET_SYSROOT/bin"
+export PKG_CONFIG_PATH="$TARGET_SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig:$TARGET_SYSROOT/usr/share/pkgconfig"

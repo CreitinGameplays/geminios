@@ -6,29 +6,42 @@ GINIT_LIB="$ROOT_DIR/ginit/lib"
 SRC="$ROOT_DIR/src"
 PKGS="$ROOT_DIR/packages/system"
 GPKG_DIR="$ROOT_DIR/gpkg"
+TARGET_MULTIARCH="x86_64-linux-gnu"
+TARGET_CXX_VERSION="$(find "$ROOTFS/usr/include/c++" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | grep -E '^[0-9]+$' | sort -V | tail -n1)"
+COMMON_CXXFLAGS=(--sysroot="$ROOTFS" -O2 -I "$GINIT_SRC" -I "$SRC")
+COMMON_LDFLAGS=(--sysroot="$ROOTFS" -L"$GINIT_LIB" -L"$ROOTFS/usr/lib/$TARGET_MULTIARCH" -L"$ROOTFS/lib/$TARGET_MULTIARCH")
+COMMON_LIBS=(-lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt)
 
-# Build these C++ userspace tools with the host toolchain. The target sysroot
-# is not yet complete enough for libstdc++/pthread-heavy binaries like gpkg.
-unset CFLAGS CXXFLAGS LDFLAGS PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_PATH
+if [ -n "$TARGET_CXX_VERSION" ]; then
+    COMMON_CXXFLAGS+=(
+        -nostdinc++
+        -isystem "$ROOTFS/usr/include/c++/$TARGET_CXX_VERSION"
+        -isystem "$ROOTFS/usr/include/$TARGET_MULTIARCH/c++/$TARGET_CXX_VERSION"
+        -isystem "$ROOTFS/usr/include/c++/$TARGET_CXX_VERSION/backward"
+    )
+fi
+
+build_tool() {
+    local output="$1"
+    shift
+    /usr/bin/g++ "${COMMON_CXXFLAGS[@]}" -o "$output" "$@" "${COMMON_LDFLAGS[@]}" "${COMMON_LIBS[@]}"
+    /usr/bin/strip "$output"
+}
 
 echo "Compiling gpkg module..."
 make -C "$GPKG_DIR" clean
-make -C "$GPKG_DIR" install DESTDIR="$ROOTFS"
+make -C "$GPKG_DIR" install DESTDIR="$ROOTFS" ROOTFS="$ROOTFS" CXXFLAGS="${COMMON_CXXFLAGS[*]}" LDFLAGS="${COMMON_LDFLAGS[*]}"
 
 echo "Compiling ping..."
-/usr/bin/g++ -I "$GINIT_SRC" -I "$SRC" -o "$ROOTFS/bin/apps/system/ping" "$PKGS/ping/ping.cpp" -L"$GINIT_LIB" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt
-/usr/bin/strip "$ROOTFS/bin/apps/system/ping"
+build_tool "$ROOTFS/bin/apps/system/ping" "$PKGS/ping/ping.cpp"
 
 echo "Compiling greq..."
-/usr/bin/g++ -I "$GINIT_SRC" -I "$SRC" -o "$ROOTFS/bin/apps/system/greq" "$PKGS/greq/greq.cpp" -L"$GINIT_LIB" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt
-/usr/bin/strip "$ROOTFS/bin/apps/system/greq"
+build_tool "$ROOTFS/bin/apps/system/greq" "$PKGS/greq/greq.cpp"
 
 echo "Compiling User Tools..."
 for tool in passwd adduser useradd userdel usermod su sudo; do
-    /usr/bin/g++ -I "$GINIT_SRC" -I "$SRC" -o "$ROOTFS/bin/apps/system/$tool" "$PKGS/$tool/$tool.cpp" -L"$GINIT_LIB" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt
-    /usr/bin/strip "$ROOTFS/bin/apps/system/$tool"
+    build_tool "$ROOTFS/bin/apps/system/$tool" "$PKGS/$tool/$tool.cpp"
 done
 
 echo "Compiling Installer..."
-/usr/bin/g++ -I "$GINIT_SRC" -I "$SRC" -o "$ROOTFS/bin/apps/system/installer" "$PKGS/installer/"*.cpp -L"$GINIT_LIB" -lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt
-/usr/bin/strip "$ROOTFS/bin/apps/system/installer"
+build_tool "$ROOTFS/bin/apps/system/installer" "$PKGS/installer/"*.cpp

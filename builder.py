@@ -8,6 +8,10 @@ import shutil
 import glob
 import re
 import tempfile
+import gzip
+import fnmatch
+import urllib.request
+from urllib.parse import urljoin
 from datetime import datetime, timezone
 
 # Terminal Colors
@@ -66,8 +70,18 @@ PORTS_DIR = os.path.join(ROOT_DIR, "ports")
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
 ENV_CONFIG = os.path.join(BUILD_SYSTEM_DIR, "env_config.sh")
 MANIFEST_FILE = os.path.join(BUILD_SYSTEM_DIR, "package_manifests.json")
+PORT_BUILD_MODES_FILE = os.path.join(BUILD_SYSTEM_DIR, "port_build_modes.json")
+BOOTSTRAP_RUNTIME_MANIFEST = os.path.join(BUILD_SYSTEM_DIR, "bootstrap_runtime_packages.txt")
+BOOTSTRAP_TOOLCHAIN_MANIFEST = os.path.join(BUILD_SYSTEM_DIR, "bootstrap_toolchain_packages.txt")
 VERIFY_SOURCES_SCRIPT = os.path.join(ROOT_DIR, "tools", "verify_source_urls.py")
 SYS_INFO_HEADER = os.path.join(ROOT_DIR, "src", "sys_info.h")
+BOOTSTRAP_ROOTFS_DIR = os.path.join(ROOT_DIR, "bootstrap_rootfs")
+BUILD_SYSROOT_DIR = os.path.join(ROOT_DIR, "build_sysroot")
+FINAL_ROOTFS_DIR = os.path.join(ROOT_DIR, "rootfs")
+ROOTFS_DIR = BUILD_SYSROOT_DIR
+OUTPUT_DIR = os.path.join(ROOT_DIR, "output")
+BOOTSTRAP_CACHE_DIR = os.path.join(ROOT_DIR, "external_dependencies", "debian-bootstrap")
+RUNTIME_CLOSURE_REPORT = os.path.join(OUTPUT_DIR, "runtime-closure.json")
 GPKG_UPGRADE_COMPANIONS_FILE = os.environ.get(
     "GPKG_UPGRADE_COMPANIONS_FILE",
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_upgrade_companions.conf"),
@@ -93,6 +107,12 @@ try:
 except FileNotFoundError:
     print_warning("WARNING: Package manifests file not found. Verification will be limited.")
     PACKAGE_MANIFESTS = {}
+
+try:
+    with open(PORT_BUILD_MODES_FILE, "r") as f:
+        PORT_BUILD_MODES = json.load(f)
+except FileNotFoundError:
+    PORT_BUILD_MODES = {"default": "target", "modes": {}}
 
 # Order of builds
 PACKAGES = [
@@ -385,6 +405,257 @@ def get_geminios_release_info():
         "iso_name": f'{identity["OS_NAME"]}-{codename_slug}-{identity["OS_VERSION_ID"]}-{build_slug}.iso',
     }
 
+def get_port_build_mode(pkg_name):
+    """Return the declared build mode for a port."""
+    return PORT_BUILD_MODES.get("modes", {}).get(pkg_name, PORT_BUILD_MODES.get("default", "target"))
+
+def read_manifest_lines(path):
+    """Read newline-separated manifest entries, ignoring comments and blanks."""
+    entries = []
+    if not os.path.exists(path):
+        return entries
+
+    with open(path, "r") as f:
+        for line in f:
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            entries.append(entry)
+    return entries
+
+def load_debian_bootstrap_config():
+    """Load Debian metadata bootstrap URLs from gpkg's Debian config."""
+    config = {}
+    if os.path.exists(GPKG_DEBIAN_CONFIG_FILE):
+        with open(GPKG_DEBIAN_CONFIG_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                config[key.strip()] = value.strip()
+
+    packages_url = config.get("PACKAGES_URL", "https://deb.debian.org/debian/dists/testing/main/binary-amd64/Packages.gz")
+    base_url = config.get("BASE_URL", "https://deb.debian.org/debian")
+    return base_url.rstrip("/") + "/", packages_url
+
+def fetch_url_cached(url, dest_path):
+    """Download a URL into the local cache unless already present."""
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+        return dest_path
+
+    with urllib.request.urlopen(url) as response, open(dest_path, "wb") as output:
+        shutil.copyfileobj(response, output)
+    return dest_path
+
+def parse_debian_packages_metadata(text):
+    """Parse a Debian Packages file into a name->metadata map."""
+    entries = {}
+    current = {}
+    current_key = None
+
+    def flush_entry():
+        nonlocal current, current_key
+        package_name = current.get("Package")
+        if package_name and package_name not in entries:
+            entries[package_name] = current
+        current = {}
+        current_key = None
+
+    for raw_line in text.splitlines():
+        if not raw_line:
+            flush_entry()
+            continue
+        if raw_line.startswith(" "):
+            if current_key:
+                current[current_key] = current.get(current_key, "") + "\n" + raw_line[1:]
+            continue
+        if ":" not in raw_line:
+            continue
+        key, value = raw_line.split(":", 1)
+        current_key = key.strip()
+        current[current_key] = value.strip()
+
+    flush_entry()
+    return entries
+
+def load_debian_package_index():
+    """Load and cache Debian package metadata used for stage0/bootstrap."""
+    base_url, packages_url = load_debian_bootstrap_config()
+    packages_gz = os.path.join(BOOTSTRAP_CACHE_DIR, "Packages.gz")
+    packages_txt = os.path.join(BOOTSTRAP_CACHE_DIR, "Packages")
+
+    fetch_url_cached(packages_url, packages_gz)
+    if not os.path.exists(packages_txt) or os.path.getmtime(packages_txt) < os.path.getmtime(packages_gz):
+        with gzip.open(packages_gz, "rb") as src, open(packages_txt, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+    with open(packages_txt, "r", encoding="utf-8", errors="replace") as f:
+        index = parse_debian_packages_metadata(f.read())
+
+    return base_url, index
+
+def normalize_dependency_name(token):
+    """Extract the package name from a Debian dependency token."""
+    token = token.strip()
+    if not token:
+        return ""
+    token = token.split("|", 1)[0].strip()
+    token = re.sub(r"\s*\(.*?\)", "", token).strip()
+    token = re.sub(r":[A-Za-z0-9_-]+$", "", token).strip()
+    token = re.sub(r"\[.*?\]", "", token).strip()
+    return token
+
+def resolve_bootstrap_requested_packages(index, requested_patterns):
+    """Resolve manifest entries to concrete Debian package names."""
+    resolved = set()
+    available_names = sorted(index)
+    for pattern in requested_patterns:
+        if any(ch in pattern for ch in "*?["):
+            matches = [name for name in available_names if fnmatch.fnmatch(name, pattern)]
+            resolved.update(matches)
+        elif pattern in index:
+            resolved.add(pattern)
+        else:
+            matches = [name for name in available_names if fnmatch.fnmatch(name, pattern + "*")]
+            resolved.update(matches)
+    return sorted(resolved)
+
+def resolve_bootstrap_dependency_closure(index, requested_packages):
+    """Resolve Depends/Pre-Depends recursively for a set of Debian packages."""
+    resolved = set()
+    queue = list(requested_packages)
+
+    while queue:
+        package_name = queue.pop()
+        if package_name in resolved or package_name not in index:
+            continue
+        resolved.add(package_name)
+        entry = index[package_name]
+        for field in ("Pre-Depends", "Depends"):
+            raw_value = entry.get(field, "")
+            if not raw_value:
+                continue
+            for dep_token in raw_value.split(","):
+                dep_name = normalize_dependency_name(dep_token)
+                if dep_name and dep_name in index and dep_name not in resolved:
+                    queue.append(dep_name)
+
+    return sorted(resolved)
+
+def extract_deb_to_dir(deb_path, dest_dir):
+    """Extract a .deb into a destination directory."""
+    os.makedirs(dest_dir, exist_ok=True)
+    result = subprocess.run(
+        ["dpkg-deb", "-x", deb_path, dest_dir],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to extract {deb_path}: {result.stderr.strip()}")
+
+def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
+    """Populate a stage directory from Debian .deb packages."""
+    if os.path.exists(stage_dir):
+        shutil.rmtree(stage_dir)
+    os.makedirs(stage_dir, exist_ok=True)
+
+    for package_name in package_names:
+        entry = package_index.get(package_name)
+        if not entry:
+            raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Debian metadata")
+        filename = entry.get("Filename")
+        if not filename:
+            raise RuntimeError(f"Bootstrap package '{package_name}' is missing a Filename entry")
+        deb_url = urljoin(base_url, filename)
+        deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
+        fetch_url_cached(deb_url, deb_path)
+        extract_deb_to_dir(deb_path, stage_dir)
+
+def ensure_debian_bootstrap():
+    """Ensure bootstrap_rootfs and build_sysroot are seeded from Debian packages."""
+    runtime_stamp = os.path.join(BOOTSTRAP_ROOTFS_DIR, ".bootstrap-complete")
+    sysroot_stamp = os.path.join(BUILD_SYSROOT_DIR, ".bootstrap-complete")
+
+    base_url, package_index = load_debian_package_index()
+    runtime_requests = read_manifest_lines(BOOTSTRAP_RUNTIME_MANIFEST)
+    toolchain_requests = read_manifest_lines(BOOTSTRAP_TOOLCHAIN_MANIFEST)
+
+    runtime_seed = resolve_bootstrap_requested_packages(package_index, runtime_requests)
+    toolchain_seed = resolve_bootstrap_requested_packages(package_index, toolchain_requests)
+    runtime_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed)
+    build_sysroot_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed + toolchain_seed)
+
+    desired_runtime_stamp = "\n".join(runtime_packages) + "\n"
+    desired_sysroot_stamp = "\n".join(build_sysroot_packages) + "\n"
+
+    runtime_stage_ready = (
+        os.path.isdir(BOOTSTRAP_ROOTFS_DIR)
+        and os.path.exists(runtime_stamp)
+        and open(runtime_stamp, "r").read() == desired_runtime_stamp
+    )
+    sysroot_stage_ready = (
+        os.path.isdir(BUILD_SYSROOT_DIR)
+        and os.path.exists(sysroot_stamp)
+        and open(sysroot_stamp, "r").read() == desired_sysroot_stamp
+    )
+    if runtime_stage_ready and sysroot_stage_ready:
+        return
+
+    print_section("\n=== Bootstrapping Debian Base Stages ===")
+
+    print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
+    bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
+    with open(runtime_stamp, "w") as f:
+        f.write(desired_runtime_stamp)
+
+    print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
+    bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
+    with open(sysroot_stamp, "w") as f:
+        f.write(desired_sysroot_stamp)
+
+def prepare_stage_dirs():
+    """Ensure the staged build directories exist and are bootstrapped."""
+    cleanup_transient_workspace_artifacts(report=True)
+    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    ensure_debian_bootstrap()
+
+def prepare_build_system_helpers():
+    """Rebuild the local shim/wrapper helpers so env changes take effect immediately."""
+    print_section("\n=== Preparing Build Helpers ===")
+    result = subprocess.run(
+        ["make", "-C", BUILD_SYSTEM_DIR],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print_error("FATAL: Failed to build build_system helpers.")
+        if result.stdout:
+            print(result.stdout.rstrip())
+        if result.stderr:
+            print(result.stderr.rstrip())
+        return False
+    print_success("  ✓ build_system wrappers rebuilt")
+    return True
+
+def assemble_final_rootfs():
+    """Assemble the final runtime rootfs from bootstrap_rootfs plus the build sysroot."""
+    print_section("\n=== Assembling Final Rootfs ===")
+    if os.path.exists(FINAL_ROOTFS_DIR):
+        shutil.rmtree(FINAL_ROOTFS_DIR)
+
+    shutil.copytree(BOOTSTRAP_ROOTFS_DIR, FINAL_ROOTFS_DIR, symlinks=True)
+    shutil.copytree(BUILD_SYSROOT_DIR, FINAL_ROOTFS_DIR, dirs_exist_ok=True, symlinks=True)
+    for stamp_name in (".bootstrap-complete",):
+        stamp_path = os.path.join(FINAL_ROOTFS_DIR, stamp_name)
+        if os.path.exists(stamp_path):
+            os.remove(stamp_path)
+    normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
+
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
     """Runs a shell command and captures output to log"""
     # Use target environment only if requested
@@ -424,10 +695,11 @@ def is_built(pkg_name):
         return False
     return not get_package_verification_issues(pkg_name)
 
-def expand_manifest_artifact_paths(artifact):
+def expand_manifest_artifact_paths(artifact, root_dir=None):
     """Return candidate paths for a manifest artifact, supporting exact paths and globs."""
+    root_dir = root_dir or ROOTFS_DIR
     project_relative = artifact.lstrip("/") if artifact.startswith("/") else artifact
-    rootfs_pattern = os.path.join(ROOT_DIR, "rootfs", project_relative)
+    rootfs_pattern = os.path.join(root_dir, project_relative)
     project_pattern = os.path.join(ROOT_DIR, artifact)
 
     patterns = [rootfs_pattern]
@@ -442,10 +714,11 @@ def expand_manifest_artifact_paths(artifact):
             matched.append(pattern)
     return matched
 
-def fallback_manifest_artifact_paths(artifact):
+def fallback_manifest_artifact_paths(artifact, root_dir=None):
     """Return smart fallback candidates for manifest entries that describe shared libraries."""
+    root_dir = root_dir or ROOTFS_DIR
     project_relative = artifact.lstrip("/") if artifact.startswith("/") else artifact
-    rootfs_path = os.path.join(ROOT_DIR, "rootfs", project_relative)
+    rootfs_path = os.path.join(root_dir, project_relative)
     dirname = os.path.dirname(rootfs_path)
     basename = os.path.basename(rootfs_path)
 
@@ -475,11 +748,11 @@ def fallback_manifest_artifact_paths(artifact):
         unique.append(path)
     return unique
 
-def artifact_exists_from_manifest(artifact):
+def artifact_exists_from_manifest(artifact, root_dir=None):
     """Check whether a manifest artifact exists, allowing glob patterns."""
-    matched_paths = expand_manifest_artifact_paths(artifact)
+    matched_paths = expand_manifest_artifact_paths(artifact, root_dir=root_dir)
     if not matched_paths:
-        matched_paths = fallback_manifest_artifact_paths(artifact)
+        matched_paths = fallback_manifest_artifact_paths(artifact, root_dir=root_dir)
     if not matched_paths:
         return False
 
@@ -488,21 +761,22 @@ def artifact_exists_from_manifest(artifact):
             return True
     return False
 
-def get_missing_manifest_artifacts(pkg_name):
+def get_missing_manifest_artifacts(pkg_name, root_dir=None):
     """Return missing manifest entries for a package."""
     if pkg_name not in PACKAGE_MANIFESTS:
         return []
 
     missing_artifacts = []
     for artifact in PACKAGE_MANIFESTS[pkg_name]:
-        if not artifact_exists_from_manifest(artifact):
+        if not artifact_exists_from_manifest(artifact, root_dir=root_dir):
             missing_artifacts.append(artifact)
     return missing_artifacts
 
-def get_dbus_runtime_abi_issues():
+def get_dbus_runtime_abi_issues(root_dir=None):
     """Return DBus runtime/library ABI mismatches inside the staged rootfs."""
-    dbus_launch_path = os.path.join(ROOT_DIR, "rootfs", "usr", "bin", "dbus-launch")
-    dbus_lib_path = os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "libdbus-1.so.3")
+    root_dir = root_dir or ROOTFS_DIR
+    dbus_launch_path = os.path.join(root_dir, "usr", "bin", "dbus-launch")
+    dbus_lib_path = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "libdbus-1.so.3")
 
     if not (os.path.exists(dbus_launch_path) and os.path.exists(dbus_lib_path)):
         return []
@@ -582,9 +856,9 @@ def collect_missing_runtime_deps(rootfs_dir, start_paths):
 
     return issues
 
-def get_glib_runtime_issues():
+def get_glib_runtime_issues(root_dir=None):
     """Return GLib/GIO runtime mismatches inside the staged rootfs."""
-    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    rootfs_dir = root_dir or ROOTFS_DIR
     libgio_path = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu", "libgio-2.0.so.0")
     if not os.path.exists(libgio_path):
         return []
@@ -610,9 +884,9 @@ def get_glib_runtime_issues():
     )
     return issues
 
-def get_libxml2_runtime_issues():
+def get_libxml2_runtime_issues(root_dir=None):
     """Return libxml2 runtime mismatches inside the staged rootfs."""
-    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    rootfs_dir = root_dir or ROOTFS_DIR
     libxml2_path = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu", "libxml2.so")
     if not os.path.exists(libxml2_path):
         return []
@@ -636,18 +910,18 @@ def get_libxml2_runtime_issues():
     )
     return issues
 
-def get_shared_mime_info_runtime_issues():
+def get_shared_mime_info_runtime_issues(root_dir=None):
     """Return shared-mime-info runtime mismatches inside the staged rootfs."""
-    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    rootfs_dir = root_dir or ROOTFS_DIR
     update_mime_path = os.path.join(rootfs_dir, "usr", "bin", "update-mime-database")
     if not os.path.exists(update_mime_path):
         return []
 
     return collect_missing_runtime_deps(rootfs_dir, [update_mime_path])
 
-def get_util_linux_runtime_issues():
+def get_util_linux_runtime_issues(root_dir=None):
     """Return util-linux ABI/runtime mismatches inside the staged rootfs."""
-    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    rootfs_dir = root_dir or ROOTFS_DIR
     libmount_path = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu", "libmount.so.1")
     if not os.path.exists(libmount_path):
         return []
@@ -674,21 +948,77 @@ def get_util_linux_runtime_issues():
     )
     return issues
 
-def get_package_verification_issues(pkg_name):
+def extract_glibc_release_version(binary_path):
+    """Return the glibc release version string embedded in a runtime object."""
+    result = subprocess.run(
+        ["strings", "-a", binary_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    for line in result.stdout.splitlines():
+        match = re.search(r"release version ([0-9][0-9.]+)", line)
+        if match:
+            return match.group(1)
+    return None
+
+def get_glibc_runtime_issues(root_dir=None):
+    """Return staged glibc loader/runtime mismatches inside the rootfs."""
+    rootfs_dir = root_dir or ROOTFS_DIR
+    libc_path = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu", "libc.so.6")
+    loader_path = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu", "ld-linux-x86-64.so.2")
+
+    if not (os.path.exists(libc_path) and os.path.exists(loader_path)):
+        return []
+
+    issues = []
+    libc_version = extract_glibc_release_version(libc_path)
+    loader_version = extract_glibc_release_version(loader_path)
+    if libc_version and loader_version and libc_version != loader_version:
+        issues.append(
+            f"glibc runtime mismatch: libc.so.6 is {libc_version} but ld-linux-x86-64.so.2 is {loader_version}"
+        )
+
+    library_path = ":".join(
+        [
+            os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu"),
+            os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu"),
+        ]
+    )
+    result = subprocess.run(
+        [loader_path, "--library-path", library_path, libc_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip().splitlines()
+        stdout = (result.stdout or "").strip().splitlines()
+        detail = stderr[-1] if stderr else (stdout[-1] if stdout else f"exit code {result.returncode}")
+        issues.append(f"staged glibc self-test failed: {detail}")
+
+    return issues
+
+def get_package_verification_issues(pkg_name, root_dir=None):
     """Return manifest and semantic verification issues for a package."""
     issues = []
-    issues.extend(f"missing artifact: {artifact}" for artifact in get_missing_manifest_artifacts(pkg_name))
+    issues.extend(f"missing artifact: {artifact}" for artifact in get_missing_manifest_artifacts(pkg_name, root_dir=root_dir))
 
-    if pkg_name == "dbus":
-        issues.extend(get_dbus_runtime_abi_issues())
+    if pkg_name == "glibc":
+        issues.extend(get_glibc_runtime_issues(root_dir=root_dir))
+    elif pkg_name == "dbus":
+        issues.extend(get_dbus_runtime_abi_issues(root_dir=root_dir))
     elif pkg_name == "glib":
-        issues.extend(get_glib_runtime_issues())
+        issues.extend(get_glib_runtime_issues(root_dir=root_dir))
     elif pkg_name == "libxml2":
-        issues.extend(get_libxml2_runtime_issues())
+        issues.extend(get_libxml2_runtime_issues(root_dir=root_dir))
     elif pkg_name == "shared-mime-info":
-        issues.extend(get_shared_mime_info_runtime_issues())
+        issues.extend(get_shared_mime_info_runtime_issues(root_dir=root_dir))
     elif pkg_name == "util-linux":
-        issues.extend(get_util_linux_runtime_issues())
+        issues.extend(get_util_linux_runtime_issues(root_dir=root_dir))
 
     return issues
 
@@ -705,7 +1035,7 @@ def resolve_rootfs_copy_destination(dest_path):
     """Follow an existing rootfs symlink destination so host overlay copies land on the canonical path."""
     if os.path.islink(dest_path):
         target_path = os.path.realpath(dest_path)
-        rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+        rootfs_dir = ROOTFS_DIR
         try:
             common_root = os.path.commonpath([rootfs_dir, target_path])
         except ValueError:
@@ -736,22 +1066,23 @@ def merge_rootfs_entry(source_path, dest_path):
     shutil.move(source_path, dest_path)
     return 1
 
-def normalize_rootfs_multiarch_layout(report=False):
+def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     """Fold legacy lib64 installs back into the canonical Debian multiarch layout."""
+    root_dir = root_dir or ROOTFS_DIR
     migration_specs = [
         (
-            os.path.join(ROOT_DIR, "rootfs", "lib64"),
-            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
+            os.path.join(root_dir, "lib64"),
+            os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
             {"x86_64-linux-gnu"},
         ),
         (
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
+            os.path.join(root_dir, "usr", "lib64"),
+            os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
             {"x86_64-linux-gnu"},
         ),
         (
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "pkgconfig"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
+            os.path.join(root_dir, "usr", "lib", "pkgconfig"),
+            os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
             set(),
         ),
     ]
@@ -775,13 +1106,71 @@ def normalize_rootfs_multiarch_layout(report=False):
         for source_path, dest_path in migrated_entries:
             print_info(f"  Migrated {source_path} -> {dest_path}")
 
-    normalize_rootfs_usr_lib_top_level(report=report)
-    ensure_multiarch_dev_compat(report=report)
+    prune_shadowed_rootfs_runtime_libraries(root_dir=root_dir, report=report)
+    normalize_rootfs_usr_lib_top_level(root_dir=root_dir, report=report)
+    ensure_multiarch_dev_compat(root_dir=root_dir, report=report)
     return migrated_entries
 
-def normalize_rootfs_usr_lib_top_level(report=False):
+def prune_shadowed_rootfs_runtime_libraries(root_dir=None, report=False):
+    """Remove non-core /lib runtime entries when the canonical /usr/lib copy exists."""
+    rootfs_dir = root_dir or ROOTFS_DIR
+    legacy_dir = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu")
+    canonical_dir = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu")
+    if not (os.path.isdir(legacy_dir) and os.path.isdir(canonical_dir)):
+        return []
+
+    protected_paths = set()
+    for artifacts in PACKAGE_MANIFESTS.values():
+        for artifact in artifacts:
+            if any(ch in artifact for ch in "*?["):
+                continue
+            rel_artifact = artifact.lstrip("/")
+            if rel_artifact.startswith("lib/"):
+                protected_paths.add(rel_artifact)
+
+    removed_entries = []
+    for entry in sorted(os.listdir(legacy_dir)):
+        legacy_path = os.path.join(legacy_dir, entry)
+        canonical_path = os.path.join(canonical_dir, entry)
+        rel_legacy = os.path.relpath(legacy_path, rootfs_dir).replace(os.sep, "/")
+
+        if not (entry.startswith("lib") or entry.startswith("ld-")):
+            continue
+        if rel_legacy in protected_paths:
+            continue
+        if is_core_multiarch_runtime_library(entry):
+            continue
+        if not os.path.lexists(legacy_path) or not os.path.lexists(canonical_path):
+            continue
+        if os.path.isdir(legacy_path) and not os.path.islink(legacy_path):
+            continue
+        if os.path.isdir(canonical_path) and not os.path.islink(canonical_path):
+            continue
+
+        remove_path(legacy_path)
+        removed_entries.append((legacy_path, canonical_path))
+
+    if removed_entries:
+        overlay_paths = load_host_dev_overlay_paths()
+        if overlay_paths:
+            for legacy_path, _ in removed_entries:
+                rel_legacy = os.path.relpath(legacy_path, rootfs_dir).replace(os.sep, "/")
+                overlay_paths.discard(rel_legacy)
+            save_host_dev_overlay_paths(overlay_paths)
+
+    if report and removed_entries:
+        print_info("[*] Pruning shadowed /lib runtime libraries in favor of Debian multiarch...")
+        for legacy_path, canonical_path in removed_entries[:20]:
+            print_info(f"  Removed {legacy_path}; canonical runtime is {canonical_path}")
+        if len(removed_entries) > 20:
+            print_info(f"  Removed {len(removed_entries) - 20} additional shadowed /lib runtime libraries.")
+
+    return removed_entries
+
+def normalize_rootfs_usr_lib_top_level(root_dir=None, report=False):
     """Relocate top-level /usr/lib libraries into the canonical multiarch directory."""
-    usr_lib_dir = os.path.join(ROOT_DIR, "rootfs", "usr", "lib")
+    root_dir = root_dir or ROOTFS_DIR
+    usr_lib_dir = os.path.join(root_dir, "usr", "lib")
     canonical_dir = os.path.join(usr_lib_dir, "x86_64-linux-gnu")
     if not os.path.isdir(usr_lib_dir):
         return []
@@ -826,7 +1215,7 @@ def normalize_rootfs_usr_lib_top_level(report=False):
 
     for entry in candidate_entries:
         source_path = os.path.join(usr_lib_dir, entry)
-        rel_path = os.path.relpath(source_path, os.path.join(ROOT_DIR, "rootfs")).replace(os.sep, "/")
+        rel_path = os.path.relpath(source_path, root_dir).replace(os.sep, "/")
         canonical_path = os.path.join(canonical_dir, entry)
         family_prefix = library_family_prefix(entry)
         canonical_family_matches = sorted(
@@ -909,7 +1298,7 @@ def cleanup_transient_workspace_artifacts(report=True):
 def clean_system():
     print_section("=== Cleaning GeminiOS Build Environment ===")
     cleanup_transient_workspace_artifacts(report=True)
-    dirs_to_remove = ["rootfs", "glibc-build", "logs", "isodir", "initramfs_build"]
+    dirs_to_remove = ["bootstrap_rootfs", "build_sysroot", "rootfs", "glibc-build", "logs", "output", "isodir", "initramfs_build"]
     for d in dirs_to_remove:
         path = os.path.join(ROOT_DIR, d)
         if os.path.exists(path):
@@ -927,13 +1316,13 @@ def clean_system():
 def sync_kernel():
     print_section("\n=== Syncing Kernel Image ===")
     kernel_src = os.path.join(ROOT_DIR, "external_dependencies/linux-6.6.14/arch/x86/boot/bzImage")
-    kernel_dest = os.path.join(ROOT_DIR, "rootfs/boot/kernel")
+    kernel_dest = os.path.join(ROOTFS_DIR, "boot", "kernel")
     
     if os.path.exists(kernel_src):
         print_info(f"[*] Copying {kernel_src} to {kernel_dest} and zoneinfo...")
         os.makedirs(os.path.dirname(kernel_dest), exist_ok=True)
         subprocess.run(f"cp {kernel_src} {kernel_dest}", shell=True, executable="/usr/bin/bash")
-        subprocess.run(f"cp -r /usr/share/zoneinfo rootfs/usr/share", shell=True, executable="/usr/bin/bash")
+        subprocess.run(f"cp -r /usr/share/zoneinfo {os.path.join(ROOTFS_DIR, 'usr', 'share')}", shell=True, executable="/usr/bin/bash")
         return True
     else:
         print_warning(f" [WARNING] Kernel image not found at {kernel_src}")
@@ -996,16 +1385,20 @@ def build_package(pkg_name, index, total, force=False, debug=False):
         print(color(" [SKIPPED]", Colors.YELLOW) + " (No build script)")
         return True
 
-    # A few packages need a true native host toolchain/bootstrap environment.
-    host_toolchain_packages = {"kernel_headers", "glibc", "wayland"}
-    use_target_env = pkg_name not in host_toolchain_packages
+    build_mode = get_port_build_mode(pkg_name)
+    host_env_packages = {"kernel_headers", "glibc", "wayland"}
+    use_target_env = build_mode != "host-only-tool" and pkg_name not in host_env_packages
     ret = run_command(build_script, cwd=pkg_dir, log_file=log_file, use_target_env=use_target_env, debug=debug)
     
     duration = time.time() - start_time
     if ret == 0:
-        normalize_rootfs_multiarch_layout(report=debug)
+        normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=debug)
         # Post-build Verification
         verification_issues = get_package_verification_issues(pkg_name)
+        closure_report = os.path.join(LOG_DIR, f"{pkg_name}-runtime-closure.json")
+        closure_issues = generate_runtime_closure_report(ROOTFS_DIR, closure_report)
+        if build_mode != "host-only-tool":
+            verification_issues.extend(closure_issues)
         if not verification_issues:
             print(color(f" [DONE]", Colors.GREEN + Colors.BOLD) + f" ({duration:.2f}s)")
             return True
@@ -1036,8 +1429,8 @@ def verify_source_urls(requested_packages):
     return subprocess.call(cmd, cwd=ROOT_DIR)
 
 def copy_dev_environment():
-    """Copies host C/C++ development environment (headers and libraries) to rootfs"""
-    print_section("\n=== Installing C/C++ Development Environment ===")
+    """Compatibility helper for migrating old host-dev overlays into the build sysroot."""
+    print_section("\n=== Installing C/C++ Development Environment (Compatibility Mode) ===")
     overlay_paths = load_host_dev_overlay_paths()
 
     def sanitize_overlay_destination(dest_path):
@@ -1050,11 +1443,11 @@ def copy_dev_environment():
     def cleanup_broken_overlay_symlinks():
         """Remove stale broken symlinks under dev-overlay target directories before copying."""
         candidate_dirs = [
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
-            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "gcc"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "include"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "local", "include"),
+            os.path.join(ROOTFS_DIR, "usr", "lib", "x86_64-linux-gnu"),
+            os.path.join(ROOTFS_DIR, "lib", "x86_64-linux-gnu"),
+            os.path.join(ROOTFS_DIR, "usr", "lib", "gcc"),
+            os.path.join(ROOTFS_DIR, "usr", "include"),
+            os.path.join(ROOTFS_DIR, "usr", "local", "include"),
         ]
 
         removed = 0
@@ -1078,7 +1471,7 @@ def copy_dev_environment():
 
     def record_overlay_tree(source_root, dest_root):
         source_root = os.path.realpath(source_root)
-        rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+        rootfs_dir = ROOTFS_DIR
         for dirpath, dirnames, filenames in os.walk(source_root, topdown=True, followlinks=False):
             rel_dir = os.path.relpath(dirpath, source_root)
             dest_dir = dest_root if rel_dir == "." else os.path.join(dest_root, rel_dir)
@@ -1097,9 +1490,9 @@ def copy_dev_environment():
     print_info("[*] Copying standard headers from host...")
 
     required_target_headers = [
-        os.path.join(ROOT_DIR, "rootfs", "usr", "include", "stdio.h"),
-        os.path.join(ROOT_DIR, "rootfs", "usr", "include", "pthread.h"),
-        os.path.join(ROOT_DIR, "rootfs", "usr", "include", "x86_64-linux-gnu", "bits", "pthreadtypes.h"),
+        os.path.join(ROOTFS_DIR, "usr", "include", "stdio.h"),
+        os.path.join(ROOTFS_DIR, "usr", "include", "pthread.h"),
+        os.path.join(ROOTFS_DIR, "usr", "include", "x86_64-linux-gnu", "bits", "pthreadtypes.h"),
     ]
     missing_target_headers = [path for path in required_target_headers if not os.path.exists(path)]
     if missing_target_headers:
@@ -1164,7 +1557,7 @@ def copy_dev_environment():
     include_paths = [x for x in include_paths if not (x in seen or seen.add(x))]
 
     for path in include_paths:
-        dest = os.path.join(ROOT_DIR, "rootfs", path.lstrip("/"))
+        dest = os.path.join(ROOTFS_DIR, path.lstrip("/"))
         dest = resolve_rootfs_copy_destination(dest)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         print_info(f"  Copying {path} -> {dest}")
@@ -1175,15 +1568,18 @@ def copy_dev_environment():
         )
         record_overlay_tree(path, dest)
 
-    # 2. Resolve and Copy Development Libraries (Static, Shared, and Objects)
-    print_info("[*] Copying C/C++ development libraries and objects from host...")
+    # 2. Resolve and Copy Development Libraries (Static and object files only).
+    # Runtime shared libraries must remain package-owned so the final image keeps
+    # a Debian-like library layout instead of inheriting host ABI state.
+    print_info("[*] Copying host static/object development libraries only...")
     
     lib_search_paths = [
         "/usr/lib/x86_64-linux-gnu",
         "/usr/lib64",
-        "/lib/x86_64-linux-gnu",
-        "/lib64"
     ]
+    # Do not seed host shared libraries from /lib*. Those paths are reserved for
+    # target-owned core runtime pieces (glibc/libxcrypt). Overlaying them causes
+    # stale host copies to shadow the canonical /usr/lib runtime during boot.
     
     # Dynamically find GCC lib dir
     gcc_lib_file = subprocess.run("gcc -print-libgcc-file-name", shell=True, capture_output=True, text=True, executable="/usr/bin/bash").stdout.strip()
@@ -1192,26 +1588,26 @@ def copy_dev_environment():
     
     # Target patterns to ensure we have everything needed for development
     target_patterns = [
-        "*.so*", "*.a", "*.o"
+        "*.a", "*.o"
     ]
-    
+
+    skipped_shared_libs = 0
     for lib_dir in lib_search_paths:
-        if not os.path.exists(lib_dir): continue
+        if not os.path.exists(lib_dir):
+            continue
         print_info(f"  Scanning {lib_dir} for libraries...")
         for pattern in target_patterns:
             find_cmd = f"find {lib_dir} -maxdepth 1 -name '{pattern}'"
             found_items = subprocess.run(find_cmd, shell=True, capture_output=True, text=True, executable="/usr/bin/bash").stdout.splitlines()
             for item_path in found_items:
-                item_name = os.path.basename(item_path)
-                
                 # Determine where it should go in rootfs
                 # We try to preserve the original path structure for development files
-                dest = os.path.join(ROOT_DIR, "rootfs", item_path.lstrip("/"))
+                dest = os.path.join(ROOTFS_DIR, item_path.lstrip("/"))
                 dest = resolve_rootfs_copy_destination(dest)
-                
+
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 sanitize_overlay_destination(dest)
-                overlay_paths.add(os.path.relpath(dest, os.path.join(ROOT_DIR, "rootfs")).replace(os.sep, "/"))
+                overlay_paths.add(os.path.relpath(dest, ROOTFS_DIR).replace(os.sep, "/"))
                 if not os.path.exists(dest):
                     if os.path.islink(item_path):
                          subprocess.run(f"cp -P {item_path} {dest}", shell=True, executable="/usr/bin/bash")
@@ -1222,7 +1618,20 @@ def copy_dev_environment():
                              executable="/usr/bin/bash",
                          )
 
+        shared_find_cmd = "find {} -maxdepth 1 -name '*.so*'".format(lib_dir)
+        skipped_shared_libs += len(
+            subprocess.run(
+                shared_find_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                executable="/usr/bin/bash",
+            ).stdout.splitlines()
+        )
+
     save_host_dev_overlay_paths(overlay_paths)
+    if skipped_shared_libs:
+        print_info(f"  Skipped {skipped_shared_libs} host shared libraries to keep rootfs runtime package-owned.")
     print_success("  ✓ Development environment installed.")
 
 def normalize_dev_tree(path):
@@ -1244,48 +1653,29 @@ def normalize_dev_tree(path):
 def normalize_dev_environment():
     """Fix previously copied host dev trees that preserved root ownership."""
     candidate_paths = [
-        os.path.join(ROOT_DIR, "rootfs", "usr", "include"),
-        os.path.join(ROOT_DIR, "rootfs", "usr", "local", "include"),
+        os.path.join(ROOTFS_DIR, "usr", "include"),
+        os.path.join(ROOTFS_DIR, "usr", "local", "include"),
     ]
     candidate_paths.extend(
-        glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "gcc", "*", "*", "include"))
+        glob.glob(os.path.join(ROOTFS_DIR, "usr", "lib", "x86_64-linux-gnu", "gcc", "*", "*", "include"))
     )
     candidate_paths.extend(
-        glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "include", "*", "c++", "*"))
+        glob.glob(os.path.join(ROOTFS_DIR, "usr", "include", "*", "c++", "*"))
     )
     candidate_paths.extend(
-        glob.glob(os.path.join(ROOT_DIR, "rootfs", "usr", "lib64", "gcc", "*", "*", "include"))
+        glob.glob(os.path.join(ROOTFS_DIR, "usr", "lib64", "gcc", "*", "*", "include"))
     )
 
     for candidate in candidate_paths:
         normalize_dev_tree(candidate)
 
 def prepare_rootfs():
-    print_section("\n=== Preparing Rootfs Structure ===")
-    cleanup_transient_workspace_artifacts(report=True)
-    dirs = [
-        "bin", "boot", "proc", "sys", "dev", "etc", "tmp", "mnt", "run", "sbin",
-        "lib", "lib/x86_64-linux-gnu", "lib64", "lib64/x86_64-linux-gnu",
-        "var/repo", "var/log", "var/tmp",
-        "usr/bin", "usr/share", "usr/local", "usr/lib", "usr/lib/x86_64-linux-gnu",
-        "usr/lib64", "usr/lib64/x86_64-linux-gnu", "usr/include",
-        "bin/apps/system"
-    ]
-    for d in dirs:
-        os.makedirs(os.path.join(ROOT_DIR, "rootfs", d), exist_ok=True)
-
-    normalize_dev_environment()
-
-    # Install Dev Environment
-    copy_dev_environment()
-
-    # Make Debian multiarch canonical before any package build runs so legacy
-    # --libdir=/usr/lib64 installs still land in the right place via the
-    # compatibility symlink instead of creating a second real tree.
-    normalize_rootfs_multiarch_layout(report=True)
-
-    # Remove problematic .la files
-    subprocess.run(f"find {os.path.join(ROOT_DIR, 'rootfs')} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
+    print_section("\n=== Preparing Build Stages ===")
+    prepare_stage_dirs()
+    if not prepare_build_system_helpers():
+        sys.exit(1)
+    normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=True)
+    subprocess.run(f"find {ROOTFS_DIR} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
 
 def verify_rootfs_integrity():
     print_section("\n=== Verifying Rootfs Integrity ===")
@@ -1323,7 +1713,7 @@ def verify_rootfs_integrity():
     
     missing = False
     for f in critical_files:
-        path = os.path.join(ROOT_DIR, "rootfs", f)
+        path = os.path.join(FINAL_ROOTFS_DIR, f)
         if not os.path.exists(path):
             print_error(f"  [MISSING] {f}")
             missing = True
@@ -1345,12 +1735,56 @@ def verify_rootfs_integrity():
         "usr/share/glvnd/egl_vendor.d/50_mesa.json",
     ]
     for rel_path in required_runtime_libs:
-        path = os.path.join(ROOT_DIR, "rootfs", rel_path)
+        path = os.path.join(FINAL_ROOTFS_DIR, rel_path)
         if not os.path.exists(path):
             print_error(f"  [MISSING] {rel_path}")
             return False
 
-    dbus_runtime_issues = get_dbus_runtime_abi_issues()
+    shadowed_runtime_issues = get_shadowed_runtime_library_issues(root_dir=FINAL_ROOTFS_DIR)
+    if shadowed_runtime_issues:
+        print_error(f"  [FAILED] {shadowed_runtime_issues[0]}")
+        print_error("           Remove stale /lib shadow copies so early boot uses the canonical /usr/lib runtime.")
+        return False
+    print_success("  [OK] Debian multiarch runtime layout")
+
+    runtime_closure_issues = generate_runtime_closure_report(FINAL_ROOTFS_DIR, RUNTIME_CLOSURE_REPORT)
+    if runtime_closure_issues:
+        print_error(f"  [FAILED] {runtime_closure_issues[0]}")
+        print_error(f"           See {RUNTIME_CLOSURE_REPORT} for the full staged ELF closure report.")
+        return False
+    print_success("  [OK] ELF runtime closure")
+
+    glibc_runtime_issues = get_glibc_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
+    if glibc_runtime_issues:
+        print_error(f"  [FAILED] {glibc_runtime_issues[0]}")
+        print_error("           The final image still contains a mismatched loader/libc runtime pair.")
+        return False
+    print_success("  [OK] glibc loader/runtime coherence")
+
+    util_linux_runtime_issues = get_util_linux_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
+    if util_linux_runtime_issues:
+        print_error(f"  [FAILED] {util_linux_runtime_issues[0]}")
+        print_error("           Early userspace must be runnable entirely from the staged rootfs.")
+        return False
+    print_success("  [OK] util-linux runtime closure")
+
+    early_userspace_smoke_tests = [
+        ("bin/bash", ["--version"]),
+        ("bin/mount", ["--help"]),
+        ("bin/umount", ["--help"]),
+        ("bin/ls", ["--version"]),
+        ("bin/sleep", ["0"]),
+        ("sbin/switch_root", ["--help"]),
+    ]
+    for rel_path, args in early_userspace_smoke_tests:
+        ok, detail = run_staged_binary_smoke_test(FINAL_ROOTFS_DIR, rel_path, args)
+        if not ok:
+            print_error(f"  [FAILED] staged smoke test for {rel_path}: {detail}")
+            print_error("           The final rootfs contains an ELF/runtime mismatch that would break early boot.")
+            return False
+    print_success("  [OK] early userspace smoke tests")
+
+    dbus_runtime_issues = get_dbus_runtime_abi_issues(root_dir=FINAL_ROOTFS_DIR)
     if dbus_runtime_issues:
         print_error(f"  [FAILED] {dbus_runtime_issues[0]}")
         print_error("           A staged package likely overwrote GeminiOS DBus binaries or libraries.")
@@ -1360,13 +1794,13 @@ def verify_rootfs_integrity():
     # Verify Python functionality
     print_info("[*] Verifying Python runtime...")
     env = os.environ.copy()
-    env["PYTHONHOME"] = os.path.join(ROOT_DIR, "rootfs/usr")
+    env["PYTHONHOME"] = os.path.join(FINAL_ROOTFS_DIR, "usr")
     env["LD_LIBRARY_PATH"] = (
-        f"{os.path.join(ROOT_DIR, 'rootfs/usr/lib/x86_64-linux-gnu')}:"
-        f"{os.path.join(ROOT_DIR, 'rootfs/lib/x86_64-linux-gnu')}"
+        f"{os.path.join(FINAL_ROOTFS_DIR, 'usr', 'lib', 'x86_64-linux-gnu')}:"
+        f"{os.path.join(FINAL_ROOTFS_DIR, 'lib', 'x86_64-linux-gnu')}"
     )
     
-    python_bin = os.path.join(ROOT_DIR, "rootfs/usr/bin/python3")
+    python_bin = os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "python3")
     if os.path.exists(python_bin):
         res = subprocess.run([python_bin, "-c", "import encodings; print('Python Encodings OK')"], 
                              env=env, capture_output=True, text=True)
@@ -1380,11 +1814,12 @@ def verify_rootfs_integrity():
 
 def finalize_rootfs():
     print_section("\n=== Finalizing Rootfs (Glue & Fixups) ===")
+    assemble_final_rootfs()
     
     # 1. Permissions (su/sudo)
     print_info("[*] Setting SUID permissions...")
     for tool in ["su", "sudo"]:
-        path = os.path.join(ROOT_DIR, "rootfs/bin/apps/system", tool)
+        path = os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", tool)
         if os.path.exists(path):
             subprocess.run(f"chmod u+s {path}", shell=True, executable="/usr/bin/bash")
 
@@ -1399,9 +1834,9 @@ def finalize_rootfs():
         ("python3", "usr/bin/python3") # Ensure both exist
     ]
     for target, link in symlinks:
-        link_path = os.path.join(ROOT_DIR, "rootfs", link)
+        link_path = os.path.join(FINAL_ROOTFS_DIR, link)
         if not os.path.exists(link_path):
-            target_path = os.path.join(ROOT_DIR, "rootfs", target)
+            target_path = os.path.join(FINAL_ROOTFS_DIR, target)
             if os.path.exists(target_path) or target == "bin/bash": 
                 # Note: bin/bash might be a symlink we just defined, so exist check might fail if not careful.
                 # However, order matters. We create bin/bash first.
@@ -1421,15 +1856,15 @@ def finalize_rootfs():
     print_info("[*] Updating system databases (Mime/Schemas)...")
     env = os.environ.copy()
     env["LD_LIBRARY_PATH"] = (
-        f"{os.path.join(ROOT_DIR, 'rootfs/usr/lib/x86_64-linux-gnu')}:"
-        f"{os.path.join(ROOT_DIR, 'rootfs/lib/x86_64-linux-gnu')}"
+        f"{os.path.join(FINAL_ROOTFS_DIR, 'usr', 'lib', 'x86_64-linux-gnu')}:"
+        f"{os.path.join(FINAL_ROOTFS_DIR, 'lib', 'x86_64-linux-gnu')}"
     )
     
     # Glib Schemas
-    schema_tool = os.path.join(ROOT_DIR, "rootfs/usr/bin/glib-compile-schemas")
-    schema_dir = os.path.join(ROOT_DIR, "rootfs/usr/share/glib-2.0/schemas")
+    schema_tool = os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "glib-compile-schemas")
+    schema_dir = os.path.join(FINAL_ROOTFS_DIR, "usr", "share", "glib-2.0", "schemas")
     if os.path.exists(schema_tool) and os.path.exists(schema_dir):
-        glib_issues = get_package_verification_issues("glib")
+        glib_issues = get_package_verification_issues("glib", root_dir=FINAL_ROOTFS_DIR)
         if glib_issues:
             print_warning(
                 "  Skipping glib-compile-schemas because the staged GLib runtime is inconsistent: "
@@ -1439,10 +1874,13 @@ def finalize_rootfs():
             subprocess.run([schema_tool, schema_dir], env=env)
 
     # Mime Database
-    mime_tool = os.path.join(ROOT_DIR, "rootfs/usr/bin/update-mime-database")
-    mime_dir = os.path.join(ROOT_DIR, "rootfs/usr/share/mime")
+    mime_tool = os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "update-mime-database")
+    mime_dir = os.path.join(FINAL_ROOTFS_DIR, "usr", "share", "mime")
     if os.path.exists(mime_tool) and os.path.exists(mime_dir):
-        mime_issues = get_package_verification_issues("libxml2") + get_package_verification_issues("shared-mime-info")
+        mime_issues = (
+            get_package_verification_issues("libxml2", root_dir=FINAL_ROOTFS_DIR)
+            + get_package_verification_issues("shared-mime-info", root_dir=FINAL_ROOTFS_DIR)
+        )
         if mime_issues:
             print_warning(
                 "  Skipping update-mime-database because the staged MIME/libxml runtime is inconsistent: "
@@ -1454,13 +1892,13 @@ def finalize_rootfs():
     # 4. Create Live Marker
     # This file tells ginit that we are booting the Live CD (enabling autologin)
     # The installer will remove this file from the installed system.
-    with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-live"), "w") as f:
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "geminios-live"), "w") as f:
         f.write("1")
 
     # 5. Seed gpkg configuration files. Debian testing is built-in; optional
     # GeminiOS-native repositories can be preseeded from build config.
     print_info("[*] Seeding gpkg repository configuration...")
-    gpkg_dir = os.path.join(ROOT_DIR, "rootfs/etc/gpkg")
+    gpkg_dir = os.path.join(FINAL_ROOTFS_DIR, "etc", "gpkg")
     gpkg_sources_dir = os.path.join(gpkg_dir, "sources.list.d")
     os.makedirs(gpkg_sources_dir, exist_ok=True)
 
@@ -1514,12 +1952,12 @@ def finalize_rootfs():
     # 6. Versioning
     release = get_geminios_release_info()
     print_info(f"[*] Setting system version: {release['display_version']} (build {release['build_id']})")
-    with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-version"), "w") as f:
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "geminios-version"), "w") as f:
         f.write(release["display_version"] + "\n")
-    with open(os.path.join(ROOT_DIR, "rootfs/etc/geminios-build-id"), "w") as f:
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "geminios-build-id"), "w") as f:
         f.write(release["build_id"] + "\n")
     
-    with open(os.path.join(ROOT_DIR, "rootfs/etc/os-release"), "w") as f:
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "os-release"), "w") as f:
         f.write(f'NAME="{release["name"]}"\n')
         f.write(f'ID={release["id"]}\n')
         f.write(f'ID_LIKE="{release["id_like"]}"\n')
@@ -1537,8 +1975,8 @@ def finalize_rootfs():
 
     # 7. D-Bus Machine ID
     print_info("[*] Generating D-Bus machine-id...")
-    machine_id_path = os.path.join(ROOT_DIR, "rootfs/etc/machine-id")
-    dbus_uuid_path = os.path.join(ROOT_DIR, "rootfs/var/lib/dbus/machine-id")
+    machine_id_path = os.path.join(FINAL_ROOTFS_DIR, "etc", "machine-id")
+    dbus_uuid_path = os.path.join(FINAL_ROOTFS_DIR, "var", "lib", "dbus", "machine-id")
     os.makedirs(os.path.dirname(dbus_uuid_path), exist_ok=True)
     
     if not os.path.exists(machine_id_path):
@@ -1555,13 +1993,13 @@ def finalize_rootfs():
     # 8. Remove known-unused host runtime libraries that can leak in from the
     # development overlay. Keep this targeted to avoid breaking dlopen()-based
     # packages or future native ports.
-    prune_unused_host_runtime_libs()
+    prune_unused_host_runtime_libs(root_dir=FINAL_ROOTFS_DIR)
 
     # 9. Strip host dev-overlay leftovers before packaging the final image.
-    prune_host_dev_overlay_artifacts()
+    prune_host_dev_overlay_artifacts(root_dir=FINAL_ROOTFS_DIR)
 
     # 10. Restore multiarch compatibility symlinks for the in-OS toolchain.
-    normalize_rootfs_multiarch_layout(report=True)
+    normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
     # 11. Final Integrity Check
     if not verify_rootfs_integrity():
@@ -1620,20 +2058,194 @@ def get_elf_interpreter(binary_path):
             return line[start + 1:end]
     return None
 
+def get_elf_rpaths(binary_path):
+    """Return RPATH/RUNPATH entries declared by an ELF binary."""
+    result = subprocess.run(
+        ["readelf", "-d", binary_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    entries = []
+    for line in result.stdout.splitlines():
+        if "(RPATH)" not in line and "(RUNPATH)" not in line:
+            continue
+        start = line.find("[")
+        end = line.find("]", start + 1)
+        if start != -1 and end != -1:
+            entries.extend([entry for entry in line[start + 1:end].split(":") if entry])
+    return entries
+
+def is_core_multiarch_runtime_library(lib_filename):
+    """Return True for libraries that legitimately live in /lib on Debian-style systems."""
+    core_prefixes = (
+        "ld-linux",
+        "ld-",
+        "libBrokenLocale.so",
+        "libBrokenLocale-",
+        "libanl.so",
+        "libanl-",
+        "libc.so",
+        "libc-",
+        "libcrypt.so",
+        "libcrypt-",
+        "libdl.so",
+        "libdl-",
+        "libm.so",
+        "libm-",
+        "libnsl.so",
+        "libnsl-",
+        "libnss_",
+        "libpthread.so",
+        "libpthread-",
+        "libresolv.so",
+        "libresolv-",
+        "librt.so",
+        "librt-",
+        "libthread_db.so",
+        "libthread_db-",
+        "libutil.so",
+        "libutil-",
+    )
+    return any(lib_filename.startswith(prefix) for prefix in core_prefixes)
+
+def iter_rootfs_library_search_paths(lib_filename):
+    """Yield library search paths in the preferred Debian-style order."""
+    if is_core_multiarch_runtime_library(lib_filename):
+        return [
+            "lib/x86_64-linux-gnu",
+            "usr/lib/x86_64-linux-gnu",
+            "lib64",
+            "usr/lib64",
+            "lib",
+            "usr/lib",
+        ]
+    return [
+        "usr/lib/x86_64-linux-gnu",
+        "lib/x86_64-linux-gnu",
+        "usr/lib64",
+        "lib64",
+        "usr/lib",
+        "lib",
+    ]
+
 def find_rootfs_library(rootfs_dir, lib_filename):
     """Find a library within the target rootfs."""
-    for search_path in [
-        "lib/x86_64-linux-gnu",
-        "usr/lib/x86_64-linux-gnu",
-        "lib64",
-        "usr/lib64",
-        "lib",
-        "usr/lib",
-    ]:
+    for search_path in iter_rootfs_library_search_paths(lib_filename):
         candidate = os.path.join(rootfs_dir, search_path, lib_filename)
         if os.path.exists(candidate):
             return candidate
     return None
+
+def get_shadowed_runtime_library_issues(root_dir=None):
+    """Report non-core libraries that still exist in both /lib and /usr/lib."""
+    rootfs_dir = root_dir or ROOTFS_DIR
+    legacy_dir = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu")
+    canonical_dir = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu")
+    if not (os.path.isdir(legacy_dir) and os.path.isdir(canonical_dir)):
+        return []
+
+    issues = []
+    for entry in sorted(os.listdir(legacy_dir)):
+        legacy_path = os.path.join(legacy_dir, entry)
+        canonical_path = os.path.join(canonical_dir, entry)
+        if not (entry.startswith("lib") or entry.startswith("ld-")):
+            continue
+        if is_core_multiarch_runtime_library(entry):
+            continue
+        if not (os.path.exists(legacy_path) and os.path.exists(canonical_path)):
+            continue
+        if os.path.isdir(legacy_path) and not os.path.islink(legacy_path):
+            continue
+        if os.path.isdir(canonical_path) and not os.path.islink(canonical_path):
+            continue
+        if os.path.realpath(legacy_path) != os.path.realpath(canonical_path):
+            issues.append(
+                f"non-core library shadowed in /lib: lib/x86_64-linux-gnu/{entry} overrides usr/lib/x86_64-linux-gnu/{entry}"
+            )
+    return issues
+
+def generate_runtime_closure_report(root_dir, report_path):
+    """Generate a runtime-closure JSON report for staged ELF files."""
+    report = {"root_dir": root_dir, "files": []}
+    issues = []
+    allowed_rpath_prefixes = ("/lib", "/usr/lib", "$ORIGIN")
+    allowed_interpreter_prefixes = ("/lib", "/lib64", "/usr/lib", "/usr/lib64")
+
+    for path in sorted(iter_rootfs_elf_files(root_dir)):
+        rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+        interpreter = get_elf_interpreter(path)
+        needed = get_elf_needed(path)
+        rpaths = get_elf_rpaths(path)
+        resolved = {}
+        unresolved = []
+        interpreter_resolved = None
+
+        for lib_name in needed:
+            candidate = find_rootfs_library(root_dir, lib_name)
+            if candidate:
+                real_candidate = os.path.realpath(candidate)
+                try:
+                    if os.path.commonpath([root_dir, real_candidate]) != root_dir:
+                        issues.append(f"{rel_path} resolves {lib_name} outside the staged rootfs: {real_candidate}")
+                        continue
+                except ValueError:
+                    issues.append(f"{rel_path} resolves {lib_name} outside the staged rootfs: {real_candidate}")
+                    continue
+                resolved[lib_name] = os.path.relpath(real_candidate, root_dir).replace(os.sep, "/")
+            else:
+                unresolved.append(lib_name)
+                issues.append(f"{rel_path} is missing runtime dependency {lib_name}")
+
+        if interpreter:
+            if not interpreter.startswith(allowed_interpreter_prefixes):
+                issues.append(f"{rel_path} declares an unexpected interpreter path: {interpreter}")
+            interpreter_name = os.path.basename(interpreter)
+            interpreter_path = find_rootfs_library(root_dir, interpreter_name)
+            if not interpreter_path:
+                issues.append(f"{rel_path} requests interpreter {interpreter} but it is missing from the staged rootfs")
+            else:
+                real_interpreter = os.path.realpath(interpreter_path)
+                try:
+                    if os.path.commonpath([root_dir, real_interpreter]) != root_dir:
+                        issues.append(f"{rel_path} resolves interpreter {interpreter} outside the staged rootfs: {real_interpreter}")
+                    else:
+                        interpreter_resolved = os.path.relpath(real_interpreter, root_dir).replace(os.sep, "/")
+                except ValueError:
+                    issues.append(f"{rel_path} resolves interpreter {interpreter} outside the staged rootfs: {real_interpreter}")
+
+        for entry in rpaths:
+            if entry.startswith(ROOT_DIR):
+                issues.append(f"{rel_path} contains host path in RPATH/RUNPATH: {entry}")
+            elif entry.startswith("/") and not entry.startswith(allowed_rpath_prefixes):
+                issues.append(f"{rel_path} contains non-target absolute RPATH/RUNPATH entry: {entry}")
+
+        report["files"].append(
+            {
+                "path": rel_path,
+                "interpreter": interpreter,
+                "interpreter_resolved": interpreter_resolved,
+                "needed": needed,
+                "resolved": resolved,
+                "unresolved": unresolved,
+                "rpath_runpath": rpaths,
+            }
+        )
+
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=2)
+        f.write("\n")
+
+    # Preserve ordering but de-duplicate messages.
+    unique_issues = []
+    seen = set()
+    for issue in issues:
+        if issue in seen:
+            continue
+        seen.add(issue)
+        unique_issues.append(issue)
+    return unique_issues
 
 def iter_rootfs_elf_files(rootfs_dir):
     """Yield likely ELF-bearing files from runtime-relevant rootfs paths."""
@@ -1673,11 +2285,11 @@ def collect_rootfs_needed_libs(rootfs_dir, excluded_paths=None):
 
     return needed
 
-def prune_unused_host_runtime_libs():
+def prune_unused_host_runtime_libs(root_dir=None):
     """Remove known host-overlay runtime libraries when nothing in rootfs needs them."""
     print_info("[*] Pruning unused host-overlay runtime libraries...")
 
-    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    rootfs_dir = root_dir or ROOTFS_DIR
     host_multiarch_dirs = [
         os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu"),
         os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu"),
@@ -1767,7 +2379,7 @@ def prune_unused_host_runtime_libs():
     if removed_count == 0:
         print_success("  ✓ No unused host-overlay runtime libraries needed pruning.")
 
-def prune_host_dev_overlay_artifacts():
+def prune_host_dev_overlay_artifacts(root_dir=None):
     """Remove host-overlay files that are not owned by built packages or needed at runtime."""
     print_info("[*] Pruning host development overlay artifacts...")
 
@@ -1776,7 +2388,7 @@ def prune_host_dev_overlay_artifacts():
         print_success("  ✓ No host development overlay record found.")
         return
 
-    rootfs_dir = os.path.join(ROOT_DIR, "rootfs")
+    rootfs_dir = root_dir or ROOTFS_DIR
     manifest_owned_artifacts = set()
     manifest_owned_targets = set()
     for artifacts in PACKAGE_MANIFESTS.values():
@@ -1807,6 +2419,12 @@ def prune_host_dev_overlay_artifacts():
         "usr/include/c++/",
         "usr/include/x86_64-linux-gnu/c++/",
     )
+    library_prefixes = (
+        "usr/lib/x86_64-linux-gnu/",
+        "lib/x86_64-linux-gnu/",
+        "usr/lib/",
+        "lib/",
+    )
 
     for rel_path in sorted(overlay_paths):
         abs_path = os.path.join(rootfs_dir, rel_path)
@@ -1826,6 +2444,13 @@ def prune_host_dev_overlay_artifacts():
             continue
 
         basename = os.path.basename(rel_path)
+        if rel_path.startswith(library_prefixes):
+            preferred_candidate = find_rootfs_library(rootfs_dir, basename)
+            if preferred_candidate and os.path.realpath(preferred_candidate) != os.path.realpath(abs_path):
+                remove_path(abs_path)
+                removed_count += 1
+                continue
+
         if basename in needed_libs:
             kept_count += 1
             continue
@@ -1835,6 +2460,12 @@ def prune_host_dev_overlay_artifacts():
             if soname is None:
                 soname = get_elf_soname(abs_path)
                 soname_cache[abs_path] = soname
+            if soname:
+                preferred_candidate = find_rootfs_library(rootfs_dir, soname)
+                if preferred_candidate and os.path.realpath(preferred_candidate) != os.path.realpath(abs_path):
+                    remove_path(abs_path)
+                    removed_count += 1
+                    continue
             if soname and soname in needed_libs:
                 kept_count += 1
                 continue
@@ -1849,7 +2480,7 @@ def prune_host_dev_overlay_artifacts():
             removed_count += 1
             continue
 
-        if rel_path.startswith(("usr/lib/x86_64-linux-gnu/", "lib/x86_64-linux-gnu/", "usr/lib/", "lib/")):
+        if rel_path.startswith(library_prefixes):
             remove_path(abs_path)
             removed_count += 1
             continue
@@ -1869,10 +2500,11 @@ def prune_host_dev_overlay_artifacts():
     if kept_count:
         print_info(f"  Kept {kept_count} overlay artifacts because they are package-owned or still needed.")
 
-def ensure_multiarch_dev_compat(report=True):
+def ensure_multiarch_dev_compat(root_dir=None, report=True):
     """Collapse lib64 trees into Debian-style multiarch with compatibility symlinks."""
     if report:
         print_info("[*] Restoring multiarch compatibility trees...")
+    root_dir = root_dir or ROOTFS_DIR
 
     def replace_with_symlink(path, target):
         if os.path.islink(path):
@@ -1888,18 +2520,18 @@ def ensure_multiarch_dev_compat(report=True):
 
     link_specs = [
         (
-            os.path.join(ROOT_DIR, "rootfs", "lib", "x86_64-linux-gnu"),
-            os.path.join(ROOT_DIR, "rootfs", "lib64"),
+            os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
+            os.path.join(root_dir, "lib64"),
             "lib/x86_64-linux-gnu",
         ),
         (
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib64"),
+            os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
+            os.path.join(root_dir, "usr", "lib64"),
             "lib/x86_64-linux-gnu",
         ),
         (
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
-            os.path.join(ROOT_DIR, "rootfs", "usr", "lib", "pkgconfig"),
+            os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
+            os.path.join(root_dir, "usr", "lib", "pkgconfig"),
             "x86_64-linux-gnu/pkgconfig",
         ),
     ]
@@ -1979,6 +2611,43 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
 
     return True
 
+def run_staged_binary_smoke_test(root_dir, binary_relpath, args):
+    """Run a staged ELF binary with the staged loader/library paths."""
+    binary_path = os.path.join(root_dir, binary_relpath)
+    if not os.path.exists(binary_path):
+        return False, f"missing binary: {binary_relpath}"
+
+    interp_path = get_elf_interpreter(binary_path)
+    if interp_path:
+        loader_name = os.path.basename(interp_path)
+        loader_path = find_rootfs_library(root_dir, loader_name)
+        if not loader_path:
+            return False, f"missing interpreter: {interp_path}"
+        cmd = [
+            loader_path,
+            "--library-path",
+            ":".join(
+                [
+                    os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
+                    os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
+                    os.path.join(root_dir, "lib64"),
+                    os.path.join(root_dir, "usr", "lib64"),
+                ]
+            ),
+            binary_path,
+        ]
+    else:
+        cmd = [binary_path]
+
+    result = subprocess.run(cmd + list(args), capture_output=True, text=True, check=False)
+    if result.returncode == 0:
+        return True, ""
+
+    stderr = (result.stderr or "").strip().splitlines()
+    stdout = (result.stdout or "").strip().splitlines()
+    detail = stderr[-1] if stderr else (stdout[-1] if stdout else f"exit code {result.returncode}")
+    return False, detail
+
 def create_minimal_initramfs():
     print_section("\n=== Building Minimal Initramfs (Live CD Bootloader) ===")
 
@@ -2000,7 +2669,7 @@ def create_minimal_initramfs():
         if not os.path.exists(os.path.join(work_dir, "lib")):
             os.symlink("lib64", os.path.join(work_dir, "lib"))
 
-        rootfs = os.path.join(ROOT_DIR, "rootfs")
+        rootfs = FINAL_ROOTFS_DIR
 
         # Essential binaries
         essential_tools = [
@@ -2051,6 +2720,34 @@ def create_minimal_initramfs():
 
             # Copy dependencies into the initramfs root so the canonical loader/lib dirs exist there.
             copy_with_libs(real_src, work_dir, rootfs, copy_bin=False)
+
+        smoke_args = {
+            "bash": ["--version"],
+            "sh": ["-c", "exit 0"],
+            "mount": ["--help"],
+            "ls": ["--version"],
+            "mkdir": ["--help"],
+            "cat": ["--help"],
+            "sleep": ["0"],
+            "umount": ["--help"],
+            "switch_root": ["--help"],
+        }
+
+        print_info("[*] Verifying staged initramfs userland...")
+        for src_rel, dest_rel in binaries:
+            binary_name = os.path.basename(src_rel)
+            binary_path = os.path.join(work_dir, dest_rel, binary_name)
+            if not os.path.exists(binary_path):
+                continue
+
+            ok, detail = run_staged_binary_smoke_test(
+                work_dir,
+                os.path.join(dest_rel, binary_name),
+                smoke_args.get(binary_name, ["--help"]),
+            )
+            if not ok:
+                print_error(f"FATAL: Initramfs binary self-test failed for {binary_name}: {detail}")
+                return False
 
         # Create init script
         init_script = """#!/bin/bash
@@ -2157,7 +2854,7 @@ def create_iso():
         
     # Using zstd with level 1 for maximum speed/compression balance during development
     # Disabling xattrs also gives a bit of speedup
-    mksquashfs_cmd = f"mksquashfs rootfs {sfs_path} -comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root -e staging"
+    mksquashfs_cmd = f"mksquashfs {FINAL_ROOTFS_DIR} {sfs_path} -comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root -e staging"
     if run_command(mksquashfs_cmd) != 0:
         print_error(" [FAILED] (mksquashfs)")
         return False
@@ -2168,7 +2865,7 @@ def create_iso():
 
     # 3. Prepare Kernel
     print_info("[*] Preparing kernel...")
-    kernel_src = os.path.join(ROOT_DIR, "rootfs/boot/kernel")
+    kernel_src = os.path.join(FINAL_ROOTFS_DIR, "boot", "kernel")
     kernel_dest = "isodir/boot/kernel"
     if not os.path.exists(kernel_src):
         # Fallback to source

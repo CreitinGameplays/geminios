@@ -9,7 +9,10 @@ while [ -h "$SOURCE" ]; do
 done
 DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
 export ROOT_DIR="$(dirname "$DIR")"
-export ROOTFS="$ROOT_DIR/rootfs"
+export BOOTSTRAP_ROOTFS="$ROOT_DIR/bootstrap_rootfs"
+export BUILD_SYSROOT="$ROOT_DIR/build_sysroot"
+export FINAL_ROOTFS="$ROOT_DIR/rootfs"
+export ROOTFS="${TARGET_SYSROOT:-$BUILD_SYSROOT}"
 export PYTHONHOME="$ROOTFS/usr"
 TARGET_MULTIARCH="${TARGET_MULTIARCH:-$(gcc -print-multiarch 2>/dev/null || true)}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.11}"

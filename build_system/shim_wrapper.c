@@ -58,9 +58,15 @@ int main(int argc, char **argv) {
 
     // Inject --sysroot for cross-compilers
     if (strstr(tool_name, "x86_64-gemini-linux-gnu-gcc") || strstr(tool_name, "x86_64-gemini-linux-gnu-g++")) {
-        char *rootfs = getenv("ROOTFS");
+        char *rootfs = getenv("TARGET_SYSROOT");
         if (!rootfs) {
-             rootfs = "/geminios/rootfs"; // Fallback, though likely wrong if env is missing
+             rootfs = getenv("BUILD_SYSROOT");
+        }
+        if (!rootfs) {
+             rootfs = getenv("ROOTFS");
+        }
+        if (!rootfs) {
+             rootfs = "/geminios/build_sysroot"; // Fallback, though likely wrong if env is missing
         }
         
         // Allocate new argv: real_tool + --sysroot=... + args + NULL
