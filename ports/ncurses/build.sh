@@ -10,6 +10,7 @@ PCDIR="$LIBDIR/pkgconfig"
 ./configure --prefix=/usr --with-shared --without-cxx --without-ada \
     --enable-widec --with-termlib --with-terminfo-dirs="/usr/share/terminfo" \
     --with-default-terminfo-dir="/usr/share/terminfo" --enable-pc-files \
+    --without-tests \
     --libdir="$LIBDIR" --with-pkg-config-libdir="$PCDIR" --host=x86_64-linux-gnu
 
 make -j$JOBS

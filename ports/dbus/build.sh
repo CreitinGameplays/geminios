@@ -38,8 +38,4 @@ if [ -f "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc" ]; then
     sed -i '/^Libs.private: *$/d' "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"
 fi
 
-rm -f \
-    "$ROOTFS/lib/x86_64-linux-gnu/libdbus-1.so" \
-    "$ROOTFS/lib/x86_64-linux-gnu/libdbus-1.so.3" \
-    "$ROOTFS/lib/x86_64-linux-gnu/libdbus-1.so."* \
-    "$ROOTFS/lib/x86_64-linux-gnu/libdbus-1.la"
+# END OF SCRIPT

@@ -88,3 +88,4 @@ build_system/ldd.sh
 *SUBMODULE_GUIDE.md*
 agent.py
 req.txt
+task/

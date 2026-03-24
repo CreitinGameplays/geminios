@@ -10,6 +10,7 @@ download_and_extract "$SRC_URL" "$ARCHIVE" "$DIR"
 
 cd "$DEP_DIR/$DIR"
 
+rm -rf build
 mkdir -p build
 cd build
 
@@ -19,7 +20,9 @@ cd build
              --libdir=/usr/lib/x86_64-linux-gnu \
              --enable-elf-shlibs \
              --disable-uuidd \
-             --disable-fsck
+             --disable-fsck \
+             --disable-libblkid \
+             --disable-libuuid
 
 # e2fsprogs libblkid/uuid are often older than util-linux, so we disable them and use util-linux's.
 

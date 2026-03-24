@@ -6,14 +6,15 @@ download_and_extract "https://github.com/besser82/libxcrypt/releases/download/v$
 
 cd "$DEP_DIR/libxcrypt-$LIBXCRYPT_VER"
 
-# Configure if not already configured
-if [ ! -f "Makefile" ]; then
-    PERL=/usr/bin/perl ./configure --prefix=/usr \
-                --enable-static \
-                --enable-hashes=all \
-                --enable-obsolete-api=glibc \
-                --disable-werror
+if [ -f "Makefile" ]; then
+    make distclean >/dev/null 2>&1 || true
 fi
+rm -f config.cache config.status
+PERL=/usr/bin/perl ./configure --prefix=/usr \
+            --enable-static \
+            --enable-hashes=all \
+            --enable-obsolete-api=glibc \
+            --disable-werror
 
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
