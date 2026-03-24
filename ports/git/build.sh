@@ -26,11 +26,9 @@ EOF
 chmod +x "$TOOLS_DIR/curl-config"
 
 export PATH="$TOOLS_DIR:$PATH"
-export CC="gcc"
-export LDFLAGS="--sysroot=$ROOTFS"
 
 if [ -f configure ]; then
-    ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu
+    ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --host=x86_64-linux-gnu
 fi
 
 make -j$JOBS \

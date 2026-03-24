@@ -6,8 +6,6 @@
         "usr/include/linux",
         "lib/x86_64-linux-gnu/libc.so.6",
         "usr/include/stdio.h",
-        "usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-        "usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
         "usr/lib/locale/en_US.UTF-8",
         "usr/lib/locale/C.UTF-8"
     ],

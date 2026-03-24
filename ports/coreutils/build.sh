@@ -24,5 +24,5 @@ make install DESTDIR="$ROOTFS"
 mkdir -p "$ROOTFS/bin"
 ESSENTIALS="cat chgrp chmod chown cp date dd df echo false ln ls mkdir mknod mv pwd rm rmdir sleep stty sync touch true uname"
 for prog in $ESSENTIALS; do
-    mv -v "$ROOTFS/usr/bin/$prog" "$ROOTFS/bin/$prog"
+    move_rootfs_entry_if_distinct "$ROOTFS/usr/bin/$prog" "$ROOTFS/bin/$prog"
 done

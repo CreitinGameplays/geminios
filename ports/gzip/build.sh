@@ -17,4 +17,4 @@ make install DESTDIR="$ROOTFS"
 
 # Move gzip to /bin as it's often needed early
 mkdir -p "$ROOTFS/bin"
-mv -v "$ROOTFS/usr/bin/gzip" "$ROOTFS/bin/gzip"
+move_rootfs_entry_if_distinct "$ROOTFS/usr/bin/gzip" "$ROOTFS/bin/gzip"

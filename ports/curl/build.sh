@@ -6,12 +6,9 @@ download_and_extract "https://curl.se/download/curl-$CURL_VER.tar.xz" "curl-$CUR
 
 cd "$DEP_DIR/curl-$CURL_VER"
 
-export CC="gcc"
-export LDFLAGS="--sysroot=$ROOTFS"
-export PKG_CONFIG="/bin/false"
-
 ./configure --prefix=/usr \
             --libdir=/usr/lib/x86_64-linux-gnu \
+            --host=x86_64-linux-gnu \
             --with-openssl \
             --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
             --with-ca-path=/etc/ssl/certs \

@@ -1,5 +1,6 @@
 #!/bin/bash
 # Wrapper to run the target (rootfs) python3
+set -e
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -15,14 +16,16 @@ export FINAL_ROOTFS="$ROOT_DIR/rootfs"
 export ROOTFS="${TARGET_SYSROOT:-$BUILD_SYSROOT}"
 export PYTHONHOME="$ROOTFS/usr"
 TARGET_MULTIARCH="${TARGET_MULTIARCH:-$(gcc -print-multiarch 2>/dev/null || true)}"
+if [ -z "$TARGET_MULTIARCH" ]; then
+  TARGET_MULTIARCH="x86_64-linux-gnu"
+fi
 PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
+PYTHON_BIN="$ROOTFS/usr/bin/python3"
+PYTHON_LOADER="$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
 
-# Use the host loader but force the staged GeminiOS runtime libraries first.
-# The target loader has proven brittle for build-time Python execution in the
-# host environment, while the host loader works correctly with the staged
-# libpython/glibc set as long as the rootfs library paths are first.
-LIBRARY_PATH="$ROOTFS/usr/lib/x86_64-linux-gnu:$ROOTFS/lib/x86_64-linux-gnu"
-export LD_LIBRARY_PATH="$LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+LIBRARY_PATH="$ROOTFS/lib/x86_64-linux-gnu:$ROOTFS/usr/lib/x86_64-linux-gnu:$ROOTFS/lib64:$ROOTFS/usr/lib64"
+export PYTHONNOUSERSITE=1
+unset LD_LIBRARY_PATH
 
 python_extra_paths=()
 if [ -n "$TARGET_MULTIARCH" ]; then
@@ -46,9 +49,14 @@ if [ -n "$PYTHONPATH_PREFIX" ]; then
     export PYTHONPATH="$PYTHONPATH_PREFIX${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
-if [ ! -x "$ROOTFS/usr/bin/python3" ]; then
-    echo "Error: Python not found at $ROOTFS/usr/bin/python3"
+if [ ! -x "$PYTHON_BIN" ]; then
+    echo "Error: Python not found at $PYTHON_BIN"
     exit 1
 fi
 
-exec "$ROOTFS/usr/bin/python3" "$@"
+if [ ! -x "$PYTHON_LOADER" ]; then
+    echo "Error: staged loader not found at $PYTHON_LOADER"
+    exit 1
+fi
+
+exec "$PYTHON_LOADER" --library-path "$LIBRARY_PATH" "$PYTHON_BIN" "$@"

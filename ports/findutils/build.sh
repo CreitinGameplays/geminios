@@ -16,4 +16,4 @@ make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
 mkdir -p "$ROOTFS/bin"
-mv -v "$ROOTFS/usr/bin/find" "$ROOTFS/bin/find"
+move_rootfs_entry_if_distinct "$ROOTFS/usr/bin/find" "$ROOTFS/bin/find"

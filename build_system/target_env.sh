@@ -24,8 +24,11 @@ export CXX="$TARGET_CXX"
 export AR="$TARGET_AR"
 export RANLIB="$TARGET_RANLIB"
 
-export CFLAGS="--sysroot=$TARGET_SYSROOT -O2 -fPIC -Wno-error"
-export CXXFLAGS="--sysroot=$TARGET_SYSROOT -O2 -fPIC -Wno-error"
+# Keep the shared target flags conservative. Some configure scripts
+# intentionally abort if they detect any Werror-related flag, including
+# -Wno-error, so warning policy stays package-local when needed.
+export CFLAGS="--sysroot=$TARGET_SYSROOT -O2 -fPIC"
+export CXXFLAGS="--sysroot=$TARGET_SYSROOT -O2 -fPIC"
 # Prefer the staged linker-script directory only. Adding legacy lib64
 # makes autoconf sanity checks bypass libc.so's linker script, which can fail
 # early with GLIBC_PRIVATE references from the staged libc.so.6.

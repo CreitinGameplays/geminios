@@ -39,3 +39,22 @@ download_and_extract() {
     fi
 }
 export -f download_and_extract
+
+rootfs_dirs_alias() {
+    local left="$1"
+    local right="$2"
+    [ "$(readlink -m "$left")" = "$(readlink -m "$right")" ]
+}
+export -f rootfs_dirs_alias
+
+move_rootfs_entry_if_distinct() {
+    local src="$1"
+    local dst="$2"
+    [ -e "$src" ] || return 0
+    mkdir -p "$(dirname "$dst")"
+    if rootfs_dirs_alias "$(dirname "$src")" "$(dirname "$dst")"; then
+        return 0
+    fi
+    mv -f "$src" "$dst"
+}
+export -f move_rootfs_entry_if_distinct

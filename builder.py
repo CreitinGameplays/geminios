@@ -5,6 +5,7 @@ import sys
 import time
 import json
 import shutil
+import filecmp
 import glob
 import re
 import tempfile
@@ -16,6 +17,9 @@ import urllib.request
 import urllib.error
 from urllib.parse import urljoin
 from datetime import datetime, timezone
+
+# Ensure consistent command output parsing across different locales
+os.environ["LC_ALL"] = "C"
 
 # Terminal Colors
 class Colors:
@@ -111,6 +115,31 @@ GPKG_DEFAULT_SOURCES_FILE = os.environ.get(
     os.path.join(BUILD_SYSTEM_DIR, "gpkg_default_sources.list"),
 )
 HOST_DEV_OVERLAY_FILE = os.path.join(ROOT_DIR, ".host_dev_overlay_paths.json")
+PKGCONFIG_CANONICAL_LIBDIR = "/usr/lib/x86_64-linux-gnu"
+PKGCONFIG_MULTIARCH_DIR = os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig")
+PKGCONFIG_STAGE_ROOTS = tuple(
+    dict.fromkeys(
+        path
+        for path in [BOOTSTRAP_ROOTFS_DIR, BUILD_SYSROOT_DIR, FINAL_ROOTFS_DIR, ROOTFS_DIR]
+        if path
+    )
+)
+PKGCONFIG_LEAK_MARKERS = tuple(
+    dict.fromkeys(path for path in [ROOT_DIR, *PKGCONFIG_STAGE_ROOTS] if path)
+)
+PKGCONFIG_LEGACY_LIBDIR_VALUES = {
+    "/usr/lib",
+    "/usr/lib64",
+    "/lib64",
+    "/lib/x86_64-linux-gnu",
+    "/usr/lib/x86_64-linux-gnu",
+    "${exec_prefix}/lib",
+    "${exec_prefix}/lib64",
+    "${exec_prefix}/lib/x86_64-linux-gnu",
+    "${prefix}/lib",
+    "${prefix}/lib64",
+    "${prefix}/lib/x86_64-linux-gnu",
+}
 
 # Load Manifests
 try:
@@ -421,6 +450,60 @@ def get_port_build_mode(pkg_name):
     """Return the declared build mode for a port."""
     return PORT_BUILD_MODES.get("modes", {}).get(pkg_name, PORT_BUILD_MODES.get("default", "target"))
 
+def audit_port_build_script(pkg_name):
+    """Return static build-script issues that would leak host tools into target builds."""
+    build_mode = get_port_build_mode(pkg_name)
+    if build_mode == "host-only-tool":
+        return [], []
+
+    build_script = os.path.join(PORTS_DIR, pkg_name, "build.sh")
+    if not os.path.exists(build_script):
+        return [], []
+
+    with open(build_script, "r") as f:
+        lines = f.readlines()
+
+    issues = []
+    warnings = []
+    host_override_patterns = [
+        ("CC", re.compile(r'^\s*(?:export\s+)?CC\s*=\s*["\']?gcc(?:["\']|\s|$)')),
+        ("CXX", re.compile(r'^\s*(?:export\s+)?CXX\s*=\s*["\']?g\+\+(?:["\']|\s|$)')),
+        ("AR", re.compile(r'^\s*(?:export\s+)?AR\s*=\s*["\']?ar(?:["\']|\s|$)')),
+        ("RANLIB", re.compile(r'^\s*(?:export\s+)?RANLIB\s*=\s*["\']?ranlib(?:["\']|\s|$)')),
+    ]
+    pkg_config_disable_pattern = re.compile(r'^\s*(?:export\s+)?PKG_CONFIG\s*=\s*["\']?/bin/false["\']?\s*$')
+    python_setup_install_pattern = re.compile(r'\bsetup\.py\s+install\b')
+
+    for lineno, raw_line in enumerate(lines, 1):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        for tool_name, pattern in host_override_patterns:
+            if pattern.search(raw_line):
+                issues.append(
+                    f"{pkg_name} build script line {lineno} forces host {tool_name}; use builder-provided target toolchain instead"
+                )
+        if pkg_config_disable_pattern.search(raw_line):
+            warnings.append(
+                f"{pkg_name} build script line {lineno} disables pkg-config; verify this is intentional for staged target builds"
+            )
+        if python_setup_install_pattern.search(raw_line) and "TARGET_PYTHON" not in raw_line:
+            issues.append(
+                f"{pkg_name} build script line {lineno} installs a Python package without TARGET_PYTHON; use the staged Python wrapper for target installs"
+            )
+
+    return issues, warnings
+
+def audit_requested_port_scripts(packages):
+    """Audit requested package build scripts for patterns that break hermetic target builds."""
+    issues = []
+    warnings = []
+    for pkg_name in packages:
+        pkg_issues, pkg_warnings = audit_port_build_script(pkg_name)
+        issues.extend(pkg_issues)
+        warnings.extend(pkg_warnings)
+    return issues, warnings
+
 def read_manifest_lines(path):
     """Read newline-separated manifest entries, ignoring comments and blanks."""
     entries = []
@@ -645,12 +728,13 @@ def resolve_bootstrap_requested_packages(index, requested_patterns):
     for pattern in requested_patterns:
         if any(ch in pattern for ch in "*?["):
             matches = [name for name in available_names if fnmatch.fnmatch(name, pattern)]
+            if not matches:
+                raise RuntimeError(f"Bootstrap manifest pattern matched no Debian packages: {pattern}")
             resolved.update(matches)
-        elif pattern in index:
-            resolved.add(pattern)
         else:
-            matches = [name for name in available_names if fnmatch.fnmatch(name, pattern + "*")]
-            resolved.update(matches)
+            if pattern not in index:
+                raise RuntimeError(f"Bootstrap manifest package not found in Debian metadata: {pattern}")
+            resolved.add(pattern)
     return sorted(resolved)
 
 def resolve_bootstrap_dependency_closure(index, requested_packages):
@@ -854,7 +938,11 @@ def assemble_final_rootfs():
         shutil.rmtree(FINAL_ROOTFS_DIR)
 
     shutil.copytree(BOOTSTRAP_ROOTFS_DIR, FINAL_ROOTFS_DIR, symlinks=True)
-    shutil.copytree(BUILD_SYSROOT_DIR, FINAL_ROOTFS_DIR, dirs_exist_ok=True, symlinks=True)
+    for entry in sorted(os.listdir(BUILD_SYSROOT_DIR)):
+        overlay_rootfs_entry(
+            os.path.join(BUILD_SYSROOT_DIR, entry),
+            os.path.join(FINAL_ROOTFS_DIR, entry),
+        )
     for stamp_name in (".bootstrap-complete",):
         stamp_path = os.path.join(FINAL_ROOTFS_DIR, stamp_name)
         if os.path.exists(stamp_path):
@@ -976,6 +1064,28 @@ def get_missing_manifest_artifacts(pkg_name, root_dir=None):
         if not artifact_exists_from_manifest(artifact, root_dir=root_dir):
             missing_artifacts.append(artifact)
     return missing_artifacts
+
+def collect_package_artifact_paths(pkg_name, root_dir=None):
+    """Collect concrete existing filesystem paths from a package manifest."""
+    root_dir = root_dir or ROOTFS_DIR
+    if pkg_name not in PACKAGE_MANIFESTS:
+        return []
+
+    collected = []
+    seen = set()
+    for artifact in PACKAGE_MANIFESTS[pkg_name]:
+        candidates = expand_manifest_artifact_paths(artifact, root_dir=root_dir)
+        if not candidates:
+            candidates = fallback_manifest_artifact_paths(artifact, root_dir=root_dir)
+        for path in candidates:
+            if not os.path.exists(path):
+                continue
+            real_path = os.path.realpath(path)
+            if real_path in seen:
+                continue
+            seen.add(real_path)
+            collected.append(real_path)
+    return collected
 
 def get_dbus_runtime_abi_issues(root_dir=None):
     """Return DBus runtime/library ABI mismatches inside the staged rootfs."""
@@ -1207,13 +1317,300 @@ def get_glibc_runtime_issues(root_dir=None):
 
     return issues
 
+def iter_pkgconfig_metadata_paths(root_dir=None):
+    """Yield pkg-config metadata paths inside the staged rootfs."""
+    root_dir = root_dir or ROOTFS_DIR
+    search_roots = [
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
+        os.path.join(root_dir, "usr", "share", "pkgconfig"),
+    ]
+    paths = set()
+    for search_root in search_roots:
+        if not os.path.isdir(search_root):
+            continue
+        paths.update(glob.glob(os.path.join(search_root, "*.pc")))
+    return sorted(paths)
+
+def collapse_pkgconfig_staged_path(path_text):
+    """Rewrite absolute staged paths back into in-root pkg-config paths."""
+    normalized_path = path_text.rstrip("/")
+    for stage_root in PKGCONFIG_STAGE_ROOTS:
+        stage_root = stage_root.rstrip("/")
+        if not stage_root:
+            continue
+        prefix = stage_root + os.sep
+        if normalized_path.startswith(prefix):
+            rel_path = os.path.relpath(normalized_path, stage_root).replace(os.sep, "/")
+            return "/" + rel_path.lstrip("/")
+    return normalized_path
+
+def normalize_pkgconfig_assignment_value(name, value, is_multiarch_pkgconfig):
+    """Normalize pkg-config variable assignments back into Debian multiarch form."""
+    normalized = value
+    for legacy_prefix in (
+        "${exec_prefix}/lib64",
+        "${exec_prefix}/lib",
+        "${prefix}/lib64",
+        "${prefix}/lib",
+        "/usr/lib64",
+        "/usr/lib",
+    ):
+        if name == "libdir" and normalized == legacy_prefix:
+            normalized = PKGCONFIG_CANONICAL_LIBDIR
+            break
+
+    normalized = normalized.replace("${exec_prefix}/lib64/", PKGCONFIG_CANONICAL_LIBDIR + "/")
+    normalized = normalized.replace("${prefix}/lib64/", PKGCONFIG_CANONICAL_LIBDIR + "/")
+    normalized = normalized.replace("/usr/lib64/", PKGCONFIG_CANONICAL_LIBDIR + "/")
+
+    if is_multiarch_pkgconfig and name == "libdir" and normalized in PKGCONFIG_LEGACY_LIBDIR_VALUES:
+        normalized = PKGCONFIG_CANONICAL_LIBDIR
+
+    return normalized
+
+def split_pkgconfig_tokens(value):
+    """Split pkg-config flag fields without crashing on malformed metadata."""
+    try:
+        return shlex.split(value)
+    except ValueError:
+        return value.split()
+
+def normalize_pkgconfig_lib_search_path(path_text):
+    """Normalize pkg-config library search paths to the canonical libdir variable."""
+    normalized = collapse_pkgconfig_staged_path(path_text.strip())
+    if normalized in PKGCONFIG_LEGACY_LIBDIR_VALUES or normalized == "${libdir}":
+        return "${libdir}"
+    return normalized
+
+def normalize_pkgconfig_include_search_path(path_text):
+    """Normalize pkg-config include search paths to the canonical include variable."""
+    normalized = collapse_pkgconfig_staged_path(path_text.strip())
+    if normalized in {"/usr/include", "${exec_prefix}/include", "${prefix}/include", "${includedir}"}:
+        return "${includedir}"
+    return normalized
+
+def normalize_pkgconfig_flag_field(field_name, value):
+    """Normalize pkg-config Libs/Cflags fields to avoid staged path leakage."""
+    tokens = split_pkgconfig_tokens(value)
+    normalized_tokens = []
+    seen_tokens = set()
+
+    for token in tokens:
+        if token.startswith("--sysroot="):
+            continue
+
+        if token.startswith("-L"):
+            search_path = normalize_pkgconfig_lib_search_path(token[2:])
+            if not search_path:
+                continue
+            token = f"-L{search_path}"
+        elif token.startswith("-I"):
+            include_path = normalize_pkgconfig_include_search_path(token[2:])
+            if not include_path:
+                continue
+            token = f"-I{include_path}"
+        elif any(marker and marker in token for marker in PKGCONFIG_LEAK_MARKERS):
+            continue
+
+        if token in seen_tokens:
+            continue
+        seen_tokens.add(token)
+        normalized_tokens.append(token)
+
+    if normalized_tokens:
+        return f"{field_name}: {' '.join(normalized_tokens)}"
+    return f"{field_name}:"
+
+def get_pkgconfig_metadata_issues(path, root_dir=None):
+    """Return pkg-config layout issues for a single .pc file."""
+    root_dir = root_dir or ROOTFS_DIR
+    rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+    issues = []
+    try:
+        with open(path, "r") as f:
+            data = f.read()
+    except OSError as exc:
+        return [f"failed to inspect pkg-config metadata {rel_path}: {exc}"]
+
+    if any(pattern in data for pattern in ("/usr/lib64", "${exec_prefix}/lib64", "${prefix}/lib64")):
+        issues.append(f"{rel_path} still points pkg-config consumers at /usr/lib64")
+
+    if any(marker and marker in data for marker in PKGCONFIG_LEAK_MARKERS) or "--sysroot=" in data:
+        issues.append(f"{rel_path} leaks staged build paths into pkg-config metadata")
+
+    if rel_path.startswith(PKGCONFIG_MULTIARCH_DIR.replace(os.sep, "/")):
+        if re.search(r"^libdir=(/usr/lib|\$\{exec_prefix\}/lib|\$\{prefix\}/lib)\s*$", data, re.MULTILINE):
+            issues.append(f"{rel_path} still points pkg-config consumers at /usr/lib instead of Debian multiarch")
+        if re.search(
+            r"^Libs(?:\.private)?:.*(?:-L/usr/lib(?:\s|$)|-L/usr/lib64(?:\s|$)|-L/lib64(?:\s|$)|-L/lib/x86_64-linux-gnu(?:\s|$))",
+            data,
+            re.MULTILINE,
+        ):
+            issues.append(f"{rel_path} still injects non-multiarch library search paths into pkg-config consumers")
+
+    return issues
+
+def get_all_pkgconfig_layout_issues(root_dir=None):
+    """Return pkg-config metadata issues across the entire staged rootfs."""
+    root_dir = root_dir or ROOTFS_DIR
+    issues = []
+    for path in iter_pkgconfig_metadata_paths(root_dir=root_dir):
+        issues.extend(get_pkgconfig_metadata_issues(path, root_dir=root_dir))
+    return issues
+
+def normalize_pkgconfig_metadata(root_dir=None, report=False):
+    """Scrub staged pkg-config metadata back into Debian multiarch form."""
+    root_dir = root_dir or ROOTFS_DIR
+    multiarch_pkgconfig_dir = os.path.join(root_dir, PKGCONFIG_MULTIARCH_DIR)
+    rewritten_paths = []
+
+    for path in iter_pkgconfig_metadata_paths(root_dir=root_dir):
+        try:
+            common_root = os.path.commonpath([multiarch_pkgconfig_dir, path])
+        except ValueError:
+            common_root = ""
+        is_multiarch_pkgconfig = common_root == multiarch_pkgconfig_dir
+
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+
+        new_lines = []
+        changed = False
+        for line in lines:
+            stripped = line.rstrip("\n")
+            assignment_match = re.match(r"^([A-Za-z][A-Za-z0-9_]*)=(.*)$", stripped)
+            if assignment_match:
+                name, value = assignment_match.groups()
+                normalized_value = normalize_pkgconfig_assignment_value(
+                    name,
+                    value,
+                    is_multiarch_pkgconfig=is_multiarch_pkgconfig,
+                )
+                new_line = f"{name}={normalized_value}\n"
+            else:
+                field_match = re.match(r"^(Libs(?:\.private)?|Cflags(?:\.private)?):(.*)$", stripped)
+                if field_match:
+                    field_name, value = field_match.groups()
+                    new_line = normalize_pkgconfig_flag_field(field_name, value) + "\n"
+                else:
+                    new_line = line
+
+            if new_line != line:
+                changed = True
+            new_lines.append(new_line)
+
+        if not changed:
+            continue
+
+        with open(path, "w") as f:
+            f.writelines(new_lines)
+        rewritten_paths.append(os.path.relpath(path, root_dir).replace(os.sep, "/"))
+
+    if report and rewritten_paths:
+        print_info("[*] Normalizing staged pkg-config metadata...")
+        for rel_path in rewritten_paths[:12]:
+            print_info(f"  Rewrote {rel_path}")
+        if len(rewritten_paths) > 12:
+            print_info(f"  Rewrote {len(rewritten_paths) - 12} additional pkg-config files.")
+
+    return rewritten_paths
+
+def get_pkgconfig_layout_issues(pkg_name, root_dir=None):
+    """Return pkg-config metadata issues that would leak non-Debian library paths."""
+    root_dir = root_dir or ROOTFS_DIR
+    issues = []
+    for artifact in PACKAGE_MANIFESTS.get(pkg_name, []):
+        if not artifact.endswith(".pc"):
+            continue
+        for path in expand_manifest_artifact_paths(artifact, root_dir=root_dir):
+            if not os.path.exists(path):
+                continue
+            issues.extend(get_pkgconfig_metadata_issues(path, root_dir=root_dir))
+    return issues
+
+def get_openssl_runtime_issues(root_dir=None):
+    """Return staged OpenSSL layout issues that break target consumers."""
+    root_dir = root_dir or ROOTFS_DIR
+    issues = []
+    canonical_header_dir = os.path.join(root_dir, "usr", "include", "openssl")
+    multiarch_header_dir = os.path.join(root_dir, "usr", "include", "x86_64-linux-gnu", "openssl")
+    canonical_config = os.path.join(canonical_header_dir, "configuration.h")
+    multiarch_config = os.path.join(multiarch_header_dir, "configuration.h")
+
+    if os.path.lexists(multiarch_header_dir):
+        if os.path.islink(multiarch_header_dir):
+            target = os.readlink(multiarch_header_dir)
+            if target != "../../openssl":
+                issues.append(
+                    "usr/include/x86_64-linux-gnu/openssl should symlink to ../../openssl"
+                )
+        elif os.path.exists(canonical_config) and os.path.exists(multiarch_config):
+            try:
+                if not filecmp.cmp(canonical_config, multiarch_config, shallow=False):
+                    issues.append(
+                        "usr/include/x86_64-linux-gnu/openssl/configuration.h conflicts with usr/include/openssl/configuration.h"
+                    )
+            except OSError as exc:
+                issues.append(f"failed to compare OpenSSL configuration headers: {exc}")
+    return issues
+
+def get_python_runtime_issues(root_dir=None):
+    """Return staged Python runtime issues that break target Python package builds."""
+    root_dir = root_dir or ROOTFS_DIR
+    python_candidates = [
+        os.path.join(root_dir, "usr", "bin", "python3"),
+        os.path.join(root_dir, "usr", "bin", "python3.11"),
+    ]
+    python_path = next((candidate for candidate in python_candidates if os.path.exists(candidate)), None)
+    if not python_path:
+        return []
+
+    issues = []
+    ok, detail = run_staged_binary_smoke_test(
+        root_dir,
+        os.path.relpath(python_path, root_dir).replace(os.sep, "/"),
+        ["-c", 'import encodings, sysconfig; print("python-ok")'],
+    )
+    if not ok:
+        issues.append(f"staged python self-test failed: {detail}")
+
+    wrapper_path = os.path.join(ROOT_DIR, "build_system", "run_target_python.sh")
+    if os.path.exists(wrapper_path):
+        env = os.environ.copy()
+        env["TARGET_SYSROOT"] = root_dir
+        env.pop("LD_LIBRARY_PATH", None)
+        env.pop("PYTHONHOME", None)
+        env.pop("PYTHONPATH", None)
+        result = subprocess.run(
+            [wrapper_path, "-c", 'import encodings, sysconfig; print("python-wrapper-ok")'],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip().splitlines()
+            stdout = (result.stdout or "").strip().splitlines()
+            detail = stderr[-1] if stderr else (stdout[-1] if stdout else f"exit code {result.returncode}")
+            issues.append(f"run_target_python wrapper failed: {detail}")
+
+    return issues
+
 def get_package_verification_issues(pkg_name, root_dir=None):
     """Return manifest and semantic verification issues for a package."""
     issues = []
     issues.extend(f"missing artifact: {artifact}" for artifact in get_missing_manifest_artifacts(pkg_name, root_dir=root_dir))
+    issues.extend(get_pkgconfig_layout_issues(pkg_name, root_dir=root_dir))
 
     if pkg_name == "glibc":
         issues.extend(get_glibc_runtime_issues(root_dir=root_dir))
+    elif pkg_name == "python":
+        issues.extend(get_python_runtime_issues(root_dir=root_dir))
+    elif pkg_name == "openssl":
+        issues.extend(get_openssl_runtime_issues(root_dir=root_dir))
     elif pkg_name == "dbus":
         issues.extend(get_dbus_runtime_abi_issues(root_dir=root_dir))
     elif pkg_name == "glib":
@@ -1271,6 +1668,33 @@ def merge_rootfs_entry(source_path, dest_path):
     shutil.move(source_path, dest_path)
     return 1
 
+def overlay_rootfs_entry(source_path, dest_path):
+    """Copy a rootfs entry into place, replacing conflicting files or symlinks."""
+    if os.path.islink(source_path):
+        if os.path.lexists(dest_path):
+            remove_path(dest_path)
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        os.symlink(os.readlink(source_path), dest_path)
+        return 1
+
+    if os.path.isdir(source_path):
+        if os.path.lexists(dest_path) and not (os.path.isdir(dest_path) and not os.path.islink(dest_path)):
+            remove_path(dest_path)
+        os.makedirs(dest_path, exist_ok=True)
+        copied_count = 0
+        for entry in sorted(os.listdir(source_path)):
+            copied_count += overlay_rootfs_entry(
+                os.path.join(source_path, entry),
+                os.path.join(dest_path, entry),
+            )
+        return copied_count
+
+    if os.path.lexists(dest_path):
+        remove_path(dest_path)
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    shutil.copy2(source_path, dest_path)
+    return 1
+
 def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     """Fold legacy lib64 installs back into the canonical Debian multiarch layout."""
     root_dir = root_dir or ROOTFS_DIR
@@ -1311,9 +1735,44 @@ def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
         for source_path, dest_path in migrated_entries:
             print_info(f"  Migrated {source_path} -> {dest_path}")
 
+    normalize_duplicate_usr_lib_subdir(root_dir=root_dir, report=report)
     prune_shadowed_rootfs_runtime_libraries(root_dir=root_dir, report=report)
     normalize_rootfs_usr_lib_top_level(root_dir=root_dir, report=report)
+    normalize_pkgconfig_metadata(root_dir=root_dir, report=report)
     ensure_multiarch_dev_compat(root_dir=root_dir, report=report)
+    return migrated_entries
+
+def normalize_duplicate_usr_lib_subdir(root_dir=None, report=False):
+    """Move misinstalled library artifacts from /usr/lib/lib into the multiarch libdir."""
+    root_dir = root_dir or ROOTFS_DIR
+    duplicate_dir = os.path.join(root_dir, "usr", "lib", "lib")
+    canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
+    if not os.path.isdir(duplicate_dir):
+        return []
+
+    os.makedirs(canonical_dir, exist_ok=True)
+    migrated_entries = []
+    for entry in sorted(os.listdir(duplicate_dir)):
+        source_path = os.path.join(duplicate_dir, entry)
+        if os.path.isdir(source_path) and not os.path.islink(source_path):
+            continue
+        if not (
+            entry.startswith("lib")
+            and (".so" in entry or entry.endswith(".a") or entry.endswith(".la"))
+        ):
+            continue
+        dest_path = os.path.join(canonical_dir, entry)
+        merge_rootfs_entry(source_path, dest_path)
+        migrated_entries.append((source_path, dest_path))
+
+    if os.path.isdir(duplicate_dir) and not os.listdir(duplicate_dir):
+        os.rmdir(duplicate_dir)
+
+    if report and migrated_entries:
+        print_info("[*] Normalizing duplicate /usr/lib/lib library installs...")
+        for source_path, dest_path in migrated_entries:
+            print_info(f"  Migrated {source_path} -> {dest_path}")
+
     return migrated_entries
 
 def prune_shadowed_rootfs_runtime_libraries(root_dir=None, report=False):
@@ -1322,6 +1781,11 @@ def prune_shadowed_rootfs_runtime_libraries(root_dir=None, report=False):
     legacy_dir = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu")
     canonical_dir = os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu")
     if not (os.path.isdir(legacy_dir) and os.path.isdir(canonical_dir)):
+        return []
+    try:
+        if os.path.samefile(legacy_dir, canonical_dir):
+            return []
+    except FileNotFoundError:
         return []
 
     protected_paths = set()
@@ -1615,9 +2079,13 @@ def build_package(pkg_name, index, total, force=False, debug=False):
     if ret == 0:
         normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=debug)
         # Post-build Verification
-        verification_issues = get_package_verification_issues(pkg_name)
+        verification_issues = get_package_verification_issues(pkg_name, root_dir=ROOTFS_DIR)
         closure_report = os.path.join(LOG_DIR, f"{pkg_name}-runtime-closure.json")
-        closure_issues = generate_runtime_closure_report(ROOTFS_DIR, closure_report)
+        closure_issues = generate_runtime_closure_report(
+            ROOTFS_DIR,
+            closure_report,
+            candidate_paths=collect_package_artifact_paths(pkg_name, root_dir=ROOTFS_DIR),
+        )
         if build_mode != "host-only-tool":
             verification_issues.extend(closure_issues)
         if not verification_issues:
@@ -1975,6 +2443,13 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] ELF runtime closure")
 
+    pkgconfig_layout_issues = get_all_pkgconfig_layout_issues(root_dir=FINAL_ROOTFS_DIR)
+    if pkgconfig_layout_issues:
+        print_error(f"  [FAILED] {pkgconfig_layout_issues[0]}")
+        print_error("           Staged pkg-config metadata still leaks lib64 or build-root paths.")
+        return False
+    print_success("  [OK] pkg-config metadata layout")
+
     glibc_runtime_issues = get_glibc_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if glibc_runtime_issues:
         print_error(f"  [FAILED] {glibc_runtime_issues[0]}")
@@ -2012,22 +2487,12 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] DBus runtime ABI")
 
-    # Verify Python functionality
-    print_info("[*] Verifying Python runtime...")
-    env = os.environ.copy()
-    env["PYTHONHOME"] = os.path.join(FINAL_ROOTFS_DIR, "usr")
-    env["LD_LIBRARY_PATH"] = (
-        f"{os.path.join(FINAL_ROOTFS_DIR, 'usr', 'lib', 'x86_64-linux-gnu')}:"
-        f"{os.path.join(FINAL_ROOTFS_DIR, 'lib', 'x86_64-linux-gnu')}"
-    )
-    
-    python_bin = os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "python3")
-    if os.path.exists(python_bin):
-        res = subprocess.run([python_bin, "-c", "import encodings; print('Python Encodings OK')"], 
-                             env=env, capture_output=True, text=True)
-        if res.returncode != 0:
-            print_error(f"  [FAILED] Python runtime check: {res.stderr}")
-            return False
+    python_runtime_issues = get_python_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
+    if python_runtime_issues:
+        print_error(f"  [FAILED] {python_runtime_issues[0]}")
+        print_error("           The staged Python runtime or wrapper is not usable for Python-based packages.")
+        return False
+    if os.path.exists(os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "python3")):
         print_success("  [OK] Python runtime")
     
     print_success("[!] Rootfs integrity check PASSED.")
@@ -2273,10 +2738,9 @@ def get_elf_interpreter(binary_path):
     for line in result.stdout.splitlines():
         if "Requesting program interpreter:" not in line:
             continue
-        start = line.find("[")
-        end = line.find("]", start + 1)
-        if start != -1 and end != -1:
-            return line[start + 1:end]
+        match = re.search(r"Requesting program interpreter:\s*([^\]]+)", line)
+        if match:
+            return match.group(1).strip()
     return None
 
 def get_elf_rpaths(binary_path):
@@ -2350,8 +2814,13 @@ def iter_rootfs_library_search_paths(lib_filename):
         "lib",
     ]
 
-def find_rootfs_library(rootfs_dir, lib_filename):
+def find_rootfs_library(rootfs_dir, lib_filename, current_path=None):
     """Find a library within the target rootfs."""
+    if current_path:
+        sibling_candidate = os.path.join(os.path.dirname(current_path), lib_filename)
+        if os.path.exists(sibling_candidate):
+            return sibling_candidate
+
     for search_path in iter_rootfs_library_search_paths(lib_filename):
         candidate = os.path.join(rootfs_dir, search_path, lib_filename)
         if os.path.exists(candidate):
@@ -2386,14 +2855,22 @@ def get_shadowed_runtime_library_issues(root_dir=None):
             )
     return issues
 
-def generate_runtime_closure_report(root_dir, report_path):
+def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None):
     """Generate a runtime-closure JSON report for staged ELF files."""
     report = {"root_dir": root_dir, "files": []}
     issues = []
     allowed_rpath_prefixes = ("/lib", "/usr/lib", "$ORIGIN")
     allowed_interpreter_prefixes = ("/lib", "/lib64", "/usr/lib", "/usr/lib64")
 
-    for path in sorted(iter_rootfs_elf_files(root_dir)):
+    if candidate_paths is None:
+        paths_to_scan = sorted(iter_rootfs_elf_files(root_dir))
+    else:
+        paths_to_scan = sorted(
+            path for path in {os.path.realpath(path) for path in candidate_paths}
+            if os.path.isfile(path)
+        )
+
+    for path in paths_to_scan:
         rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
         interpreter = get_elf_interpreter(path)
         needed = get_elf_needed(path)
@@ -2403,7 +2880,7 @@ def generate_runtime_closure_report(root_dir, report_path):
         interpreter_resolved = None
 
         for lib_name in needed:
-            candidate = find_rootfs_library(root_dir, lib_name)
+            candidate = find_rootfs_library(root_dir, lib_name, current_path=path)
             if candidate:
                 real_candidate = os.path.realpath(candidate)
                 try:
@@ -2422,7 +2899,7 @@ def generate_runtime_closure_report(root_dir, report_path):
             if not interpreter.startswith(allowed_interpreter_prefixes):
                 issues.append(f"{rel_path} declares an unexpected interpreter path: {interpreter}")
             interpreter_name = os.path.basename(interpreter)
-            interpreter_path = find_rootfs_library(root_dir, interpreter_name)
+            interpreter_path = find_rootfs_library(root_dir, interpreter_name, current_path=path)
             if not interpreter_path:
                 issues.append(f"{rel_path} requests interpreter {interpreter} but it is missing from the staged rootfs")
             else:
@@ -3208,6 +3685,17 @@ def main():
         packages_to_build = PACKAGES
         if force_rebuild:
             forced_packages = set(PACKAGES)
+
+    port_audit_issues, port_audit_warnings = audit_requested_port_scripts(packages_to_build)
+    if port_audit_warnings:
+        print_section("\n=== Port Script Audit ===")
+        for warning in port_audit_warnings:
+            print_warning(f"WARNING: {warning}")
+    if port_audit_issues:
+        print_section("\n=== Port Script Audit ===")
+        for issue in port_audit_issues:
+            print_error(f"ERROR: {issue}")
+        sys.exit(1)
 
     print_section("=== GeminiOS Ports Builder ===")
     

@@ -8,7 +8,7 @@ cd "$DEP_DIR/expat-$EXPAT_VER"
 rm -rf build_cmake
 mkdir -p build_cmake && cd build_cmake
 cmake -DCMAKE_INSTALL_PREFIX=/usr \
-      -DCMAKE_INSTALL_LIBDIR=lib64 \
+      -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
       -DCMAKE_BUILD_TYPE=Release \
       -DEXPAT_BUILD_EXAMPLES=OFF \
       -DEXPAT_BUILD_TESTS=OFF \

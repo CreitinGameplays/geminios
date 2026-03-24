@@ -18,7 +18,7 @@ make install DESTDIR="$ROOTFS"
 # Move clear to /bin
 mkdir -p "$ROOTFS/bin"
 if [ -f "$ROOTFS/usr/bin/clear" ]; then
-    mv "$ROOTFS/usr/bin/clear" "$ROOTFS/bin/clear"
+    move_rootfs_entry_if_distinct "$ROOTFS/usr/bin/clear" "$ROOTFS/bin/clear"
 fi
 
 # Create compat symlinks

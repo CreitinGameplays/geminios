@@ -8,5 +8,7 @@ cd "$DEP_DIR/bash-$BASH_VER"
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 mkdir -p "$ROOTFS/bin"
-ln -sf ../usr/bin/bash "$ROOTFS/bin/bash"
-ln -sf bash "$ROOTFS/bin/sh"
+if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
+    ln -sf ../usr/bin/bash "$ROOTFS/bin/bash"
+fi
+ln -sf bash "$ROOTFS/usr/bin/sh"

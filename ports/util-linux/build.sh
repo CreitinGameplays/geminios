@@ -6,13 +6,12 @@ download_and_extract "https://mirrors.edge.kernel.org/pub/linux/utils/util-linux
 
 cd "$DEP_DIR/util-linux-$UTIL_LINUX_VER"
 make distclean || true
-export CC="gcc"
-export LDFLAGS="--sysroot=$ROOTFS"
 # In this cross/sysroot build the target libc can expose sched_setattr() at
 # link time while the target headers still lack struct sched_attr. Force
 # util-linux to use its bundled syscall fallback so chrt/uclampset build
 # against the staged target headers consistently.
 ac_cv_func_sched_setattr=no ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu \
+    --host=x86_64-linux-gnu \
     --bindir=/bin \
     --sbindir=/sbin \
     --enable-libuuid \

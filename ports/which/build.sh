@@ -17,4 +17,6 @@ make install DESTDIR="$ROOTFS"
 
 # Create symlink in /bin
 mkdir -p "$ROOTFS/bin"
-ln -sf /usr/bin/which "$ROOTFS/bin/which"
+if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
+    ln -sf /usr/bin/which "$ROOTFS/bin/which"
+fi
