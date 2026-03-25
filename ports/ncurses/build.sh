@@ -7,9 +7,14 @@ download_and_extract "https://ftp.gnu.org/pub/gnu/ncurses/ncurses-$NCURSES_VER.t
 cd "$DEP_DIR/ncurses-$NCURSES_VER"
 LIBDIR="/usr/lib/x86_64-linux-gnu"
 PCDIR="$LIBDIR/pkgconfig"
+if [ -f Makefile ]; then
+    make distclean >/dev/null 2>&1 || true
+fi
+rm -f config.cache config.status
 ./configure --prefix=/usr --with-shared --without-cxx --without-ada \
     --enable-widec --with-termlib --with-terminfo-dirs="/usr/share/terminfo" \
     --with-default-terminfo-dir="/usr/share/terminfo" --enable-pc-files \
+    --with-versioned-syms \
     --without-tests \
     --libdir="$LIBDIR" --with-pkg-config-libdir="$PCDIR" --host=x86_64-linux-gnu
 

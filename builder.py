@@ -3606,6 +3606,10 @@ def run_staged_binary_smoke_test(root_dir, binary_relpath, args):
         return False, str(exc)
 
     if result.returncode == 0:
+        stderr_text = result.stderr or ""
+        if "no version information available" in stderr_text:
+            detail = stderr_text.strip().splitlines()
+            return False, detail[-1] if detail else "runtime emitted symbol-version warning"
         return True, ""
 
     stderr = (result.stderr or "").strip().splitlines()
