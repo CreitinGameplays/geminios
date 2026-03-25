@@ -1043,6 +1043,7 @@ def fallback_manifest_artifact_paths(artifact, root_dir=None):
 
 def artifact_exists_from_manifest(artifact, root_dir=None):
     """Check whether a manifest artifact exists, allowing glob patterns."""
+    root_dir = root_dir or ROOTFS_DIR
     matched_paths = expand_manifest_artifact_paths(artifact, root_dir=root_dir)
     if not matched_paths:
         matched_paths = fallback_manifest_artifact_paths(artifact, root_dir=root_dir)
@@ -1050,7 +1051,7 @@ def artifact_exists_from_manifest(artifact, root_dir=None):
         return False
 
     for path in matched_paths:
-        if os.path.exists(path):
+        if os.path.exists(resolve_rootfs_path(root_dir, path)):
             return True
     return False
 
@@ -1080,7 +1081,7 @@ def collect_package_artifact_paths(pkg_name, root_dir=None):
         for path in candidates:
             if not os.path.exists(path):
                 continue
-            real_path = os.path.realpath(path)
+            real_path = resolve_rootfs_path(root_dir, path)
             if real_path in seen:
                 continue
             seen.add(real_path)
@@ -1156,7 +1157,7 @@ def collect_missing_runtime_deps(rootfs_dir, start_paths):
     to_process = [path for path in start_paths if os.path.exists(path)]
 
     while to_process:
-        current = os.path.realpath(to_process.pop())
+        current = resolve_rootfs_path(rootfs_dir, to_process.pop())
         if current in visited:
             continue
         visited.add(current)
@@ -2971,17 +2972,50 @@ def iter_rootfs_library_search_paths(lib_filename):
         "lib",
     ]
 
+def rootfs_abspath(rootfs_dir, path):
+    """Return an absolute path interpreted within the staged rootfs namespace."""
+    rootfs_dir = os.path.realpath(rootfs_dir)
+    if os.path.isabs(path):
+        normalized = os.path.normpath(path)
+        try:
+            if os.path.commonpath([rootfs_dir, normalized]) == rootfs_dir:
+                return normalized
+        except ValueError:
+            pass
+        return os.path.normpath(os.path.join(rootfs_dir, path.lstrip("/")))
+    return os.path.normpath(os.path.join(rootfs_dir, path))
+
+def resolve_rootfs_path(rootfs_dir, path, max_depth=40):
+    """Resolve symlinks using rootfs semantics, keeping absolute targets inside rootfs."""
+    rootfs_dir = os.path.realpath(rootfs_dir)
+    current = rootfs_abspath(rootfs_dir, path)
+    seen = set()
+
+    for _ in range(max_depth):
+        if current in seen:
+            break
+        seen.add(current)
+        if not os.path.lexists(current) or not os.path.islink(current):
+            break
+        target = os.readlink(current)
+        if os.path.isabs(target):
+            current = os.path.normpath(os.path.join(rootfs_dir, target.lstrip("/")))
+        else:
+            current = os.path.normpath(os.path.join(os.path.dirname(current), target))
+
+    return current
+
 def expand_rootfs_runtime_search_dirs(rootfs_dir, current_path=None, rpaths=None):
     """Map ELF RPATH/RUNPATH entries into concrete directories inside the staged rootfs."""
     rootfs_dir = os.path.realpath(rootfs_dir)
-    current_dir = os.path.dirname(os.path.realpath(current_path)) if current_path else None
+    current_dir = os.path.dirname(resolve_rootfs_path(rootfs_dir, current_path)) if current_path else None
     resolved_dirs = []
     seen = set()
 
     def add_dir(path):
         if not path:
             return
-        candidate = os.path.realpath(path)
+        candidate = resolve_rootfs_path(rootfs_dir, path)
         if not os.path.isdir(candidate):
             return
         try:
@@ -3012,7 +3046,7 @@ def expand_rootfs_runtime_search_dirs(rootfs_dir, current_path=None, rpaths=None
 def find_rootfs_library(rootfs_dir, lib_filename, current_path=None, rpaths=None):
     """Find a library within the target rootfs."""
     if current_path:
-        sibling_candidate = os.path.join(os.path.dirname(current_path), lib_filename)
+        sibling_candidate = os.path.join(os.path.dirname(resolve_rootfs_path(rootfs_dir, current_path)), lib_filename)
         if os.path.exists(sibling_candidate):
             return sibling_candidate
 
@@ -3066,7 +3100,7 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
         paths_to_scan = sorted(iter_rootfs_elf_files(root_dir))
     else:
         paths_to_scan = sorted(
-            path for path in {os.path.realpath(path) for path in candidate_paths}
+            path for path in {resolve_rootfs_path(root_dir, path) for path in candidate_paths}
             if os.path.isfile(path)
         )
 
@@ -3082,7 +3116,7 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
         for lib_name in needed:
             candidate = find_rootfs_library(root_dir, lib_name, current_path=path, rpaths=rpaths)
             if candidate:
-                real_candidate = os.path.realpath(candidate)
+                real_candidate = resolve_rootfs_path(root_dir, candidate)
                 try:
                     if os.path.commonpath([root_dir, real_candidate]) != root_dir:
                         issues.append(f"{rel_path} resolves {lib_name} outside the staged rootfs: {real_candidate}")
@@ -3103,7 +3137,7 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
             if not interpreter_path:
                 issues.append(f"{rel_path} requests interpreter {interpreter} but it is missing from the staged rootfs")
             else:
-                real_interpreter = os.path.realpath(interpreter_path)
+                real_interpreter = resolve_rootfs_path(root_dir, interpreter_path)
                 try:
                     if os.path.commonpath([root_dir, real_interpreter]) != root_dir:
                         issues.append(f"{rel_path} resolves interpreter {interpreter} outside the staged rootfs: {real_interpreter}")
@@ -3166,10 +3200,11 @@ def iter_rootfs_elf_files(rootfs_dir):
         for dirpath, _, filenames in os.walk(base_dir):
             for filename in filenames:
                 path = os.path.join(dirpath, filename)
-                if path in seen or not os.path.isfile(path):
+                resolved_path = resolve_rootfs_path(rootfs_dir, path)
+                if resolved_path in seen or not os.path.isfile(resolved_path):
                     continue
-                seen.add(path)
-                yield path
+                seen.add(resolved_path)
+                yield resolved_path
 
 def collect_rootfs_needed_libs(rootfs_dir, excluded_paths=None):
     """Collect DT_NEEDED library names used by runtime ELF files."""
@@ -3454,6 +3489,7 @@ def ensure_multiarch_dev_compat(root_dir=None, report=True):
 
 def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
     """Copies a binary and all its shared library dependencies to dest_dir"""
+    binary_path = resolve_rootfs_path(rootfs_dir, binary_path)
     if not os.path.exists(binary_path):
         print_warning(f"WARNING: Binary not found: {binary_path}")
         return False
@@ -3489,7 +3525,7 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
                 print_warning(f"WARNING: Could not find library {lib_filename} in rootfs for {binary_path}")
                 continue
 
-            real_lib = os.path.realpath(candidate)
+            real_lib = resolve_rootfs_path(rootfs_dir, candidate)
             real_basename = os.path.basename(real_lib)
             dest_real = os.path.join(dest_lib_dir, real_basename)
             if real_basename not in copied:
@@ -3497,7 +3533,8 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
                 copied.add(real_basename)
                 to_process.append(real_lib)
 
-            if candidate != real_lib:
+            candidate_basename = os.path.basename(candidate)
+            if candidate_basename != real_basename:
                 link_name = os.path.join(dest_lib_dir, lib_filename)
                 if os.path.lexists(link_name):
                     os.remove(link_name)
@@ -3506,17 +3543,18 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
     if not os.path.exists(os.path.join(dest_lib_dir, interpreter_name)):
         src_interp = find_rootfs_library(rootfs_dir, interpreter_name)
         if src_interp:
-            shutil.copy2(src_interp, os.path.join(dest_lib_dir, interpreter_name))
+            shutil.copy2(resolve_rootfs_path(rootfs_dir, src_interp), os.path.join(dest_lib_dir, interpreter_name))
 
     return True
 
 def run_staged_binary_command(root_dir, binary_relpath, args, capture_output=True, text=True, env=None):
     """Run a staged ELF binary with the staged loader/library paths."""
-    binary_path = os.path.join(root_dir, binary_relpath)
-    if not os.path.exists(binary_path):
+    binary_path = rootfs_abspath(root_dir, binary_relpath)
+    resolved_binary_path = resolve_rootfs_path(root_dir, binary_path)
+    if not os.path.exists(resolved_binary_path):
         raise FileNotFoundError(f"missing binary: {binary_relpath}")
 
-    interp_path = get_elf_interpreter(binary_path)
+    interp_path = get_elf_interpreter(resolved_binary_path)
     if interp_path:
         loader_name = os.path.basename(interp_path)
         loader_path = find_rootfs_library(root_dir, loader_name)
@@ -3524,8 +3562,8 @@ def run_staged_binary_command(root_dir, binary_relpath, args, capture_output=Tru
             raise FileNotFoundError(f"missing interpreter: {interp_path}")
         runtime_search_dirs = expand_rootfs_runtime_search_dirs(
             root_dir,
-            current_path=binary_path,
-            rpaths=get_elf_rpaths(binary_path),
+            current_path=resolved_binary_path,
+            rpaths=get_elf_rpaths(resolved_binary_path),
         )
         runtime_search_dirs.extend(
             [
@@ -3547,10 +3585,10 @@ def run_staged_binary_command(root_dir, binary_relpath, args, capture_output=Tru
             loader_path,
             "--library-path",
             ":".join(deduped_runtime_search_dirs),
-            binary_path,
+            resolved_binary_path,
         ]
     else:
-        cmd = [binary_path]
+        cmd = [resolved_binary_path]
 
     return subprocess.run(
         cmd + list(args),
@@ -3636,7 +3674,7 @@ def create_minimal_initramfs():
                  continue
 
             # Always resolve to real file to avoid broken symlinks in minimal env
-            real_src = os.path.realpath(src_path)
+            real_src = resolve_rootfs_path(rootfs, src_path)
 
             # Determine destination filename (preserve the name requested, e.g. sh)
             dest_file = os.path.join(dest_path, os.path.basename(src_rel))
