@@ -3,7 +3,7 @@ set -e
 
 # Default values if not set
 ROOT_DIR="${ROOT_DIR:-$(pwd)}"
-ROOTFS="${ROOTFS:-$ROOT_DIR/rootfs}"
+ROOTFS="${ROOTFS:-$ROOT_DIR/build_sysroot}"
 JOBS="${JOBS:-1}"
 
 compile_sys_pkg() {

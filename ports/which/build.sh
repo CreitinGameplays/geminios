@@ -10,6 +10,11 @@ download_and_extract "$SRC_URL" "$ARCHIVE" "$DIR"
 
 cd "$DEP_DIR/$DIR"
 
+if [ -f Makefile ]; then
+    make distclean >/dev/null 2>&1 || true
+fi
+rm -f config.cache config.status
+
 ./configure --prefix=/usr
 
 make -j$JOBS

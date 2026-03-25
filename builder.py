@@ -1160,9 +1160,15 @@ def collect_missing_runtime_deps(rootfs_dir, start_paths):
         if current in visited:
             continue
         visited.add(current)
+        current_rpaths = get_elf_rpaths(current)
 
         for lib_filename in get_elf_needed(current):
-            candidate = find_rootfs_library(rootfs_dir, lib_filename)
+            candidate = find_rootfs_library(
+                rootfs_dir,
+                lib_filename,
+                current_path=current,
+                rpaths=current_rpaths,
+            )
             if not candidate:
                 current_rel = os.path.relpath(current, rootfs_dir).replace(os.sep, "/")
                 issues.append(f"{current_rel} is missing runtime dependency {lib_filename}")
@@ -1458,6 +1464,140 @@ def get_all_pkgconfig_layout_issues(root_dir=None):
         issues.extend(get_pkgconfig_metadata_issues(path, root_dir=root_dir))
     return issues
 
+def iter_libtool_archive_paths(root_dir=None):
+    """Yield installed libtool archive metadata inside the staged rootfs."""
+    root_dir = root_dir or ROOTFS_DIR
+    search_roots = [
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
+        os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
+        os.path.join(root_dir, "usr", "lib"),
+        os.path.join(root_dir, "lib"),
+    ]
+    paths = set()
+    for search_root in search_roots:
+        if not os.path.isdir(search_root):
+            continue
+        paths.update(glob.glob(os.path.join(search_root, "*.la")))
+    return sorted(paths)
+
+def libtool_dependency_token_to_link_flag(token):
+    """Collapse a concrete library path into a generic -lfoo linker flag."""
+    basename = os.path.basename(token)
+    if not basename.startswith("lib"):
+        return None
+    if basename.endswith(".la"):
+        return f"-l{basename[3:-3]}"
+    if basename.endswith(".a"):
+        return f"-l{basename[3:-2]}"
+    if ".so" in basename:
+        return f"-l{basename[3:].split('.so', 1)[0]}"
+    return None
+
+def normalize_libtool_dependency_token(token):
+    """Normalize staged libtool dependency metadata so later relinks stay target-clean."""
+    raw_token = token.strip()
+    if not raw_token:
+        return None
+
+    if raw_token.startswith("--sysroot="):
+        return None
+
+    if raw_token.startswith("-L"):
+        search_path = collapse_pkgconfig_staged_path(raw_token[2:])
+        if search_path in PKGCONFIG_LEGACY_LIBDIR_VALUES or search_path in {
+            PKGCONFIG_CANONICAL_LIBDIR,
+            "/lib/x86_64-linux-gnu",
+            "/usr/lib",
+            "/lib",
+            "/usr/lib64",
+            "/lib64",
+            "${libdir}",
+        }:
+            return None
+        if any(marker and marker in search_path for marker in PKGCONFIG_LEAK_MARKERS):
+            return None
+        return f"-L{search_path}"
+
+    normalized = collapse_pkgconfig_staged_path(raw_token)
+
+    if normalized.startswith("/"):
+        link_flag = libtool_dependency_token_to_link_flag(normalized)
+        if link_flag:
+            return link_flag
+        if any(marker and marker in normalized for marker in PKGCONFIG_LEAK_MARKERS):
+            return None
+
+    if any(marker and marker in normalized for marker in PKGCONFIG_LEAK_MARKERS):
+        return None
+
+    return normalized
+
+def normalize_libtool_dependency_libs(value):
+    """Normalize libtool dependency_libs without dropping real link requirements."""
+    tokens = split_pkgconfig_tokens(value)
+    normalized_tokens = []
+    seen_tokens = set()
+
+    for token in tokens:
+        normalized = normalize_libtool_dependency_token(token)
+        if not normalized or normalized in seen_tokens:
+            continue
+        seen_tokens.add(normalized)
+        normalized_tokens.append(normalized)
+
+    return " ".join(normalized_tokens)
+
+def normalize_libtool_archive_metadata(root_dir=None, report=False):
+    """Scrub staged libtool archives so they do not leak staged paths into later builds."""
+    root_dir = root_dir or ROOTFS_DIR
+    rewritten_paths = []
+
+    for path in iter_libtool_archive_paths(root_dir=root_dir):
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+
+        new_lines = []
+        changed = False
+        for line in lines:
+            stripped = line.rstrip("\n")
+            match = re.match(r"^([A-Za-z_]+)='(.*)'$", stripped)
+            if not match:
+                new_lines.append(line)
+                continue
+
+            name, value = match.groups()
+            new_value = value
+            if name == "dependency_libs":
+                new_value = normalize_libtool_dependency_libs(value)
+            elif name == "libdir":
+                new_value = collapse_pkgconfig_staged_path(value)
+                if new_value in PKGCONFIG_LEGACY_LIBDIR_VALUES:
+                    new_value = PKGCONFIG_CANONICAL_LIBDIR
+
+            new_line = f"{name}='{new_value}'\n"
+            if new_line != line:
+                changed = True
+            new_lines.append(new_line)
+
+        if not changed:
+            continue
+
+        with open(path, "w") as f:
+            f.writelines(new_lines)
+        rewritten_paths.append(os.path.relpath(path, root_dir).replace(os.sep, "/"))
+
+    if report and rewritten_paths:
+        print_info("[*] Normalizing staged libtool metadata...")
+        for rel_path in rewritten_paths[:12]:
+            print_info(f"  Rewrote {rel_path}")
+        if len(rewritten_paths) > 12:
+            print_info(f"  Rewrote {len(rewritten_paths) - 12} additional libtool archive files.")
+
+    return rewritten_paths
+
 def normalize_pkgconfig_metadata(root_dir=None, report=False):
     """Scrub staged pkg-config metadata back into Debian multiarch form."""
     root_dir = root_dir or ROOTFS_DIR
@@ -1739,6 +1879,7 @@ def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     prune_shadowed_rootfs_runtime_libraries(root_dir=root_dir, report=report)
     normalize_rootfs_usr_lib_top_level(root_dir=root_dir, report=report)
     normalize_pkgconfig_metadata(root_dir=root_dir, report=report)
+    normalize_libtool_archive_metadata(root_dir=root_dir, report=report)
     ensure_multiarch_dev_compat(root_dir=root_dir, report=report)
     return migrated_entries
 
@@ -2540,12 +2681,6 @@ def finalize_rootfs():
 
     # 3. Database Updates
     print_info("[*] Updating system databases (Mime/Schemas)...")
-    env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = (
-        f"{os.path.join(FINAL_ROOTFS_DIR, 'usr', 'lib', 'x86_64-linux-gnu')}:"
-        f"{os.path.join(FINAL_ROOTFS_DIR, 'lib', 'x86_64-linux-gnu')}"
-    )
-    
     # Glib Schemas
     schema_tool = os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "glib-compile-schemas")
     schema_dir = os.path.join(FINAL_ROOTFS_DIR, "usr", "share", "glib-2.0", "schemas")
@@ -2557,7 +2692,18 @@ def finalize_rootfs():
                 + glib_issues[0]
             )
         else:
-            subprocess.run([schema_tool, schema_dir], env=env)
+            try:
+                result = run_staged_binary_command(
+                    FINAL_ROOTFS_DIR,
+                    "usr/bin/glib-compile-schemas",
+                    [schema_dir],
+                )
+                if result.returncode != 0:
+                    schema_error = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
+                    detail = schema_error[-1] if schema_error else f"exit code {result.returncode}"
+                    print_warning(f"  glib-compile-schemas failed: {detail}")
+            except FileNotFoundError as exc:
+                print_warning(f"  Could not run glib-compile-schemas: {exc}")
 
     # Mime Database
     mime_tool = os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "update-mime-database")
@@ -2573,7 +2719,18 @@ def finalize_rootfs():
                 + mime_issues[0]
             )
         else:
-            subprocess.run([mime_tool, mime_dir], env=env)
+            try:
+                result = run_staged_binary_command(
+                    FINAL_ROOTFS_DIR,
+                    "usr/bin/update-mime-database",
+                    [mime_dir],
+                )
+                if result.returncode != 0:
+                    mime_error = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
+                    detail = mime_error[-1] if mime_error else f"exit code {result.returncode}"
+                    print_warning(f"  update-mime-database failed: {detail}")
+            except FileNotFoundError as exc:
+                print_warning(f"  Could not run update-mime-database: {exc}")
 
     # 4. Create Live Marker
     # This file tells ginit that we are booting the Live CD (enabling autologin)
@@ -2814,12 +2971,55 @@ def iter_rootfs_library_search_paths(lib_filename):
         "lib",
     ]
 
-def find_rootfs_library(rootfs_dir, lib_filename, current_path=None):
+def expand_rootfs_runtime_search_dirs(rootfs_dir, current_path=None, rpaths=None):
+    """Map ELF RPATH/RUNPATH entries into concrete directories inside the staged rootfs."""
+    rootfs_dir = os.path.realpath(rootfs_dir)
+    current_dir = os.path.dirname(os.path.realpath(current_path)) if current_path else None
+    resolved_dirs = []
+    seen = set()
+
+    def add_dir(path):
+        if not path:
+            return
+        candidate = os.path.realpath(path)
+        if not os.path.isdir(candidate):
+            return
+        try:
+            if os.path.commonpath([rootfs_dir, candidate]) != rootfs_dir:
+                return
+        except ValueError:
+            return
+        if candidate in seen:
+            return
+        seen.add(candidate)
+        resolved_dirs.append(candidate)
+
+    for entry in rpaths or []:
+        if not entry:
+            continue
+        if entry.startswith("$ORIGIN"):
+            if not current_dir:
+                continue
+            suffix = entry[len("$ORIGIN"):].lstrip("/")
+            add_dir(current_dir if not suffix else os.path.join(current_dir, suffix))
+        elif entry.startswith("/"):
+            add_dir(os.path.join(rootfs_dir, entry.lstrip("/")))
+        elif current_dir:
+            add_dir(os.path.join(current_dir, entry))
+
+    return resolved_dirs
+
+def find_rootfs_library(rootfs_dir, lib_filename, current_path=None, rpaths=None):
     """Find a library within the target rootfs."""
     if current_path:
         sibling_candidate = os.path.join(os.path.dirname(current_path), lib_filename)
         if os.path.exists(sibling_candidate):
             return sibling_candidate
+
+    for search_dir in expand_rootfs_runtime_search_dirs(rootfs_dir, current_path=current_path, rpaths=rpaths):
+        candidate = os.path.join(search_dir, lib_filename)
+        if os.path.exists(candidate):
+            return candidate
 
     for search_path in iter_rootfs_library_search_paths(lib_filename):
         candidate = os.path.join(rootfs_dir, search_path, lib_filename)
@@ -2880,7 +3080,7 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
         interpreter_resolved = None
 
         for lib_name in needed:
-            candidate = find_rootfs_library(root_dir, lib_name, current_path=path)
+            candidate = find_rootfs_library(root_dir, lib_name, current_path=path, rpaths=rpaths)
             if candidate:
                 real_candidate = os.path.realpath(candidate)
                 try:
@@ -2899,7 +3099,7 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
             if not interpreter.startswith(allowed_interpreter_prefixes):
                 issues.append(f"{rel_path} declares an unexpected interpreter path: {interpreter}")
             interpreter_name = os.path.basename(interpreter)
-            interpreter_path = find_rootfs_library(root_dir, interpreter_name, current_path=path)
+            interpreter_path = find_rootfs_library(root_dir, interpreter_name, current_path=path, rpaths=rpaths)
             if not interpreter_path:
                 issues.append(f"{rel_path} requests interpreter {interpreter} but it is missing from the staged rootfs")
             else:
@@ -3281,9 +3481,10 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
         if current in processed:
             continue
         processed.add(current)
+        current_rpaths = get_elf_rpaths(current)
 
         for lib_filename in get_elf_needed(current):
-            candidate = find_rootfs_library(rootfs_dir, lib_filename)
+            candidate = find_rootfs_library(rootfs_dir, lib_filename, current_path=current, rpaths=current_rpaths)
             if not candidate:
                 print_warning(f"WARNING: Could not find library {lib_filename} in rootfs for {binary_path}")
                 continue
@@ -3309,35 +3510,63 @@ def copy_with_libs(binary_path, dest_dir, rootfs_dir, copy_bin=True):
 
     return True
 
-def run_staged_binary_smoke_test(root_dir, binary_relpath, args):
+def run_staged_binary_command(root_dir, binary_relpath, args, capture_output=True, text=True, env=None):
     """Run a staged ELF binary with the staged loader/library paths."""
     binary_path = os.path.join(root_dir, binary_relpath)
     if not os.path.exists(binary_path):
-        return False, f"missing binary: {binary_relpath}"
+        raise FileNotFoundError(f"missing binary: {binary_relpath}")
 
     interp_path = get_elf_interpreter(binary_path)
     if interp_path:
         loader_name = os.path.basename(interp_path)
         loader_path = find_rootfs_library(root_dir, loader_name)
         if not loader_path:
-            return False, f"missing interpreter: {interp_path}"
+            raise FileNotFoundError(f"missing interpreter: {interp_path}")
+        runtime_search_dirs = expand_rootfs_runtime_search_dirs(
+            root_dir,
+            current_path=binary_path,
+            rpaths=get_elf_rpaths(binary_path),
+        )
+        runtime_search_dirs.extend(
+            [
+                os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
+                os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
+                os.path.join(root_dir, "lib64"),
+                os.path.join(root_dir, "usr", "lib64"),
+            ]
+        )
+        deduped_runtime_search_dirs = []
+        seen_dirs = set()
+        for path in runtime_search_dirs:
+            normalized = os.path.realpath(path)
+            if normalized in seen_dirs or not os.path.isdir(normalized):
+                continue
+            seen_dirs.add(normalized)
+            deduped_runtime_search_dirs.append(normalized)
         cmd = [
             loader_path,
             "--library-path",
-            ":".join(
-                [
-                    os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
-                    os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
-                    os.path.join(root_dir, "lib64"),
-                    os.path.join(root_dir, "usr", "lib64"),
-                ]
-            ),
+            ":".join(deduped_runtime_search_dirs),
             binary_path,
         ]
     else:
         cmd = [binary_path]
 
-    result = subprocess.run(cmd + list(args), capture_output=True, text=True, check=False)
+    return subprocess.run(
+        cmd + list(args),
+        capture_output=capture_output,
+        text=text,
+        check=False,
+        env=env,
+    )
+
+def run_staged_binary_smoke_test(root_dir, binary_relpath, args):
+    """Run a staged ELF binary with the staged loader/library paths."""
+    try:
+        result = run_staged_binary_command(root_dir, binary_relpath, args)
+    except FileNotFoundError as exc:
+        return False, str(exc)
+
     if result.returncode == 0:
         return True, ""
 

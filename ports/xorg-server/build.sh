@@ -7,33 +7,41 @@ if [ -z "$ROOT_DIR" ]; then
     ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
     export ROOT_DIR
 fi
+ROOTFS="${ROOTFS:-$ROOT_DIR/build_sysroot}"
+STAGED_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu"
 
 # Fix broken libXfont2.la path if it exists
-if [ -f "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libXfont2.la" ]; then
-    sed -i "s|/usr/lib/libfontenc.la|$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libfontenc.la|g" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libXfont2.la"
+if [ -f "$STAGED_LIBDIR/libXfont2.la" ]; then
+    sed -i "s|/usr/lib/libfontenc.la|$STAGED_LIBDIR/libfontenc.la|g" "$STAGED_LIBDIR/libXfont2.la"
 fi
 
 # Fix missing libudev.la
-if [ ! -f "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la" ]; then
-    echo "libudev.la not found in rootfs. Attempting to recover..."
+if [ ! -f "$STAGED_LIBDIR/libudev.la" ]; then
+    echo "libudev.la not found in staged sysroot. Attempting to recover..."
     # Try to find it in external_dependencies
     FOUND_LA=$(find "$DEP_DIR" -name "libudev.la" 2>/dev/null | grep "src/libudev/libudev.la" | head -n 1)
     if [ -n "$FOUND_LA" ]; then
-        echo "Found libudev.la at $FOUND_LA. Installing to rootfs..."
-        cp "$FOUND_LA" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la"
-        sed -i "s/installed=no/installed=yes/g" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la"
+        echo "Found libudev.la at $FOUND_LA. Installing to staged sysroot..."
+        mkdir -p "$STAGED_LIBDIR"
+        cp "$FOUND_LA" "$STAGED_LIBDIR/libudev.la"
+        sed -i "s/installed=no/installed=yes/g" "$STAGED_LIBDIR/libudev.la"
     else
         echo "Warning: libudev.la not found in dependencies. Build might fail."
     fi
 fi
 
-if [ -f "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la" ]; then
-    sed -i "s|^dependency_libs=.*$|dependency_libs=''|" "$ROOT_DIR/rootfs/usr/lib/x86_64-linux-gnu/libudev.la"
+if [ -f "$STAGED_LIBDIR/libudev.la" ]; then
+    sed -i "s|^dependency_libs=.*$|dependency_libs=''|" "$STAGED_LIBDIR/libudev.la"
 fi
 
 XORG_SERVER_VER="1.20.14"
 download_and_extract "https://www.x.org/archive/individual/xserver/xorg-server-$XORG_SERVER_VER.tar.gz" "xorg-server-$XORG_SERVER_VER.tar.gz" "xorg-server-$XORG_SERVER_VER"
 cd "$DEP_DIR/xorg-server-$XORG_SERVER_VER"
+
+if [ -f Makefile ]; then
+    make distclean >/dev/null 2>&1 || true
+fi
+rm -f config.cache config.status
 
 # Apply patch if not already applied
 if ! grep -q "#undef bool" glx/glxdri2.c; then
@@ -73,7 +81,9 @@ chmod 755 "$PKG_CONFIG_FILTER"
 export PKG_CONFIG="$PKG_CONFIG_FILTER"
 
 sanitize_generated_la() {
-    find . -name '*.la' -type f -exec sed -i "s| -L$ROOTFS/lib/x86_64-linux-gnu||g" {} +
+    find . -name '*.la' -type f -exec sed -i \
+        -e "s| -L$ROOTFS/usr/lib/x86_64-linux-gnu||g" \
+        -e "s| -L$ROOTFS/lib/x86_64-linux-gnu||g" {} +
 }
 
 ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --sysconfdir=/etc --localstatedir=/var \

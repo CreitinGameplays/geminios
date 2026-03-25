@@ -674,6 +674,6 @@
         "usr/bin/cpp",
         "usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
         "usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-        "usr/libexec/gcc/x86_64-linux-gnu/14/cc1"
+        "usr/libexec/gcc/x86_64-linux-gnu/*/cc1"
     ]
 }
