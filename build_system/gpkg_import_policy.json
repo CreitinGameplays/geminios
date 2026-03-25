@@ -146,6 +146,7 @@
   ],
   "package_aliases": {
     "gpg": "gpg-from-sq",
+    "gpgv": "gpgv-from-sq",
     "libreoffice-core-nogui": "libreoffice-core"
   },
   "dependency_choices": {
@@ -155,7 +156,6 @@
     "policykit-1-gnome | polkit-1-auth-agent": "polkit-1-auth-agent"
   },
   "dependency_rewrites": {
-    "gpg": "gpg-from-sq",
     "libpam-ck-connector": "libpam-elogind",
     "libpam-systemd": "libpam-elogind",
     "systemd": "elogind"
@@ -165,17 +165,6 @@
     "polkit-1-auth-agent": "mate-polkit"
   },
   "package_overrides": {
-    "gpg-from-sq": {
-      "replaces_add": [
-        "gpg"
-      ],
-      "conflicts_add": [
-        "gpg"
-      ],
-      "provides_add": [
-        "gpg"
-      ]
-    },
     "nano": {
       "section": "editors"
     },
