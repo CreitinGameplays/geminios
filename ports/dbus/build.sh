@@ -33,6 +33,14 @@ find "$ROOTFS/usr/lib/x86_64-linux-gnu" "$ROOTFS/lib/x86_64-linux-gnu" "$ROOTFS/
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
+helper="$ROOTFS/usr/libexec/dbus-daemon-launch-helper"
+if [ -f "$helper" ]; then
+    # A non-root build skips upstream's install-exec-hook, but the final image
+    # still needs the helper to be setuid-ready so system bus activation works.
+    chmod 4750 "$helper"
+    chown 0:18 "$helper" 2>/dev/null || true
+fi
+
 # FIX: Remove empty Libs.private from .pc file
 if [ -f "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc" ]; then
     sed -i '/^Libs.private: *$/d' "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"

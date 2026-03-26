@@ -13,6 +13,7 @@ import gzip
 import fnmatch
 import shlex
 import socket
+import stat
 import urllib.request
 import urllib.error
 from urllib.parse import urljoin
@@ -140,6 +141,10 @@ PKGCONFIG_LEGACY_LIBDIR_VALUES = {
     "${prefix}/lib64",
     "${prefix}/lib/x86_64-linux-gnu",
 }
+DBUS_HELPER_REL_PATH = os.path.join("usr", "libexec", "dbus-daemon-launch-helper")
+DBUS_HELPER_REQUIRED_MODE = 0o4750
+DBUS_HELPER_REQUIRED_UID = 0
+DBUS_HELPER_REQUIRED_GID = 18
 
 # Load Manifests
 try:
@@ -1740,6 +1745,96 @@ def get_python_runtime_issues(root_dir=None):
 
     return issues
 
+def get_dbus_helper_permission_issues(root_dir=None):
+    """Return staged D-Bus helper permission issues."""
+    root_dir = root_dir or ROOTFS_DIR
+    helper_path = os.path.join(root_dir, DBUS_HELPER_REL_PATH)
+    if not os.path.exists(helper_path):
+        return []
+
+    issues = []
+    helper_stat = os.lstat(helper_path)
+    helper_mode = stat.S_IMODE(helper_stat.st_mode)
+    if helper_mode != DBUS_HELPER_REQUIRED_MODE:
+        issues.append(
+            f"{DBUS_HELPER_REL_PATH.replace(os.sep, '/')} should have mode {DBUS_HELPER_REQUIRED_MODE:o} "
+            f"in the staged rootfs (found {helper_mode:o})"
+        )
+    return issues
+
+def get_squashfs_metadata_overrides(root_dir=None):
+    """Return SquashFS pseudo definitions for paths that need non-root group metadata."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    overrides = []
+
+    helper_path = os.path.join(root_dir, DBUS_HELPER_REL_PATH)
+    if os.path.exists(helper_path):
+        overrides.append(
+            (
+                DBUS_HELPER_REL_PATH.replace(os.sep, "/"),
+                DBUS_HELPER_REQUIRED_MODE,
+                DBUS_HELPER_REQUIRED_UID,
+                DBUS_HELPER_REQUIRED_GID,
+            )
+        )
+
+    return overrides
+
+def build_mksquashfs_metadata_args(root_dir=None):
+    """Return shell-quoted mksquashfs pseudo-definition arguments."""
+    overrides = get_squashfs_metadata_overrides(root_dir=root_dir)
+    if not overrides:
+        return ""
+
+    args = ["-pseudo-override"]
+    for rel_path, mode, uid, gid in overrides:
+        pseudo_definition = f"{rel_path} m {mode:o} {uid} {gid}"
+        args.append(f"-p {shlex.quote(pseudo_definition)}")
+    return " " + " ".join(args)
+
+def get_squashfs_metadata_issues(sfs_path, root_dir=None):
+    """Return special metadata issues detected in a packed SquashFS image."""
+    if not shutil.which("unsquashfs"):
+        return []
+
+    issues = []
+    for rel_path, mode, uid, gid in get_squashfs_metadata_overrides(root_dir=root_dir):
+        result = subprocess.run(
+            ["unsquashfs", "-lln", sfs_path, rel_path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
+            issues.append(
+                f"failed to inspect {rel_path} metadata inside {os.path.basename(sfs_path)}: "
+                f"{detail[-1] if detail else f'exit code {result.returncode}'}"
+            )
+            continue
+
+        helper_line = ""
+        expected_suffix = f"squashfs-root/{rel_path}"
+        for line in (result.stdout or "").splitlines():
+            stripped = line.strip()
+            if stripped.endswith(expected_suffix):
+                helper_line = stripped
+                break
+
+        if not helper_line:
+            issues.append(f"{rel_path} is missing from packed SquashFS image")
+            continue
+
+        expected_mode = stat.filemode(stat.S_IFREG | mode)
+        expected_owner = f"{uid}/{gid}"
+        if not helper_line.startswith(expected_mode) or f" {expected_owner} " not in helper_line:
+            issues.append(
+                f"{rel_path} should be packed as {expected_mode} {expected_owner}, "
+                f"but SquashFS recorded: {helper_line}"
+            )
+
+    return issues
+
 def get_package_verification_issues(pkg_name, root_dir=None):
     """Return manifest and semantic verification issues for a package."""
     issues = []
@@ -1754,6 +1849,7 @@ def get_package_verification_issues(pkg_name, root_dir=None):
         issues.extend(get_openssl_runtime_issues(root_dir=root_dir))
     elif pkg_name == "dbus":
         issues.extend(get_dbus_runtime_abi_issues(root_dir=root_dir))
+        issues.extend(get_dbus_helper_permission_issues(root_dir=root_dir))
     elif pkg_name == "glib":
         issues.extend(get_glib_runtime_issues(root_dir=root_dir))
     elif pkg_name == "libxml2":
@@ -2532,6 +2628,7 @@ def verify_rootfs_integrity():
         "usr/lib/x86_64-linux-gnu/libinput.so",
         "usr/share/mime/magic",
         "bin/apps/system/gpkg-worker",
+        "usr/libexec/dbus-daemon-launch-helper",
         "usr/share/glib-2.0/schemas/gschemas.compiled",
         "usr/share/fonts/TTF/Inter-Regular.otf",
         "usr/bin/Xwayland",
@@ -2629,6 +2726,13 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] DBus runtime ABI")
 
+    dbus_helper_permission_issues = get_dbus_helper_permission_issues(root_dir=FINAL_ROOTFS_DIR)
+    if dbus_helper_permission_issues:
+        print_error(f"  [FAILED] {dbus_helper_permission_issues[0]}")
+        print_error("           The D-Bus system activation helper must be staged with setuid mode 4750.")
+        return False
+    print_success("  [OK] DBus helper staging permissions")
+
     python_runtime_issues = get_python_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if python_runtime_issues:
         print_error(f"  [FAILED] {python_runtime_issues[0]}")
@@ -2644,12 +2748,27 @@ def finalize_rootfs():
     print_section("\n=== Finalizing Rootfs (Glue & Fixups) ===")
     assemble_final_rootfs()
     
-    # 1. Permissions (su/sudo)
+    # 1. Permissions (su/sudo + dbus helper)
     print_info("[*] Setting SUID permissions...")
-    for tool in ["su", "sudo"]:
-        path = os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", tool)
-        if os.path.exists(path):
-            subprocess.run(f"chmod u+s {path}", shell=True, executable="/usr/bin/bash")
+    suid_fixups = [
+        (os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", "su"), None),
+        (os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", "sudo"), None),
+        (os.path.join(FINAL_ROOTFS_DIR, DBUS_HELPER_REL_PATH), DBUS_HELPER_REQUIRED_MODE),
+    ]
+    for path, exact_mode in suid_fixups:
+        if not os.path.exists(path):
+            continue
+        current_mode = stat.S_IMODE(os.lstat(path).st_mode)
+        new_mode = exact_mode if exact_mode is not None else (current_mode | stat.S_ISUID)
+        if current_mode != new_mode:
+            os.chmod(path, new_mode)
+
+    helper_path = os.path.join(FINAL_ROOTFS_DIR, DBUS_HELPER_REL_PATH)
+    if os.path.exists(helper_path) and os.geteuid() == 0:
+        try:
+            os.chown(helper_path, DBUS_HELPER_REQUIRED_UID, DBUS_HELPER_REQUIRED_GID)
+        except OSError as exc:
+            print_warning(f"  Could not chown {DBUS_HELPER_REL_PATH.replace(os.sep, '/')}: {exc}")
 
     # 2. Critical Symlinks
     print_info("[*] Creating system symlinks...")
@@ -3823,12 +3942,19 @@ def create_iso():
         
     # Using zstd with level 1 for maximum speed/compression balance during development
     # Disabling xattrs also gives a bit of speedup
+    squashfs_metadata_args = build_mksquashfs_metadata_args(root_dir=FINAL_ROOTFS_DIR)
     mksquashfs_cmd = (
         f"mksquashfs {shlex.quote(FINAL_ROOTFS_DIR)} {shlex.quote(sfs_path)} "
-        "-comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root -e staging"
+        f"-comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root"
+        f"{squashfs_metadata_args} -e staging"
     )
     if run_command(mksquashfs_cmd) != 0:
         print_error(" [FAILED] (mksquashfs)")
+        return False
+
+    squashfs_metadata_issues = get_squashfs_metadata_issues(sfs_path, root_dir=FINAL_ROOTFS_DIR)
+    if squashfs_metadata_issues:
+        print_error(f" [FAILED] (root.sfs metadata: {squashfs_metadata_issues[0]})")
         return False
         
     # 2. Build Minimal Initramfs

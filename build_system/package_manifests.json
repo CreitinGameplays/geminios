@@ -149,6 +149,7 @@
         "usr/bin/dbus-daemon",
         "usr/bin/dbus-launch",
         "usr/bin/dbus-run-session",
+        "usr/libexec/dbus-daemon-launch-helper",
         "usr/lib/x86_64-linux-gnu/libdbus-1.so.3.32.4",
         "usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"
     ],
