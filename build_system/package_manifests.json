@@ -162,6 +162,24 @@
         "usr/lib/x86_64-linux-gnu/libpcre2-8.so",
         "usr/lib/x86_64-linux-gnu/pkgconfig/libpcre2-8.pc"
     ],
+    "selinux_userspace": [
+        "usr/lib/x86_64-linux-gnu/libselinux.so.1",
+        "usr/lib/x86_64-linux-gnu/libsemanage.so.2",
+        "usr/lib/x86_64-linux-gnu/libsepol.so.2",
+        "usr/lib/x86_64-linux-gnu/pkgconfig/libselinux.pc",
+        "usr/lib/x86_64-linux-gnu/pkgconfig/libsemanage.pc",
+        "usr/lib/x86_64-linux-gnu/pkgconfig/libsepol.pc",
+        "usr/include/selinux/selinux.h",
+        "usr/include/semanage/semanage.h",
+        "usr/include/sepol/policydb/policydb.h",
+        "usr/bin/checkpolicy",
+        "usr/bin/checkmodule",
+        "usr/bin/secilc"
+    ],
+    "refpolicy": [
+        "etc/selinux/default/contexts/files/file_contexts",
+        "etc/selinux/default/policy/policy.*"
+    ],
     "glib": [
         "usr/lib/x86_64-linux-gnu/libglib-2.0.so",
         "usr/lib/x86_64-linux-gnu/libgobject-2.0.so",

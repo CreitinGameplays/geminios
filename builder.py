@@ -246,6 +246,8 @@ PACKAGES = [
     "util-macros",
     "elfutils",
     "pcre2",
+    "selinux_userspace",
+    "refpolicy",
     "util-linux",
     "e2fsprogs",
     "libxml2",
@@ -370,6 +372,8 @@ PACKAGE_DEPENDENCIES = {
     "ca-certificates": [],
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
+    "selinux_userspace": ["pcre2", "libcap", "gettext", "python", "pkg-config", "bison", "flex"],
+    "refpolicy": ["selinux_userspace"],
     "linux-pam": ["libxcrypt", "meson", "ninja", "pkg-config"],
     "jinja2": ["python", "setuptools", "markupsafe"],
     "elogind": ["dbus", "eudev", "linux-pam", "libcap", "jinja2", "gperf", "meson", "ninja", "pkg-config"],
@@ -4325,7 +4329,7 @@ def create_iso():
 set default=0
 
 menuentry "GeminiOS Live" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0 security=selinux selinux=1
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0 selinux=0
     initrd /boot/initramfs.cpio.lz4
 }
 """
