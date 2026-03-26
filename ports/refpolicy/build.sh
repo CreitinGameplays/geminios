@@ -63,33 +63,31 @@ make_rootfs_tool_wrapper sefcontext_compile usr/sbin/sefcontext_compile sbin/sef
 
 export PATH="$TOOL_WRAP_DIR:$PATH"
 
-make clean || true
-make \
-    TYPE=standard \
-    NAME=default \
-    DISTRO=debian \
-    MONOLITHIC=y \
-    SYSTEMD=n \
-    DIRECT_INITRC=y \
-    UNK_PERMS=allow \
-    WERROR=n \
-    CHECKPOLICY="$TOOL_WRAP_DIR/checkpolicy" \
-    CHECKMODULE="$TOOL_WRAP_DIR/checkmodule" \
+COMMON_MAKE_ARGS=(
+    TYPE=standard
+    NAME=default
+    DISTRO=debian
+    MONOLITHIC=y
+    SYSTEMD=n
+    DIRECT_INITRC=y
+    UNK_PERMS=allow
+    WERROR=n
+    CHECKPOLICY="$TOOL_WRAP_DIR/checkpolicy"
+    CHECKMODULE="$TOOL_WRAP_DIR/checkmodule"
     SECILC="$TOOL_WRAP_DIR/secilc"
+    SETFILES="$TOOL_WRAP_DIR/setfiles"
+    SEFCONTEXT_COMPILE="$TOOL_WRAP_DIR/sefcontext_compile"
+)
+
+make clean || true
+# Upstream refpolicy expects make conf to generate policy/modules.conf and the
+# related booleans/tunables config before a clean monolithic build.
+make "${COMMON_MAKE_ARGS[@]}" conf
+make "${COMMON_MAKE_ARGS[@]}"
 
 make \
     DESTDIR="$STAGE_DIR" \
-    TYPE=standard \
-    NAME=default \
-    DISTRO=debian \
-    MONOLITHIC=y \
-    SYSTEMD=n \
-    DIRECT_INITRC=y \
-    UNK_PERMS=allow \
-    WERROR=n \
-    CHECKPOLICY="$TOOL_WRAP_DIR/checkpolicy" \
-    CHECKMODULE="$TOOL_WRAP_DIR/checkmodule" \
-    SECILC="$TOOL_WRAP_DIR/secilc" \
+    "${COMMON_MAKE_ARGS[@]}" \
     install
 
 rm -f \
