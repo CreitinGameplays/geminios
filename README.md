@@ -301,9 +301,6 @@ GeminiOS uses a custom "Shim Wrapper" architecture to ensure build isolation and
 
 ## Kernel Compilation
 
-Yes: after enabling SELinux in GeminiOS userspace, you also need to rebuild the external Linux kernel that GeminiOS boots.
-GeminiOS now expects `external_dependencies/linux-6.19.10/arch/x86/boot/bzImage`; it does not turn SELinux on inside the kernel for you.
-
 Run these commands once to prepare the kernel:
 ```sh
 mkdir -p external_dependencies

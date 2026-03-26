@@ -19,7 +19,7 @@ libgmpxx4ldbl
 libmpc3
 libmpfr6
 libncurses-dev
-libselinux1-dev
+libselinux-dev
 libsepol-dev
 libssl-dev
 libtirpc-dev
