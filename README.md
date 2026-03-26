@@ -239,6 +239,8 @@ sudo gpkg repair --suggested-yes
 
 `gpkg clean` clears the local package cache under `/var/repo/`: cached `.deb` archives, cached `.gpkg` archives, converted Debian-to-`.gpkg` imports, partial downloads, and merged/package-list indices. That makes it behave closer to `apt` archive cleanup while still resetting gpkg’s merged repository cache in one step.
 
+On SELinux-enabled installs, `gpkg-worker` now relabels the files it just wrote before finishing the transaction, and it drops `/.autorelabel` automatically if an upgrade touches the SELinux policy store itself. GeminiOS also blocks Debian-imported SELinux userspace/policy packages from replacing the distro-managed SELinux stack through normal `gpkg upgrade` runs.
+
 `builder.py` now seeds `/etc/gpkg/sources.list.d/00-default.list` from `build_system/gpkg_default_sources.list` when that file exists.
 That keeps the default GeminiOS-native repository policy in build config instead of hardcoding it into `gpkg` itself.
 

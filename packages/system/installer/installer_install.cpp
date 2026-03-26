@@ -2,6 +2,7 @@
 
 #include "user_mgmt.h"
 
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -30,6 +31,66 @@ std::string kernel_root_argument(const InstallArtifacts& artifacts) {
         return "UUID=" + artifacts.root_uuid;
     }
     return {};
+}
+
+std::string normalize_machine_id(std::string value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (unsigned char ch : value) {
+        if (!std::isxdigit(ch)) continue;
+        normalized.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return normalized.size() == 32 ? normalized : "";
+}
+
+std::string generate_machine_id() {
+    std::string machine_id = normalize_machine_id(read_file_trimmed("/proc/sys/kernel/random/uuid"));
+    if (!machine_id.empty()) return machine_id;
+
+    unsigned char random_bytes[16] = {};
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) return "";
+
+    size_t offset = 0;
+    while (offset < sizeof(random_bytes)) {
+        ssize_t got = read(fd, random_bytes + offset, sizeof(random_bytes) - offset);
+        if (got <= 0) {
+            close(fd);
+            return "";
+        }
+        offset += static_cast<size_t>(got);
+    }
+    close(fd);
+
+    static const char kHexDigits[] = "0123456789abcdef";
+    machine_id.reserve(32);
+    for (unsigned char byte : random_bytes) {
+        machine_id.push_back(kHexDigits[(byte >> 4) & 0x0F]);
+        machine_id.push_back(kHexDigits[byte & 0x0F]);
+    }
+    return machine_id;
+}
+
+bool configure_machine_identity(std::string& error) {
+    const std::string machine_id = generate_machine_id();
+    if (machine_id.empty()) {
+        error = "Failed to generate a unique machine-id.";
+        return false;
+    }
+
+    if (!write_text_file(kTargetRoot + "/etc/machine-id", machine_id + "\n")) {
+        error = "Failed to write /etc/machine-id.";
+        return false;
+    }
+    if (!mkdir_p(kTargetRoot + "/var/lib/dbus")) {
+        error = "Failed to create /var/lib/dbus.";
+        return false;
+    }
+    if (!ensure_symlink("/etc/machine-id", kTargetRoot + "/var/lib/dbus/machine-id")) {
+        error = "Failed to link /var/lib/dbus/machine-id.";
+        return false;
+    }
+    return true;
 }
 
 bool auto_partition_disk(const ToolRegistry& tools, const InstallerConfig& config, InstallArtifacts& artifacts, std::string& error) {
@@ -577,6 +638,10 @@ bool configure_identity(const InstallerConfig& config, const InstallArtifacts& a
     hosts << "127.0.1.1\t" << config.hostname << ".localdomain " << config.hostname << "\n";
     if (!write_text_file(kTargetRoot + "/etc/hosts", hosts.str())) {
         error = "Failed to write hosts file.";
+        return false;
+    }
+
+    if (!configure_machine_identity(error)) {
         return false;
     }
 

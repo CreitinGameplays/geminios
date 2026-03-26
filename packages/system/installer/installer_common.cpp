@@ -629,7 +629,10 @@ bool wait_for_path(const std::string& path, int retries, int delay_ms) {
 }
 
 bool ensure_file_removed(const std::string& path) {
-    if (!file_exists(path)) return true;
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0) {
+        return errno == ENOENT;
+    }
     if (unlink(path.c_str()) == 0) return true;
     log_message("WARN", "Failed to remove " + path + ": " + std::strerror(errno));
     return false;
