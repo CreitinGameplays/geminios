@@ -1346,6 +1346,150 @@ def find_existing_rootfs_relpath(root_dir, relpaths):
             return relpath
     return None
 
+
+def get_selinux_type(root_dir):
+    """Return the configured SELinux policy store name for a staged rootfs."""
+    config_path = os.path.join(root_dir, "etc", "selinux", "config")
+    if not os.path.exists(config_path):
+        return "default"
+
+    try:
+        with open(config_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("SELINUXTYPE="):
+                    value = stripped.split("=", 1)[1].strip()
+                    if value:
+                        return value
+    except OSError:
+        pass
+
+    return "default"
+
+
+def materialize_selinux_policy_store(root_dir=None):
+    """Best-effort offline SELinux policy build for the staged rootfs."""
+    rootfs_dir = root_dir or FINAL_ROOTFS_DIR
+    selinux_type = get_selinux_type(rootfs_dir)
+    contexts_dir = os.path.join(rootfs_dir, "etc", "selinux", selinux_type, "contexts", "files")
+    policy_dir = os.path.join(rootfs_dir, "etc", "selinux", selinux_type, "policy")
+    existing_file_contexts = glob.glob(os.path.join(contexts_dir, "file_contexts*"))
+    existing_policy = glob.glob(os.path.join(policy_dir, "policy.*"))
+    if existing_file_contexts and existing_policy:
+        return True
+
+    modules_manifest = os.path.join(rootfs_dir, "usr", "share", "selinux", selinux_type, ".modules")
+    semanage_conf = os.path.join(rootfs_dir, "etc", "selinux", "semanage.conf")
+    semodule_rel = find_existing_rootfs_relpath(rootfs_dir, ["usr/sbin/semodule", "sbin/semodule"])
+    setfiles_rel = find_existing_rootfs_relpath(rootfs_dir, ["usr/sbin/setfiles", "sbin/setfiles"])
+    sefcontext_compile_rel = find_existing_rootfs_relpath(
+        rootfs_dir,
+        ["usr/sbin/sefcontext_compile", "sbin/sefcontext_compile"],
+    )
+    hll_compiler_dir = os.path.join(rootfs_dir, "usr", "libexec", "selinux", "hll")
+
+    if not all(
+        [
+            os.path.exists(modules_manifest),
+            os.path.exists(semanage_conf),
+            semodule_rel,
+            setfiles_rel,
+            sefcontext_compile_rel,
+            os.path.isdir(hll_compiler_dir),
+        ]
+    ):
+        return False
+
+    runtime_lib_dirs = []
+    for path in (
+        os.path.join(rootfs_dir, "usr", "lib", "x86_64-linux-gnu"),
+        os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu"),
+        os.path.join(rootfs_dir, "usr", "lib64"),
+        os.path.join(rootfs_dir, "lib64"),
+    ):
+        if os.path.isdir(path):
+            runtime_lib_dirs.append(os.path.realpath(path))
+    if not runtime_lib_dirs:
+        return False
+
+    print_info("[*] Materializing staged SELinux policy store...")
+
+    with tempfile.TemporaryDirectory(prefix="geminios-selinux-") as tmpdir:
+        lib_path = ":".join(dict.fromkeys(runtime_lib_dirs))
+        setfiles_wrapper = os.path.join(tmpdir, "setfiles-wrapper.sh")
+        sefcontext_wrapper = os.path.join(tmpdir, "sefcontext-compile-wrapper.sh")
+        staged_setfiles = rootfs_abspath(rootfs_dir, setfiles_rel)
+        staged_sefcontext = rootfs_abspath(rootfs_dir, sefcontext_compile_rel)
+
+        for wrapper_path, target_binary in (
+            (setfiles_wrapper, staged_setfiles),
+            (sefcontext_wrapper, staged_sefcontext),
+        ):
+            with open(wrapper_path, "w", encoding="utf-8") as f:
+                f.write("#!/bin/bash\n")
+                f.write(f"export LD_LIBRARY_PATH={shlex.quote(lib_path)}\n")
+                f.write(f"exec {shlex.quote(target_binary)} \"$@\"\n")
+            os.chmod(wrapper_path, 0o755)
+
+        with open(semanage_conf, "r", encoding="utf-8", errors="replace") as f:
+            semanage_text = f.read().rstrip() + "\n"
+        semanage_text += f"compiler-directory = {hll_compiler_dir}\n"
+        semanage_text += "[setfiles]\n"
+        semanage_text += f"path = {setfiles_wrapper}\n"
+        semanage_text += "args = -q -c $@ $<\n"
+        semanage_text += "[end]\n"
+        semanage_text += "[sefcontext_compile]\n"
+        semanage_text += f"path = {sefcontext_wrapper}\n"
+        semanage_text += "args = $@\n"
+        semanage_text += "[end]\n"
+
+        temp_conf_path = os.path.join(tmpdir, "semanage.conf")
+        with open(temp_conf_path, "w", encoding="utf-8") as f:
+            f.write(semanage_text)
+
+        module_args = []
+        for module_name in read_manifest_lines(modules_manifest):
+            module_path = os.path.join(rootfs_dir, "usr", "share", "selinux", selinux_type, f"{module_name}.pp.bz2")
+            if os.path.exists(module_path):
+                module_args.append(f"-i{module_path}")
+
+        env = os.environ.copy()
+        env["LD_LIBRARY_PATH"] = lib_path
+        result = run_staged_binary_command(
+            rootfs_dir,
+            semodule_rel,
+            ["-n", "-s", selinux_type, "-p", rootfs_dir, "-g", temp_conf_path, "-X", "100", *module_args],
+            env=env,
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip().splitlines()
+            summary = stderr[-1] if stderr else f"exit {result.returncode}"
+            print_warning(f"  SELinux policy materialization reported: {summary}")
+
+    generated_policy_paths = glob.glob(
+        os.path.join(rootfs_dir, "var", "lib", "selinux", "final", selinux_type, "policy", "policy.*")
+    )
+    generated_file_contexts = glob.glob(
+        os.path.join(rootfs_dir, "var", "lib", "selinux", "final", selinux_type, "contexts", "files", "file_contexts*")
+    )
+
+    if generated_policy_paths:
+        os.makedirs(policy_dir, exist_ok=True)
+        for src_path in generated_policy_paths:
+            shutil.copy2(src_path, os.path.join(policy_dir, os.path.basename(src_path)))
+
+    if generated_file_contexts:
+        os.makedirs(contexts_dir, exist_ok=True)
+        for src_path in generated_file_contexts:
+            shutil.copy2(src_path, os.path.join(contexts_dir, os.path.basename(src_path)))
+
+    staged_ok = bool(glob.glob(os.path.join(contexts_dir, "file_contexts*"))) and bool(
+        glob.glob(os.path.join(policy_dir, "policy.*"))
+    )
+    if staged_ok:
+        print_success("  ✓ Staged SELinux policy artifacts generated")
+    return staged_ok
+
 def get_selinux_runtime_issues(root_dir=None):
     """Return SELinux policy/runtime mismatches inside the staged rootfs."""
     rootfs_dir = root_dir or ROOTFS_DIR
@@ -3097,13 +3241,17 @@ def finalize_rootfs():
     # 10. Restore multiarch compatibility symlinks for the in-OS toolchain.
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
-    # 11. Prepare SELinux policy/config and opportunistically pre-label the
+    # 11. Materialize the Debian SELinux module set into a usable staged
+    # policy/file-context store before any relabel or integrity verification.
+    materialize_selinux_policy_store(root_dir=FINAL_ROOTFS_DIR)
+
+    # 12. Prepare SELinux policy/config and opportunistically pre-label the
     # staged rootfs when the build host can support it. The live image still
     # stays permissive by default; the installer flips installed systems to
     # enforcing after a successful relabel.
     stage_selinux_rootfs_labels(root_dir=FINAL_ROOTFS_DIR)
 
-    # 12. Final Integrity Check
+    # 13. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)
