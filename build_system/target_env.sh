@@ -18,6 +18,7 @@ export TARGET_OBJDUMP="x86_64-gemini-linux-gnu-objdump"
 export TARGET_STRIP="x86_64-gemini-linux-gnu-strip"
 export TARGET_PKG_CONFIG="$ROOT_DIR/build_system/wrap_bin/pkg-config"
 export TARGET_SYSROOT
+export PKG_CONFIG="$TARGET_PKG_CONFIG"
 
 export CC="$TARGET_CC"
 export CXX="$TARGET_CXX"
