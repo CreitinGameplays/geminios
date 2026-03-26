@@ -13,6 +13,7 @@
     "sysvinit-utils",
     "udev",
     "x-terminal-emulator",
+    "ncurses-base",
     "libc6",
     "libcrypt1",
     "libgcc-s1",
@@ -83,6 +84,7 @@
     "xz-utils",
     "zlib1g",
     "x11-common",
+    "ncurses-base",
     "wayland",
     "libwayland-egl1",
     "libdrm",
@@ -120,7 +122,8 @@
   ],
   "allow_essential_packages": [
     "libc6",
-    "libc-bin"
+    "libc-bin",
+    "ncurses-base"
   ],
   "skip_dependency_patterns": [
     "debconf-2.0"
