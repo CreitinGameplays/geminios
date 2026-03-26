@@ -10,8 +10,9 @@ cd -
 # ginit Makefile now installs binaries to /bin and /sbin
 # and services to /usr/lib/ginit/services
 
-# Ensure /init points to /bin/ginit (PID 1)
-cp "$ROOTFS/bin/ginit" "$ROOTFS/init"
+# The live initramfs hands off with switch_root /new_root /bin/init,
+# so the real rootfs does not need a separate top-level /init.
+rm -f "$ROOTFS/init"
 ln -sf ginit "$ROOTFS/bin/init"
 
 ln -sf bash "$ROOTFS/bin/sh"

@@ -794,22 +794,38 @@ def save_bootstrap_stage_progress(progress_path, payload):
         f.write("\n")
     os.replace(temp_path, progress_path)
 
+def get_bootstrap_stage_metadata_paths(stage_dir):
+    """Store bootstrap bookkeeping outside the staged filesystem tree."""
+    stage_name = os.path.basename(stage_dir.rstrip(os.sep))
+    safe_stage_name = re.sub(r"[^A-Za-z0-9._-]+", "_", stage_name)
+    metadata_dir = os.path.join(OUTPUT_DIR, "bootstrap-stage-state")
+    os.makedirs(metadata_dir, exist_ok=True)
+    return (
+        os.path.join(metadata_dir, f"{safe_stage_name}.plan.json"),
+        os.path.join(metadata_dir, f"{safe_stage_name}.progress.json"),
+    )
+
 def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
     """Populate a stage directory from Debian .deb packages with resume support."""
     stage_name = os.path.basename(stage_dir)
-    plan_path = os.path.join(stage_dir, ".bootstrap-plan.json")
-    progress_path = os.path.join(stage_dir, ".bootstrap-progress.json")
+    plan_path, progress_path = get_bootstrap_stage_metadata_paths(stage_dir)
+    legacy_plan_path = os.path.join(stage_dir, ".bootstrap-plan.json")
+    legacy_progress_path = os.path.join(stage_dir, ".bootstrap-progress.json")
     desired_plan = {"packages": package_names}
     expected_set = set(package_names)
 
     if os.path.exists(stage_dir):
         existing_plan = load_bootstrap_stage_progress(plan_path)
+        if not existing_plan and os.path.exists(legacy_plan_path):
+            existing_plan = load_bootstrap_stage_progress(legacy_plan_path)
         if existing_plan.get("packages") != package_names:
             print_warning(f"WARNING: Bootstrap plan changed for {stage_name}; resetting staged directory.")
             shutil.rmtree(stage_dir)
     os.makedirs(stage_dir, exist_ok=True)
 
     existing_progress = load_bootstrap_stage_progress(progress_path)
+    if not existing_progress and os.path.exists(legacy_progress_path):
+        existing_progress = load_bootstrap_stage_progress(legacy_progress_path)
     completed = set(existing_progress.get("completed", [])) & expected_set
     save_bootstrap_stage_progress(plan_path, desired_plan)
     save_bootstrap_stage_progress(
@@ -820,6 +836,9 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
             "completed": sorted(completed),
         },
     )
+    for stale_path in (legacy_plan_path, legacy_progress_path):
+        if os.path.exists(stale_path):
+            os.remove(stale_path)
 
     if completed:
         print_info(f"[*] Resuming {stage_name} from cache: {len(completed)}/{len(package_names)} packages already staged.")
@@ -952,6 +971,10 @@ def assemble_final_rootfs():
         stamp_path = os.path.join(FINAL_ROOTFS_DIR, stamp_name)
         if os.path.exists(stamp_path):
             os.remove(stamp_path)
+    for leaked_path in (".bootstrap-plan.json", ".bootstrap-progress.json", "init"):
+        leaked_abs_path = os.path.join(FINAL_ROOTFS_DIR, leaked_path)
+        if os.path.lexists(leaked_abs_path):
+            remove_path(leaked_abs_path)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
