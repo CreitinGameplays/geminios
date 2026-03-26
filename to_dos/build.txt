@@ -1,4 +1,4 @@
-Kernel Command:
+Dev Commands:
 
 # stable
 python3 tools/build_kernel_gpkg.py \
