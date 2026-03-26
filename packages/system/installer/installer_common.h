@@ -101,6 +101,7 @@ struct InstallerConfig {
 
 struct ToolRegistry {
     std::string cp;
+    std::string mount;
     std::string sfdisk;
     std::string mkfs_ext4;
     std::string mkfs_xfs;

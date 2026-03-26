@@ -7,11 +7,13 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <dirent.h>
 #include <fcntl.h>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -31,6 +33,129 @@ std::string kernel_root_argument(const InstallArtifacts& artifacts) {
         return "UUID=" + artifacts.root_uuid;
     }
     return {};
+}
+
+struct LiveBaseMount {
+    std::string temp_dir;
+    std::string media_mount;
+    std::string root_mount;
+    bool media_mounted = false;
+    bool root_mounted = false;
+
+    ~LiveBaseMount() {
+        if (root_mounted) {
+            unmount_path(root_mount);
+        }
+        if (media_mounted) {
+            unmount_path(media_mount);
+        }
+        if (!root_mount.empty()) {
+            rmdir(root_mount.c_str());
+        }
+        if (!media_mount.empty()) {
+            rmdir(media_mount.c_str());
+        }
+        if (!temp_dir.empty()) {
+            rmdir(temp_dir.c_str());
+        }
+    }
+};
+
+bool try_mount_iso_device_read_only(const std::string& device, const std::string& mountpoint) {
+    return mount(device.c_str(), mountpoint.c_str(), "iso9660", MS_RDONLY, nullptr) == 0;
+}
+
+bool find_pristine_live_source_root(
+    const ToolRegistry& tools,
+    LiveBaseMount& mount_state,
+    std::string& source_root,
+    std::string& error
+) {
+    source_root.clear();
+
+    static const char* const kDirectCandidates[] = {
+        "/mnt/ro",
+        "/run/geminios/base-root",
+        "/run/geminios/ro-root",
+    };
+    for (const char* candidate_path : kDirectCandidates) {
+        const std::string candidate = candidate_path;
+        if (directory_exists(candidate) &&
+            directory_exists(candidate + "/usr") &&
+            file_exists(candidate + "/etc/geminios-live")) {
+            source_root = candidate;
+            return true;
+        }
+    }
+
+    if (tools.mount.empty()) {
+        error = "mount is required to read the pristine live base image.";
+        return false;
+    }
+
+    char temp_template[] = "/tmp/geminios-installer-source-XXXXXX";
+    char* temp_path = mkdtemp(temp_template);
+    if (!temp_path) {
+        error = "Failed to allocate a temporary mount directory for the live base image.";
+        return false;
+    }
+
+    mount_state.temp_dir = temp_path;
+    mount_state.media_mount = mount_state.temp_dir + "/media";
+    mount_state.root_mount = mount_state.temp_dir + "/root";
+    if (!mkdir_p(mount_state.media_mount) || !mkdir_p(mount_state.root_mount)) {
+        error = "Failed to create temporary mountpoints for the live base image.";
+        return false;
+    }
+
+    DIR* dir = opendir("/dev");
+    if (!dir) {
+        error = "Unable to scan /dev for the live boot media.";
+        return false;
+    }
+
+    while (dirent* entry = readdir(dir)) {
+        const std::string name = entry->d_name;
+        if (name == "." || name == "..") continue;
+
+        const bool match =
+            name.rfind("sr", 0) == 0 ||
+            name.rfind("sd", 0) == 0 ||
+            name.rfind("vd", 0) == 0 ||
+            name.rfind("hd", 0) == 0 ||
+            name.rfind("nvme", 0) == 0 ||
+            name.rfind("mmcblk", 0) == 0;
+        if (!match) continue;
+
+        const std::string device = "/dev/" + name;
+        if (!try_mount_iso_device_read_only(device, mount_state.media_mount)) {
+            continue;
+        }
+        mount_state.media_mounted = true;
+
+        const std::string root_sfs = mount_state.media_mount + "/root.sfs";
+        if (file_exists(root_sfs)) {
+            CommandResult result = run_command(
+                tools.mount,
+                {"-t", "squashfs", "-o", "loop,ro", root_sfs, mount_state.root_mount}
+            );
+            if (result.success &&
+                directory_exists(mount_state.root_mount + "/usr") &&
+                file_exists(mount_state.root_mount + "/etc/geminios-live")) {
+                closedir(dir);
+                mount_state.root_mounted = true;
+                source_root = mount_state.root_mount;
+                return true;
+            }
+        }
+
+        unmount_path(mount_state.media_mount);
+        mount_state.media_mounted = false;
+    }
+    closedir(dir);
+
+    error = "Unable to locate and mount the pristine live base image (root.sfs).";
+    return false;
 }
 
 std::string normalize_machine_id(std::string value) {
@@ -242,6 +367,16 @@ bool prepare_target_mounts(const InstallerConfig& config, InstallArtifacts& arti
 }
 
 bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) {
+    const bool is_live = file_exists("/etc/geminios-live");
+    std::string base_source_root = "/";
+    LiveBaseMount live_base_mount;
+    if (is_live) {
+        if (!find_pristine_live_source_root(tools, live_base_mount, base_source_root, error)) {
+            return false;
+        }
+        log_message("INFO", "Installing base system from pristine live image at " + base_source_root);
+    }
+
     const std::vector<std::string> essential_paths = {
         "/bin",
         "/sbin",
@@ -255,8 +390,9 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
     };
 
     for (const auto& path : essential_paths) {
-        if (!copy_tree(tools, path, kTargetRoot + "/")) {
-            error = "Failed to copy " + path + ". See " + kLogPath;
+        const std::string source_path = base_source_root + path;
+        if (!copy_tree(tools, source_path, kTargetRoot + "/")) {
+            error = "Failed to copy " + source_path + ". See " + kLogPath;
             return false;
         }
     }
