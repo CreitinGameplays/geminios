@@ -576,6 +576,7 @@
         "etc/lightdm/lightdm.conf",
         "etc/lightdm/Xsession",
         "etc/lightdm/lightdm.conf.d/50-geminios.conf",
+        "etc/xdg/fastfetch/config.jsonc",
         "usr/lib/ginit/services/dbus.gservice",
         "usr/lib/ginit/services/elogind.gservice",
         "usr/lib/ginit/services/udevd.gservice",
@@ -594,6 +595,8 @@
         "bin/wayland-session-report",
         "usr/libexec/geminios/lightdm-prepare",
         "usr/libexec/geminios/lightdm-greeter-launch",
+        "usr/share/fastfetch/logos/geminios-ascii.txt",
+        "usr/share/fastfetch/logos/geminios-rainbow.ans",
         "usr/share/xgreeters/lightdm-greeter.desktop",
         "usr/share/wayland-sessions/geminios-weston.desktop",
         "usr/share/wayland-sessions/geminios-gnome.desktop"

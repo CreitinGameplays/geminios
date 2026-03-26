@@ -226,6 +226,8 @@ sudo gpkg upgrade --reinstall
 sudo gpkg repair --suggested-yes
 ```
 
+GeminiOS also ships a system-wide `fastfetch` default at `/etc/xdg/fastfetch/config.jsonc`, with GeminiOS logo assets under `/usr/share/fastfetch/logos/`. Users can still override that per-account with `~/.config/fastfetch/config.jsonc`.
+
 `--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. `--reinstall` is valid with `install` and `upgrade`; it forces the selected transaction targets back through download/prepare/install even when the installed version is already current. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
 
 `gpkg` now also maintains a dpkg-style status ledger at `/var/lib/gpkg/status` alongside `/var/lib/gpkg/info/`. Installations transition through `half-installed`, `unpacked`, `half-configured`, and `installed`; removals keep package conffiles and land in `config-files`; `gpkg remove --purge` follows the remove step with a purge step that deletes retained conffiles and the remaining package metadata; and retirements forget the package entry entirely after success. The worker restores the previous status automatically if a transaction rolls back.

@@ -100,8 +100,9 @@ export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
 EOF
 
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
-mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg/autostart"
+mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg/autostart" "$ROOTFS/etc/xdg/fastfetch"
 mkdir -p "$ROOTFS/usr/libexec/geminios/session-env.d"
+mkdir -p "$ROOTFS/usr/share/fastfetch/logos"
 mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
 mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm"
 if [ "$(id -u)" -eq 0 ]; then
@@ -113,6 +114,57 @@ fi
 cat > "$ROOTFS/etc/environment" <<EOF
 PATH=/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 LANG=C.UTF-8
+EOF
+
+FASTFETCH_ASSET_DIR="$ROOT_DIR/build_system/assets/fastfetch"
+FASTFETCH_ASCII_SOURCE="$FASTFETCH_ASSET_DIR/geminios-ascii.txt"
+FASTFETCH_ASCII_TARGET="$ROOTFS/usr/share/fastfetch/logos/geminios-ascii.txt"
+FASTFETCH_RENDERED_TARGET="$ROOTFS/usr/share/fastfetch/logos/geminios-rainbow.ans"
+cp "$FASTFETCH_ASCII_SOURCE" "$FASTFETCH_ASCII_TARGET"
+python3 "$ROOT_DIR/tools/generate_fastfetch_logo.py" "$FASTFETCH_ASCII_SOURCE" "$FASTFETCH_RENDERED_TARGET"
+
+cat > "$ROOTFS/etc/xdg/fastfetch/config.jsonc" <<'EOF'
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "file-raw",
+    "source": "/usr/share/fastfetch/logos/geminios-rainbow.ans",
+    "padding": {
+      "right": 2
+    }
+  },
+  "modules": [
+    "title",
+    "separator",
+    "os",
+    "host",
+    "kernel",
+    "uptime",
+    "packages",
+    "shell",
+    "display",
+    "de",
+    "wm",
+    "wmtheme",
+    "theme",
+    "icons",
+    "font",
+    "cursor",
+    "terminal",
+    "terminalfont",
+    "cpu",
+    "gpu",
+    "memory",
+    "swap",
+    "disk",
+    "localip",
+    "battery",
+    "poweradapter",
+    "locale",
+    "break",
+    "colors"
+  ]
+}
 EOF
 
 cat > "$ROOTFS/etc/selinux/config" <<EOF
