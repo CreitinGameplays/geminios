@@ -31,6 +31,7 @@ libncursesw6
 libpcre2-8-0
 libreadline8t64
 libselinux1
+libsepol2
 libsmartcols1
 libssl3t64
 libstdc++6
@@ -39,3 +40,8 @@ libuuid1
 libxml2-16
 libzstd1
 openssl
+policycoreutils
+selinux-policy-default
+selinux-utils
+checkpolicy
+secilc

@@ -743,6 +743,7 @@ ToolRegistry detect_tools() {
     tools.grub_install = find_executable("grub-install");
     tools.udevadm = find_executable("udevadm");
     tools.blockdev = find_executable("blockdev");
+    tools.setfiles = find_executable("setfiles");
     return tools;
 }
 
@@ -753,6 +754,7 @@ void print_environment_summary(const ToolRegistry& tools) {
     std::cout << "  sfdisk:         " << (tools.sfdisk.empty() ? "missing" : tools.sfdisk) << "\n";
     std::cout << "  GRUB:           " << (tools.grub_install.empty() ? "missing" : tools.grub_install) << "\n";
     std::cout << "  blkid:          " << (tools.blkid.empty() ? "missing" : tools.blkid) << "\n";
+    std::cout << "  setfiles:       " << (tools.setfiles.empty() ? "missing" : tools.setfiles) << "\n";
     std::cout << "  ext4 support:   " << (tools.mkfs_ext4.empty() ? "missing" : "available") << "\n";
     std::cout << "  xfs support:    " << (tools.mkfs_xfs.empty() ? "missing" : "available") << "\n";
     std::cout << "  btrfs support:  " << (tools.mkfs_btrfs.empty() ? "missing" : "available") << "\n";

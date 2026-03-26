@@ -1276,26 +1276,72 @@ def get_util_linux_runtime_issues(root_dir=None):
     if not os.path.exists(libmount_path):
         return []
 
-    issues = []
     libmount_real = os.path.realpath(libmount_path)
-    libmount_needed = set(get_elf_needed(libmount_real))
-    unexpected_selinux_deps = sorted({"libselinux.so.1", "libsepol.so.2"} & libmount_needed)
-    if unexpected_selinux_deps:
-        issues.append(
-            "libmount unexpectedly links against SELinux runtime libraries: "
-            + ", ".join(unexpected_selinux_deps)
-        )
-    issues.extend(
-        collect_missing_runtime_deps(
-            rootfs_dir,
-            [
-                os.path.join(rootfs_dir, "bin", "mount"),
-                os.path.join(rootfs_dir, "bin", "umount"),
-                os.path.join(rootfs_dir, "sbin", "switch_root"),
-                libmount_real,
-            ],
-        )
+    return collect_missing_runtime_deps(
+        rootfs_dir,
+        [
+            os.path.join(rootfs_dir, "bin", "mount"),
+            os.path.join(rootfs_dir, "bin", "umount"),
+            os.path.join(rootfs_dir, "sbin", "switch_root"),
+            libmount_real,
+        ],
     )
+
+def find_existing_rootfs_relpath(root_dir, relpaths):
+    """Return the first existing rootfs-relative path from the given candidates."""
+    for relpath in relpaths:
+        if os.path.exists(os.path.join(root_dir, relpath)):
+            return relpath
+    return None
+
+def get_selinux_runtime_issues(root_dir=None):
+    """Return SELinux policy/runtime mismatches inside the staged rootfs."""
+    rootfs_dir = root_dir or ROOTFS_DIR
+    issues = []
+
+    config_path = os.path.join(rootfs_dir, "etc", "selinux", "config")
+    if not os.path.exists(config_path):
+        return ["SELinux config is missing: etc/selinux/config"]
+
+    with open(config_path, "r", encoding="utf-8", errors="replace") as f:
+        config_text = f.read()
+    if "SELINUX=" not in config_text:
+        issues.append("etc/selinux/config does not declare SELINUX=")
+    if "SELINUXTYPE=default" not in config_text:
+        issues.append("etc/selinux/config should pin SELINUXTYPE=default")
+
+    required_bins = {
+        "load_policy": ["usr/sbin/load_policy", "sbin/load_policy"],
+        "setfiles": ["usr/sbin/setfiles", "sbin/setfiles"],
+        "restorecon": ["usr/sbin/restorecon", "sbin/restorecon"],
+        "setenforce": ["usr/sbin/setenforce", "sbin/setenforce"],
+    }
+    for label, candidates in required_bins.items():
+        if not find_existing_rootfs_relpath(rootfs_dir, candidates):
+            issues.append(f"SELinux helper missing from staged rootfs: {label}")
+
+    required_libs = [
+        "usr/lib/x86_64-linux-gnu/libselinux.so.1",
+        "usr/lib/x86_64-linux-gnu/libsepol.so.2",
+    ]
+    for relpath in required_libs:
+        if not os.path.exists(os.path.join(rootfs_dir, relpath)):
+            issues.append(f"SELinux runtime library missing: {relpath}")
+
+    file_context_candidates = [
+        os.path.join(rootfs_dir, "etc", "selinux", "default", "contexts", "files", "file_contexts"),
+        os.path.join(rootfs_dir, "etc", "selinux", "targeted", "contexts", "files", "file_contexts"),
+    ]
+    if not any(os.path.exists(path) for path in file_context_candidates):
+        issues.append("SELinux file contexts are missing from /etc/selinux")
+
+    policy_candidates = (
+        glob.glob(os.path.join(rootfs_dir, "etc", "selinux", "default", "policy", "policy.*"))
+        + glob.glob(os.path.join(rootfs_dir, "etc", "selinux", "targeted", "policy", "policy.*"))
+    )
+    if not policy_candidates:
+        issues.append("SELinux binary policy store is missing from /etc/selinux")
+
     return issues
 
 def extract_glibc_release_version(binary_path):
@@ -2726,6 +2772,13 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] util-linux runtime closure")
 
+    selinux_runtime_issues = get_selinux_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
+    if selinux_runtime_issues:
+        print_error(f"  [FAILED] {selinux_runtime_issues[0]}")
+        print_error("           The staged SELinux policy/userspace stack is incomplete.")
+        return False
+    print_success("  [OK] SELinux policy/runtime")
+
     early_userspace_smoke_tests = [
         ("bin/bash", ["--version"]),
         ("bin/mount", ["--help"]),
@@ -2987,7 +3040,13 @@ def finalize_rootfs():
     # 10. Restore multiarch compatibility symlinks for the in-OS toolchain.
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
-    # 11. Final Integrity Check
+    # 11. Prepare SELinux policy/config and opportunistically pre-label the
+    # staged rootfs when the build host can support it. The live image still
+    # stays permissive by default; the installer flips installed systems to
+    # enforcing after a successful relabel.
+    stage_selinux_rootfs_labels(root_dir=FINAL_ROOTFS_DIR)
+
+    # 12. Final Integrity Check
     if not verify_rootfs_integrity():
         print_error("FATAL: Final rootfs integrity check failed!")
         sys.exit(1)
@@ -3009,6 +3068,58 @@ def get_elf_needed(binary_path):
         if start != -1 and end != -1:
             needed.append(line[start + 1:end])
     return needed
+
+def stage_selinux_rootfs_labels(root_dir=None):
+    """Best-effort SELinux relabel for the staged rootfs when the host allows it."""
+    rootfs_dir = root_dir or FINAL_ROOTFS_DIR
+    config_path = os.path.join(rootfs_dir, "etc", "selinux", "config")
+    if not os.path.exists(config_path):
+        return
+
+    print_info("[*] Preparing staged SELinux labels...")
+
+    setfiles_rel = find_existing_rootfs_relpath(
+        rootfs_dir,
+        ["usr/sbin/setfiles", "sbin/setfiles"],
+    )
+    file_contexts_path = None
+    for candidate in (
+        os.path.join(rootfs_dir, "etc", "selinux", "default", "contexts", "files", "file_contexts"),
+        os.path.join(rootfs_dir, "etc", "selinux", "targeted", "contexts", "files", "file_contexts"),
+    ):
+        if os.path.exists(candidate):
+            file_contexts_path = candidate
+            break
+
+    if not setfiles_rel or not file_contexts_path:
+        print_warning("  Skipping staged SELinux relabel because setfiles or file_contexts is missing.")
+        return
+
+    if os.geteuid() != 0:
+        print_warning(
+            "  Skipping staged SELinux relabel because the builder is not running as root. "
+            "The live image will remain permissive and the installer will relabel installed systems."
+        )
+        return
+
+    env = os.environ.copy()
+    env.setdefault("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
+    result = run_staged_binary_command(
+        rootfs_dir,
+        setfiles_rel,
+        ["-F", "-r", rootfs_dir, file_contexts_path, rootfs_dir],
+        env=env,
+    )
+    if result.returncode != 0:
+        detail_lines = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
+        detail = detail_lines[-1] if detail_lines else f"exit code {result.returncode}"
+        print_warning(
+            "  Staged SELinux relabel failed; the build will continue in permissive-live mode. "
+            f"Detail: {detail}"
+        )
+        return
+
+    print_success("  ✓ Applied staged SELinux file labels")
 
 def get_elf_soname(binary_path):
     """Return the DT_SONAME entry for an ELF library, if present."""
@@ -3968,7 +4079,7 @@ def create_iso():
     squashfs_metadata_args = build_mksquashfs_metadata_args(root_dir=FINAL_ROOTFS_DIR)
     mksquashfs_cmd = (
         f"mksquashfs {shlex.quote(FINAL_ROOTFS_DIR)} {shlex.quote(sfs_path)} "
-        f"-comp zstd -Xcompression-level 1 -no-xattrs -noappend -wildcards -all-root"
+        f"-comp zstd -Xcompression-level 1 -noappend -wildcards -all-root"
         f"{squashfs_metadata_args} -e staging"
     )
     if run_command(mksquashfs_cmd) != 0:
@@ -4004,7 +4115,7 @@ def create_iso():
 set default=0
 
 menuentry "GeminiOS Live" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0 security=selinux selinux=1
     initrd /boot/initramfs.cpio.lz4
 }
 """

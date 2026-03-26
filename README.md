@@ -301,6 +301,9 @@ GeminiOS uses a custom "Shim Wrapper" architecture to ensure build isolation and
 
 ## Kernel Compilation
 
+Yes: after enabling SELinux in GeminiOS userspace, you also need to rebuild the external Linux kernel that GeminiOS boots.
+`builder.py` only copies the kernel image from `external_dependencies/linux-6.6.14/arch/x86/boot/bzImage`; it does not turn SELinux on inside the kernel for you.
+
 Run these commands once to prepare the kernel:
 ```sh
 mkdir -p external_dependencies
@@ -339,10 +342,44 @@ make x86_64_defconfig
 ./scripts/config --enable CONFIG_MSDOS_PARTITION
 ./scripts/config --enable CONFIG_EFI_PARTITION
 
-# 3. Finalize and Compile
+# 3. Enable SELinux and label/xattr support
+./scripts/config --enable CONFIG_SECURITY
+./scripts/config --enable CONFIG_SECURITYFS
+./scripts/config --enable CONFIG_AUDIT
+./scripts/config --enable CONFIG_AUDITSYSCALL
+./scripts/config --enable CONFIG_NETLABEL
+./scripts/config --enable CONFIG_DEFAULT_SECURITY_SELINUX
+./scripts/config --disable CONFIG_DEFAULT_SECURITY_DAC
+./scripts/config --enable CONFIG_SECURITY_SELINUX
+./scripts/config --enable CONFIG_SECURITY_SELINUX_BOOTPARAM
+./scripts/config --set-val CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE 1
+./scripts/config --enable CONFIG_SECURITY_SELINUX_DEVELOP
+./scripts/config --enable CONFIG_SECURITY_SELINUX_AVC_STATS
+./scripts/config --enable CONFIG_EXT4_FS_SECURITY
+./scripts/config --enable CONFIG_XFS_FS
+./scripts/config --enable CONFIG_XFS_POSIX_ACL
+./scripts/config --enable CONFIG_BTRFS_FS
+
+# 4. Finalize and Compile
 make olddefconfig
 make -j$(nproc) bzImage
 ```
+
+Recommended verification before returning to `builder.py`:
+
+```sh
+grep -E 'CONFIG_SECURITY_SELINUX=|CONFIG_DEFAULT_SECURITY_SELINUX=|CONFIG_SECURITYFS=|CONFIG_EXT4_FS_SECURITY=' .config
+```
+
+Expected result:
+
+- `CONFIG_SECURITY_SELINUX=y`
+- `CONFIG_DEFAULT_SECURITY_SELINUX=y`
+- `CONFIG_SECURITYFS=y`
+- `CONFIG_EXT4_FS_SECURITY=y`
+
+GeminiOS now ships `/etc/selinux/config` with `SELINUX=enforcing` by default.
+The live ISO still drops to permissive mode during boot as a safety override, but installed systems are intended to run enforcing after relabeling.
 
 ## Kernel Packages
 

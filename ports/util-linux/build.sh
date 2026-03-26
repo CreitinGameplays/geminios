@@ -32,7 +32,7 @@ ac_cv_func_sched_setattr=no ./configure --prefix=/usr --libdir=/usr/lib/x86_64-l
     --disable-runuser \
     --disable-makeinstall-chown \
     --disable-makeinstall-setuid \
-    --without-selinux \
+    --with-selinux \
     --without-systemd \
     --without-udev \
     --without-python

@@ -286,6 +286,66 @@ bool configure_display_stack(const InstallerConfig& config, std::string& error) 
     return true;
 }
 
+bool write_selinux_config(const std::string& mode, std::string& error) {
+    const std::string config =
+        "# GeminiOS SELinux defaults\n"
+        "SELINUX=" + mode + "\n"
+        "SELINUXTYPE=default\n"
+        "SETLOCALDEFS=0\n";
+
+    if (!write_text_file(kTargetRoot + "/etc/selinux/config", config)) {
+        error = "Failed to write /etc/selinux/config.";
+        return false;
+    }
+
+    return true;
+}
+
+std::string target_selinux_file_contexts() {
+    const std::vector<std::string> candidates = {
+        kTargetRoot + "/etc/selinux/default/contexts/files/file_contexts",
+        kTargetRoot + "/etc/selinux/targeted/contexts/files/file_contexts",
+    };
+
+    for (const auto& candidate : candidates) {
+        if (file_exists(candidate)) return candidate;
+    }
+
+    return "";
+}
+
+bool relabel_selinux_target(const ToolRegistry& tools, std::string& error) {
+    if (!file_exists(kTargetRoot + "/etc/selinux/config")) return true;
+
+    if (!write_selinux_config("permissive", error)) return false;
+
+    const std::string file_contexts = target_selinux_file_contexts();
+    if (tools.setfiles.empty() || file_contexts.empty()) {
+        log_message("WARN", "SELinux relabel skipped because setfiles or file_contexts is unavailable. Leaving target permissive.");
+        if (!write_text_file(kTargetRoot + "/.autorelabel", "")) {
+            error = "Failed to create /.autorelabel in the target filesystem.";
+            return false;
+        }
+        return true;
+    }
+
+    CommandResult relabel = run_command(
+        tools.setfiles,
+        {"-F", "-r", kTargetRoot, file_contexts, kTargetRoot}
+    );
+    if (!relabel.success) {
+        log_message("WARN", "SELinux relabel failed. Leaving target permissive and scheduling a first-boot relabel.");
+        if (!write_text_file(kTargetRoot + "/.autorelabel", "")) {
+            error = "Failed to create /.autorelabel after a relabel failure.";
+            return false;
+        }
+        return true;
+    }
+
+    ensure_file_removed(kTargetRoot + "/.autorelabel");
+    return write_selinux_config("enforcing", error);
+}
+
 bool replace_shadow_password(std::vector<std::string>& lines, const std::string& username, const std::string& password_hash) {
     const long now_days = static_cast<long>(std::time(nullptr) / 86400);
     for (auto& line : lines) {
@@ -628,7 +688,7 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
         grub << "set root=" << (boot_mode == BootMode::Uefi ? "(hd0,gpt2)" : "(hd0,msdos1)") << "\n";
     }
     grub << "menuentry \"GeminiOS\" {\n";
-    grub << "  linux /boot/kernel root=" << kernel_root << " rootfstype=" << filesystem_label(config.filesystem) << " rootwait rw quiet\n";
+    grub << "  linux /boot/kernel root=" << kernel_root << " rootfstype=" << filesystem_label(config.filesystem) << " rootwait rw quiet security=selinux selinux=1\n";
     grub << "}\n";
 
     if (!write_text_file(kTargetRoot + "/boot/grub/grub.cfg", grub.str())) {
@@ -745,6 +805,12 @@ bool perform_install(const ToolRegistry& tools, const InstallerConfig& config, s
 
     print_notice("->", C_CYAN, "Writing GRUB configuration");
     if (!write_grub_config(config, artifacts, error)) {
+        cleanup_install_state(state);
+        return false;
+    }
+
+    print_notice("->", C_CYAN, "Applying SELinux labels");
+    if (!relabel_selinux_target(tools, error)) {
         cleanup_install_state(state);
         return false;
     }

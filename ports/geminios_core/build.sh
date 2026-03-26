@@ -20,6 +20,7 @@ ln -sf /bin/apps/system/gpkg "$ROOTFS/bin/gpkg"
 
 # Create default system files (passwd, group, shadow)
 mkdir -p "$ROOTFS/etc"
+mkdir -p "$ROOTFS/etc/selinux"
 
 # 1. /etc/passwd - Use /bin/bash as shell
 cat > "$ROOTFS/etc/passwd" <<EOF
@@ -114,6 +115,13 @@ PATH=/bin/apps/system:/bin/apps:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/us
 LANG=C.UTF-8
 EOF
 
+cat > "$ROOTFS/etc/selinux/config" <<EOF
+# GeminiOS SELinux defaults
+SELINUX=enforcing
+SELINUXTYPE=default
+SETLOCALDEFS=0
+EOF
+
 mkdir -p "$ROOTFS/etc/default"
 cat > "$ROOTFS/etc/default/locale" <<EOF
 LANG=C.UTF-8
@@ -141,6 +149,8 @@ session     required      pam_limits.so
 session     required      pam_unix.so
 session     optional      pam_loginuid.so
 session     optional      pam_keyinit.so force revoke
+session     optional      pam_selinux.so close
+session     optional      pam_selinux.so open env_params
 session     optional      pam_elogind.so
 EOF
 

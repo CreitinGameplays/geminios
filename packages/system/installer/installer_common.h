@@ -111,6 +111,7 @@ struct ToolRegistry {
     std::string grub_install;
     std::string udevadm;
     std::string blockdev;
+    std::string setfiles;
 };
 
 struct CommandResult {

@@ -19,6 +19,7 @@
         "usr/lib/x86_64-linux-gnu/security/pam_env.so",
         "usr/lib/x86_64-linux-gnu/security/pam_limits.so",
         "usr/lib/x86_64-linux-gnu/security/pam_loginuid.so",
+        "usr/lib/x86_64-linux-gnu/security/pam_selinux.so",
         "usr/sbin/unix_chkpwd"
     ],
     "libcap": [
