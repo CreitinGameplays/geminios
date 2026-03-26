@@ -118,6 +118,37 @@ GPKG_DEFAULT_SOURCES_FILE = os.environ.get(
 HOST_DEV_OVERLAY_FILE = os.path.join(ROOT_DIR, ".host_dev_overlay_paths.json")
 PKGCONFIG_CANONICAL_LIBDIR = "/usr/lib/x86_64-linux-gnu"
 PKGCONFIG_MULTIARCH_DIR = os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig")
+
+
+def read_env_config_export(var_name, default_value):
+    """Read a simple exported variable from env_config.sh."""
+    if not os.path.exists(ENV_CONFIG):
+        return default_value
+
+    pattern = re.compile(
+        rf"^\s*export\s+{re.escape(var_name)}=(['\"]?)(.*?)\1\s*$"
+    )
+
+    try:
+        with open(ENV_CONFIG, "r", encoding="utf-8") as env_file:
+            for line in env_file:
+                match = pattern.match(line.strip())
+                if match:
+                    return match.group(2)
+    except OSError:
+        pass
+
+    return default_value
+
+
+KERNEL_VERSION = read_env_config_export("KERNEL_VERSION", "linux-7.0-rc5")
+EXTERNAL_DEPENDENCIES_DIR = os.path.join(ROOT_DIR, "external_dependencies")
+KERNEL_BZIMAGE_PATH = os.path.join(
+    EXTERNAL_DEPENDENCIES_DIR, KERNEL_VERSION, "arch", "x86", "boot", "bzImage"
+)
+KERNEL_BZIMAGE_GLOB = os.path.join(
+    EXTERNAL_DEPENDENCIES_DIR, "linux-*", "arch", "x86", "boot", "bzImage"
+)
 PKGCONFIG_STAGE_ROOTS = tuple(
     dict.fromkeys(
         path
@@ -128,6 +159,27 @@ PKGCONFIG_STAGE_ROOTS = tuple(
 PKGCONFIG_LEAK_MARKERS = tuple(
     dict.fromkeys(path for path in [ROOT_DIR, *PKGCONFIG_STAGE_ROOTS] if path)
 )
+
+
+def kernel_tree_name_from_bzimage(kernel_bzimage_path):
+    """Return the kernel source directory name for a bzImage path."""
+    relpath = os.path.relpath(kernel_bzimage_path, EXTERNAL_DEPENDENCIES_DIR)
+    return relpath.split(os.sep, 1)[0]
+
+
+def resolve_kernel_bzimage_path():
+    """Prefer the configured kernel image and fall back to the newest compiled one."""
+    if os.path.exists(KERNEL_BZIMAGE_PATH):
+        return KERNEL_BZIMAGE_PATH, False
+
+    compiled_images = [
+        path for path in glob.glob(KERNEL_BZIMAGE_GLOB) if os.path.exists(path)
+    ]
+    if not compiled_images:
+        return KERNEL_BZIMAGE_PATH, False
+
+    compiled_images.sort(key=lambda path: (os.path.getmtime(path), path))
+    return compiled_images[-1], True
 PKGCONFIG_LEGACY_LIBDIR_VALUES = {
     "/usr/lib",
     "/usr/lib64",
@@ -2307,10 +2359,15 @@ def clean_system():
 
 def sync_kernel():
     print_section("\n=== Syncing Kernel Image ===")
-    kernel_src = os.path.join(ROOT_DIR, "external_dependencies/linux-6.6.14/arch/x86/boot/bzImage")
+    kernel_src, used_fallback_kernel = resolve_kernel_bzimage_path()
     kernel_dest = os.path.join(ROOTFS_DIR, "boot", "kernel")
     
     if os.path.exists(kernel_src):
+        if used_fallback_kernel:
+            print_warning(
+                f" [WARNING] Configured kernel {KERNEL_VERSION} was not found; using "
+                f"{kernel_tree_name_from_bzimage(kernel_src)} instead."
+            )
         print_info(f"[*] Copying {kernel_src} to {kernel_dest} and zoneinfo...")
         os.makedirs(os.path.dirname(kernel_dest), exist_ok=True)
         subprocess.run(f"cp {kernel_src} {kernel_dest}", shell=True, executable="/usr/bin/bash")
@@ -4101,7 +4158,12 @@ def create_iso():
     kernel_dest = os.path.join(ISO_WORK_DIR, "boot", "kernel")
     if not os.path.exists(kernel_src):
         # Fallback to source
-        kernel_src = os.path.join(ROOT_DIR, "external_dependencies/linux-6.6.14/arch/x86/boot/bzImage")
+        kernel_src, used_fallback_kernel = resolve_kernel_bzimage_path()
+        if used_fallback_kernel:
+            print_warning(
+                f" [WARNING] Configured kernel {KERNEL_VERSION} was not found; using "
+                f"{kernel_tree_name_from_bzimage(kernel_src)} instead."
+            )
     
     if os.path.exists(kernel_src):
          shutil.copy2(kernel_src, kernel_dest)

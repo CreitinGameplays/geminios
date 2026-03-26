@@ -248,6 +248,8 @@ cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-geminios.conf" <<EOF
 run-directory=/run/lightdm
 
 [Seat:*]
+logind-check-graphical=false
+minimum-vt=1
 display-setup-script=/usr/libexec/geminios/lightdm-prepare
 greeter-session=lightdm-greeter
 session-wrapper=/etc/lightdm/Xsession
@@ -325,6 +327,20 @@ cat > "$ROOTFS/etc/lightdm/lightdm.conf.d/50-geminios.conf" <<EOF
 run-directory=/run/lightdm
 
 [Seat:*]
+logind-check-graphical=false
+minimum-vt=1
+display-setup-script=/usr/libexec/geminios/lightdm-prepare
+greeter-session=lightdm-greeter
+session-wrapper=/etc/lightdm/Xsession
+EOF
+
+cat > "$ROOTFS/etc/lightdm/lightdm.conf" <<EOF
+[LightDM]
+run-directory=/run/lightdm
+
+[Seat:*]
+logind-check-graphical=false
+minimum-vt=1
 display-setup-script=/usr/libexec/geminios/lightdm-prepare
 greeter-session=lightdm-greeter
 session-wrapper=/etc/lightdm/Xsession

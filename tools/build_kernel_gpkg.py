@@ -196,7 +196,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Build GeminiOS kernel .gpkg packages and optional repo metadata."
     )
-    parser.add_argument("--kernel-release", help="Kernel release string, for example 6.19.9-geminios")
+    parser.add_argument("--kernel-release", help="Kernel release string, for example 6.19.10-geminios")
     parser.add_argument("--bzimage", required=True, help="Path to the compiled kernel image")
     parser.add_argument("--modules-dir", help="Path to the lib/modules/<release> directory to package")
     parser.add_argument("--system-map", help="Optional System.map path")

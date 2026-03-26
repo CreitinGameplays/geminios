@@ -168,6 +168,11 @@
     "polkit-1-auth-agent": "mate-polkit"
   },
   "package_overrides": {
+    "lightdm": {
+      "depends_add": [
+        "accountsservice"
+      ]
+    },
     "nano": {
       "section": "editors"
     },

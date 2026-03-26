@@ -302,17 +302,17 @@ GeminiOS uses a custom "Shim Wrapper" architecture to ensure build isolation and
 ## Kernel Compilation
 
 Yes: after enabling SELinux in GeminiOS userspace, you also need to rebuild the external Linux kernel that GeminiOS boots.
-`builder.py` only copies the kernel image from `external_dependencies/linux-6.6.14/arch/x86/boot/bzImage`; it does not turn SELinux on inside the kernel for you.
+GeminiOS now expects `external_dependencies/linux-6.19.10/arch/x86/boot/bzImage`; it does not turn SELinux on inside the kernel for you.
 
 Run these commands once to prepare the kernel:
 ```sh
 mkdir -p external_dependencies
 cd external_dependencies
 # Download kernel
-wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.14.tar.xz
-tar -xf linux-6.6.14.tar.xz
-rm linux-6.6.14.tar.xz
-cd linux-6.6.14
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.19.10.tar.xz
+tar -xf linux-6.19.10.tar.xz
+rm linux-6.19.10.tar.xz
+cd linux-6.19.10
 
 # 3. Configure and Compile
 make x86_64_defconfig
@@ -387,7 +387,7 @@ GeminiOS now has a structured path for shipping kernels as native `.gpkg` packag
 
 The intended layout follows the same general shape Debian uses for kernels:
 
-- a versioned image package, for example `geminios-kernel-image-6.19.9`
+- a versioned image package, for example `geminios-kernel-image-6.19.10`
 - an optional channel/meta package, for example `geminios-kernel-stable` or `geminios-kernel-mainline`
 - a public repository index under `x86_64/Packages.json.zst`
 
@@ -404,7 +404,7 @@ Typical flow:
 
 ```bash
 # 1. Build the kernel and modules
-cd external_dependencies/linux-6.19.9
+cd external_dependencies/linux-6.19.10
 make -j"$(nproc)" bzImage modules
 rm -rf /tmp/geminios-kernel-stage
 make modules_install INSTALL_MOD_PATH=/tmp/geminios-kernel-stage
@@ -412,10 +412,10 @@ make modules_install INSTALL_MOD_PATH=/tmp/geminios-kernel-stage
 # 2. Build GeminiOS kernel packages
 cd /home/creitin/Documents/geminios
 python3 tools/build_kernel_gpkg.py \
-  --kernel-release "$(make -s -C external_dependencies/linux-6.19.9 kernelrelease)" \
-  --bzimage external_dependencies/linux-6.19.9/arch/x86/boot/bzImage \
-  --modules-dir /tmp/geminios-kernel-stage/lib/modules/"$(make -s -C external_dependencies/linux-6.19.9 kernelrelease)" \
-  --config-file external_dependencies/linux-6.19.9/.config \
+  --kernel-release "$(make -s -C external_dependencies/linux-6.19.10 kernelrelease)" \
+  --bzimage external_dependencies/linux-6.19.10/arch/x86/boot/bzImage \
+  --modules-dir /tmp/geminios-kernel-stage/lib/modules/"$(make -s -C external_dependencies/linux-6.19.10 kernelrelease)" \
+  --config-file external_dependencies/linux-6.19.10/.config \
   --channel stable \
   --repo-root /tmp/geminios-kernel-repo
 

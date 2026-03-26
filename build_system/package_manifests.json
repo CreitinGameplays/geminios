@@ -555,6 +555,7 @@
         "bin/login",
         "sbin/getty",
         "etc/pam.d/common-session-noninteractive",
+        "etc/lightdm/lightdm.conf",
         "etc/lightdm/Xsession",
         "etc/lightdm/lightdm.conf.d/50-geminios.conf",
         "usr/lib/ginit/services/dbus.gservice",
