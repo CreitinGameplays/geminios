@@ -67,9 +67,9 @@ Run the VM with virtio GPU:
 Test the virtio GPU:
 
 ```
-qemu-system-x86_64 -m 4G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -smp 2 -enable-kvm -hda disk.qcow2 -boot d -serial stdio
+qemu-system-x86_64 -m 6G -cdrom GeminiOS.iso -device virtio-vga-gl -display sdl,gl=on -cpu host -smp 2 -enable-kvm -hda disk.qcow2 -boot d -serial stdio
 ```
 
 ```
-qemu-system-x86_64 -m 4G -device virtio-vga-gl -display sdl,gl=on -cpu host -smp 2 -enable-kvm -hda disk.qcow2 -boot d -nic user,model=e1000,id=net0 -serial stdio
+qemu-system-x86_64 -m 6G -device virtio-vga-gl -display sdl,gl=on -cpu host -smp 2 -enable-kvm -hda disk.qcow2 -boot d -nic user,model=e1000,id=net0 -serial stdio
 ```
