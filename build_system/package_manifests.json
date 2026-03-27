@@ -20,6 +20,10 @@
         "usr/lib/x86_64-linux-gnu/security/pam_limits.so",
         "usr/lib/x86_64-linux-gnu/security/pam_loginuid.so",
         "usr/lib/x86_64-linux-gnu/security/pam_selinux.so",
+        "usr/include/security/pam_appl.h",
+        "usr/include/security/pam_ext.h",
+        "usr/include/security/pam_misc.h",
+        "usr/include/security/pam_modules.h",
         "usr/sbin/unix_chkpwd"
     ],
     "libcap": [
@@ -594,7 +598,10 @@
         "usr/lib/ginit/services/udev-trigger.gservice",
         "usr/lib/ginit/services/udev-settle.gservice",
         "usr/lib/ginit/services/network.gservice",
+        "usr/lib/ginit/services/sshd.gservice",
+        "etc/ssh/sshd_config.d/10-geminios.conf",
         "usr/libexec/geminios/ensure-fuse-device",
+        "usr/libexec/geminios/sshd-launch",
         "usr/libexec/geminios/session-common",
         "usr/libexec/geminios/session-runtime",
         "usr/libexec/geminios/session-launch",

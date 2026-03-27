@@ -378,11 +378,12 @@ PACKAGE_DEPENDENCIES = {
     "ca-certificates": [],
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
+    "util-linux": ["ncurses"],
     "selinux_userspace": ["pcre2", "libcap", "gettext", "python", "pkg-config", "bison", "flex"],
     "refpolicy": ["selinux_userspace"],
     "linux-pam": ["libxcrypt", "meson", "ninja", "pkg-config"],
     "jinja2": ["python", "setuptools", "markupsafe"],
-    "elogind": ["dbus", "eudev", "linux-pam", "libcap", "jinja2", "gperf", "meson", "ninja", "pkg-config"],
+    "elogind": ["dbus", "eudev", "linux-pam", "libcap", "util-linux", "jinja2", "gperf", "meson", "ninja", "pkg-config"],
     "wayland-protocols": ["python", "meson", "ninja", "pkg-config"],
     "wayland": ["expat", "libffi", "pkg-config", "meson", "ninja", "wayland-protocols"],
     "json-glib": ["glib", "meson", "ninja", "pkg-config"],
@@ -4823,9 +4824,10 @@ def main():
             
     if create_iso():
         print_success("\n[!] Build completed successfully!")
-        print_info("\nRun: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm")
-        print_info("Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm")
-        print_info("Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm")
+        print_info("\nRun: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm -nic user,model=e1000,hostfwd=tcp::2222-:22")
+        print_info("Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm -nic user,model=e1000,hostfwd=tcp::2222-:22")
+        print_info("Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm -nic user,model=e1000,hostfwd=tcp::2222-:22")
+        print_info("SSH debug login: ssh -o StrictHostKeyChecking=no -p 2222 root@127.0.0.1  (password: geminios)")
         print(color("Remove the -enable-kvm flag if your host does not support it.", Colors.DIM))
     else:
         print_error("\nFATAL: ISO creation failed")

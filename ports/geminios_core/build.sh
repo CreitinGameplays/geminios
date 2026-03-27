@@ -59,7 +59,7 @@ EOF
 
 # 3. /etc/shadow
 cat > "$ROOTFS/etc/shadow" <<EOF
-root:\$5\$GEMINI_SALT\$4813494d137e1631bba301d5acab6e7bb7aa74ce1185d456565ef51d737677b2:19000:0:99999:7:::
+root:\$5\$GEMINI_SALT\$eBv4S.VF3SzMsgDgFmF1JdfMnXTId9IOAZUzSXVN6P9:19000:0:99999:7:::
 lightdm:!:19000:0:99999:7:::
 messagebus:!:19000:0:99999:7:::
 EOF
@@ -100,6 +100,7 @@ export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
 EOF
 
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
+mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
 mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg/autostart" "$ROOTFS/etc/xdg/fastfetch"
 mkdir -p "$ROOTFS/usr/libexec/geminios/session-env.d"
 mkdir -p "$ROOTFS/usr/share/fastfetch/logos"
@@ -177,6 +178,16 @@ EOF
 mkdir -p "$ROOTFS/etc/default"
 cat > "$ROOTFS/etc/default/locale" <<EOF
 LANG=C.UTF-8
+EOF
+
+cat > "$ROOTFS/etc/ssh/sshd_config.d/10-geminios.conf" <<'EOF'
+# GeminiOS SSH defaults keep VM debugging straightforward while leaving
+# installed systems free to tighten policy locally.
+UsePAM yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+PermitEmptyPasswords no
+PrintMotd no
 EOF
 
 cat > "$ROOTFS/etc/security/limits.conf" <<EOF
@@ -525,6 +536,59 @@ echo "[fuse-device] /dev/fuse is unavailable; FUSE-backed features such as GVfs 
 exit 0
 EOF
 chmod 755 "$ROOTFS/usr/libexec/geminios/ensure-fuse-device"
+
+cat > "$ROOTFS/usr/libexec/geminios/sshd-launch" <<'EOF'
+#!/bin/sh
+set -eu
+
+find_bin() {
+    for candidate in "$@"; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+sshd_bin="$(find_bin /usr/sbin/sshd /usr/bin/sshd /sbin/sshd /bin/sshd || true)"
+if [ -z "$sshd_bin" ]; then
+    echo "E: sshd daemon not found in expected locations." >&2
+    exit 1
+fi
+
+ssh_keygen_bin="$(find_bin /usr/bin/ssh-keygen /bin/ssh-keygen /usr/sbin/ssh-keygen /sbin/ssh-keygen || true)"
+
+mkdir -p /etc/ssh /run/sshd /var/empty
+chmod 755 /run/sshd /var/empty 2>/dev/null || true
+
+if [ -n "$ssh_keygen_bin" ]; then
+    "$ssh_keygen_bin" -A >/dev/null 2>&1 || {
+        echo "E: failed to generate SSH host keys." >&2
+        exit 1
+    }
+elif [ ! -f /etc/ssh/ssh_host_rsa_key ] && [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
+    echo "E: ssh-keygen is unavailable and no SSH host keys are present." >&2
+    exit 1
+fi
+
+if command -v restorecon >/dev/null 2>&1; then
+    restorecon -RF /run/sshd /etc/ssh >/dev/null 2>&1 || true
+fi
+
+set -- "$sshd_bin" -D -e -f /etc/ssh/sshd_config \
+    -o UsePAM=yes \
+    -o PasswordAuthentication=yes \
+    -o PubkeyAuthentication=yes \
+    -o PermitEmptyPasswords=no
+
+if [ -f /etc/geminios-live ]; then
+    set -- "$@" -o PermitRootLogin=yes
+fi
+
+exec "$@"
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/sshd-launch"
 
 cat > "$ROOTFS/usr/libexec/geminios/lightdm-prepare" <<'EOF'
 #!/bin/sh
