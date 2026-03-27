@@ -199,6 +199,9 @@ INFO_DIR="$(root_path /var/lib/gpkg/info)"
 REPO_CACHE_DIR="$(root_path /var/repo)"
 SOURCES_DIR="$(root_path /etc/gpkg/sources.list.d)"
 PACKAGES_JSON="$(root_path /var/repo/Packages.json)"
+BASE_SYSTEM_JSON="$(root_path /usr/share/gpkg/base-system.json)"
+SELINUX_CONFIG="$(root_path /etc/selinux/config)"
+LIVE_MARKER="$(root_path /etc/geminios-live)"
 
 need_cmd bash
 need_cmd find
@@ -277,6 +280,17 @@ assert_last_log_contains() {
     fi
     fail "$message (pattern not found in $LAST_LOG)"
     return 1
+}
+
+assert_last_log_not_contains() {
+    local pattern="$1"
+    local message="$2"
+    if grep -Eq -- "$pattern" "$LAST_LOG"; then
+        fail "$message (unexpected pattern found in $LAST_LOG)"
+        return 1
+    fi
+    ok "$message"
+    return 0
 }
 
 escape_ere() {
@@ -618,6 +632,43 @@ run_repo_and_query_tests() {
     say
 }
 
+run_doctor_and_selinux_tests() {
+    say "== Doctor And SELinux Tests =="
+    expect_success "gpkg-doctor" "$GPKG_BIN" doctor || return 1
+    assert_last_log_contains '^gpkg doctor report:' "gpkg doctor prints its report header" || return 1
+    assert_last_log_contains '^Repository configuration:' "gpkg doctor reports repository health" || return 1
+    assert_last_log_contains '^Base system registry:' "gpkg doctor reports base-system health" || return 1
+    assert_last_log_contains '^Upgrade dry-run:' "gpkg doctor reports upgrade-plan health" || return 1
+
+    if [[ "$ROOT" == "/" ]]; then
+        assert_path_exists "$BASE_SYSTEM_JSON" "Base-system registry exists on the live system" || return 1
+        assert_last_log_not_contains '\[ERR\]' "gpkg doctor reports no hard errors on the live system" || return 1
+    else
+        warn "Skipping strict gpkg doctor health assertion because --state-root is not /"
+    fi
+
+    assert_path_exists "$SELINUX_CONFIG" "SELinux config exists in the tested root" || return 1
+    expect_success "selinux-config-default" grep -Eq '^SELINUX=enforcing$' "$SELINUX_CONFIG" || return 1
+    ok "Installed-system SELinux default is enforcing in /etc/selinux/config"
+
+    if [[ "$ROOT" == "/" && -e "$LIVE_MARKER" ]]; then
+        expect_success "selinux-live-runtime" bash -lc '
+            if command -v getenforce >/dev/null 2>&1; then
+                getenforce
+            elif [[ -r /sys/fs/selinux/enforce ]]; then
+                cat /sys/fs/selinux/enforce
+            else
+                exit 1
+            fi
+        ' || return 1
+        assert_last_log_contains 'Permissive|Enforcing|0|1' "Live runtime exposes an enabled SELinux state" || return 1
+        assert_last_log_not_contains 'Disabled' "Live runtime SELinux is not disabled" || return 1
+    else
+        skip "Skipping live SELinux runtime probe because this is not the active live root"
+    fi
+    say
+}
+
 run_protection_tests() {
     say "== Protection Tests =="
     pick_protected_package
@@ -783,6 +834,7 @@ main_rc=0
 preflight || main_rc=1
 if [[ "$main_rc" -eq 0 ]]; then run_cli_guardrail_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_repo_and_query_tests || main_rc=1; fi
+if [[ "$main_rc" -eq 0 ]]; then run_doctor_and_selinux_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_protection_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_transaction_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_clean_and_index_tests || main_rc=1; fi

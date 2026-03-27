@@ -3615,9 +3615,9 @@ def finalize_rootfs():
     materialize_selinux_policy_store(root_dir=FINAL_ROOTFS_DIR)
 
     # 12. Prepare SELinux policy/config and opportunistically pre-label the
-    # staged rootfs when the build host can support it. The live image still
-    # stays permissive by default; the installer flips installed systems to
-    # enforcing after a successful relabel.
+    # staged rootfs when the build host can support it. The live image boots
+    # with SELinux enabled in permissive mode; the installer flips installed
+    # systems to enforcing after a successful relabel.
     stage_selinux_rootfs_labels(root_dir=FINAL_ROOTFS_DIR)
 
     # 13. Final Integrity Check
@@ -4699,7 +4699,7 @@ def create_iso():
 set default=0
 
 menuentry "GeminiOS Live" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0 selinux=0
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 net.ifnames=0 security=selinux selinux=1 enforcing=0
     initrd /boot/initramfs.cpio.lz4
 }
 """

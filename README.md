@@ -240,6 +240,8 @@ GeminiOS also ships a system-wide `fastfetch` default at `/etc/xdg/fastfetch/con
 
 On SELinux-enabled installs, `gpkg-worker` now relabels the files it just wrote before finishing the transaction, and it drops `/.autorelabel` automatically if an upgrade touches the SELinux policy store itself. GeminiOS also blocks Debian-imported SELinux userspace/policy packages from replacing the distro-managed SELinux stack through normal `gpkg upgrade` runs.
 
+`gpkg doctor` provides a read-only health report for the package manager state. It checks repository/index availability, installed-package metadata consistency, base-system registry drift, and whether `gpkg upgrade` can build a safe dry-run transaction plan.
+
 `builder.py` now seeds `/etc/gpkg/sources.list.d/00-default.list` from `build_system/gpkg_default_sources.list` when that file exists.
 That keeps the default GeminiOS-native repository policy in build config instead of hardcoding it into `gpkg` itself.
 
@@ -522,7 +524,7 @@ Optional but good signs:
 - `CONFIG_SND_HDA_INTEL=y`
 
 GeminiOS now ships `/etc/selinux/config` with `SELINUX=enforcing` by default.
-The live ISO still drops to permissive mode during boot as a safety override, but installed systems are intended to run enforcing after relabeling.
+The live ISO boots with SELinux enabled in permissive mode as a safety override, while installed systems are intended to run enforcing after relabeling.
 
 ## Kernel Packages
 
