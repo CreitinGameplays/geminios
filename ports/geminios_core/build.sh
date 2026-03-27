@@ -449,6 +449,83 @@ exit 1
 EOF
 chmod 755 "$ROOTFS/usr/libexec/geminios/elogind-launch"
 
+mkdir -p "$ROOTFS/etc/modules-load.d"
+cat > "$ROOTFS/etc/modules-load.d/fuse.conf" <<'EOF'
+# Hint for future module-load integration.
+fuse
+EOF
+
+cat > "$ROOTFS/usr/libexec/geminios/ensure-fuse-device" <<'EOF'
+#!/bin/sh
+set -eu
+
+find_fuse_dev_numbers() {
+    if [ -r /sys/class/misc/fuse/dev ]; then
+        cat /sys/class/misc/fuse/dev
+        return 0
+    fi
+
+    if [ -r /proc/misc ]; then
+        minor="$(grep ' fuse$' /proc/misc 2>/dev/null | sed -n '1s/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]\+fuse$/\1/p')"
+        if [ -n "${minor:-}" ]; then
+            printf '10:%s\n' "$minor"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+ensure_fuse_node() {
+    dev_numbers="$(find_fuse_dev_numbers || true)"
+    [ -n "$dev_numbers" ] || return 1
+
+    major="${dev_numbers%:*}"
+    minor="${dev_numbers#*:}"
+    [ -n "$major" ] && [ -n "$minor" ] || return 1
+
+    mkdir -p /dev
+    if [ ! -e /dev/fuse ]; then
+        mknod -m 666 /dev/fuse c "$major" "$minor"
+    fi
+    chmod 666 /dev/fuse || true
+    return 0
+}
+
+try_modprobe_fuse() {
+    for tool in /usr/bin/modprobe /usr/sbin/modprobe /bin/modprobe /sbin/modprobe; do
+        if [ -x "$tool" ]; then
+            "$tool" fuse >/dev/null 2>&1 && return 0
+        fi
+    done
+    return 1
+}
+
+if [ -e /dev/fuse ]; then
+    chmod 666 /dev/fuse >/dev/null 2>&1 || true
+    exit 0
+fi
+
+if ensure_fuse_node; then
+    exit 0
+fi
+
+try_modprobe_fuse || true
+
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm trigger --subsystem-match=misc >/dev/null 2>&1 || true
+    udevadm settle --timeout=10 >/dev/null 2>&1 || true
+fi
+
+if ensure_fuse_node; then
+    exit 0
+fi
+
+echo "[fuse-device] /dev/fuse is unavailable; FUSE-backed features such as GVfs mounts may not work." >&2
+exit 0
+EOF
+chmod 755 "$ROOTFS/usr/libexec/geminios/ensure-fuse-device"
+
 cat > "$ROOTFS/usr/libexec/geminios/lightdm-prepare" <<'EOF'
 #!/bin/sh
 set -e
@@ -981,15 +1058,81 @@ cat > "$ROOTFS/bin/startgnome-wayland" <<'EOF'
 #!/bin/sh
 set -eu
 
-if ! command -v gnome-session >/dev/null 2>&1; then
-    echo "E: gnome-session is not installed." >&2
+export GNOME_SHELL_SESSION_MODE="${GNOME_SHELL_SESSION_MODE:-user}"
+exec env GEMINIOS_WAYLAND_DESKTOP=GNOME /bin/startwayland /usr/libexec/geminios/gnome-session-entry "$@"
+EOF
+chmod 755 "$ROOTFS/bin/startgnome-wayland"
+
+cat > "$ROOTFS/usr/libexec/geminios/gnome-session-entry" <<'EOF'
+#!/bin/sh
+set -eu
+
+user_id="$(id -u)"
+bg_pids=""
+
+start_bg_process() {
+    pattern="$1"
+    shift
+    if [ "$#" -eq 0 ]; then
+        return 0
+    fi
+    if command -v pgrep >/dev/null 2>&1 && pgrep -u "$user_id" -f "$pattern" >/dev/null 2>&1; then
+        return 0
+    fi
+    "$@" >/dev/null 2>&1 &
+    bg_pids="$bg_pids $!"
+}
+
+cleanup() {
+    for pid in $bg_pids; do
+        kill "$pid" >/dev/null 2>&1 || true
+        wait "$pid" >/dev/null 2>&1 || true
+    done
+}
+trap cleanup EXIT HUP INT TERM
+
+have_user_systemd_bus() {
+    if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] || ! command -v dbus-send >/dev/null 2>&1; then
+        return 1
+    fi
+    dbus-send --session --print-reply \
+        --dest=org.freedesktop.systemd1 \
+        /org/freedesktop/systemd1 \
+        org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1
+}
+
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-GNOME}"
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-GNOME}"
+export DESKTOP_SESSION="${DESKTOP_SESSION:-GNOME}"
+export XDG_MENU_PREFIX="${XDG_MENU_PREFIX:-gnome-}"
+export GNOME_SHELL_SESSION_MODE="${GNOME_SHELL_SESSION_MODE:-user}"
+export GSETTINGS_BACKEND="${GSETTINGS_BACKEND:-dconf}"
+
+if have_user_systemd_bus && command -v gnome-session >/dev/null 2>&1; then
+    exec gnome-session --session=gnome "$@"
+fi
+
+if ! command -v gnome-shell >/dev/null 2>&1; then
+    echo "E: GNOME requires either gnome-session with a user systemd bus or a standalone gnome-shell binary." >&2
     exit 1
 fi
 
-export GNOME_SHELL_SESSION_MODE="${GNOME_SHELL_SESSION_MODE:-user}"
-exec env GEMINIOS_WAYLAND_DESKTOP=GNOME /bin/startwayland gnome-session --session=gnome "$@"
+echo "[*] org.freedesktop.systemd1 is unavailable on the user bus; starting standalone GNOME Shell mode." >&2
+echo "[*] This is a GeminiOS compatibility path, not a full upstream gnome-session environment." >&2
+
+if command -v gnome-settings-daemon >/dev/null 2>&1; then
+    start_bg_process "gnome-settings-daemon" gnome-settings-daemon
+fi
+if command -v gnome-shell-calendar-server >/dev/null 2>&1; then
+    start_bg_process "gnome-shell-calendar-server" gnome-shell-calendar-server
+fi
+if command -v ibus-daemon >/dev/null 2>&1; then
+    start_bg_process "ibus-daemon" ibus-daemon --replace --xim
+fi
+
+exec gnome-shell --wayland --display-server "$@"
 EOF
-chmod 755 "$ROOTFS/bin/startgnome-wayland"
+chmod 755 "$ROOTFS/usr/libexec/geminios/gnome-session-entry"
 
 # Prepare runtime/session paths used by Wayland-capable applications.
 mkdir -p "$ROOTFS/run/user"
