@@ -10,9 +10,9 @@ The project now follows a clear model:
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
 - `gpkg` as a testing-first package manager with GeminiOS/S2 packages layered on top
 
-Versioning now follows a rolling `stream + snapshot` model:
+Versioning follows a rolling `stream + snapshot` model:
 
-- the named stream is kept in [`src/sys_info.h`](/home/creitin/Documents/geminios/src/sys_info.h) as the human release line, for example `Castor Rolling`
+- the named stream is kept in [`src/sys_info.h`](/home/creitin/Documents/geminios/src/sys_info.h) as the human release line.
 - each built image gets a UTC snapshot date like `2026.03.23`
 - `/etc/os-release` keeps `VERSION_ID="rolling"` and uses `BUILD_ID` / `IMAGE_VERSION` for the exact image snapshot
 
@@ -20,7 +20,7 @@ Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
 ## Setup and Build
 
-To build GeminiOS, you need a Linux host (Ubuntu/Debian recommended) with the following dependencies:
+To build GeminiOS, you need a Linux host (Ubuntu/Debian highly recommended) with the following dependencies:
 
 *Only tested and built on a Debian 13 Trixie x86_64 system*
 
@@ -140,13 +140,12 @@ The base login/session layer now also seeds the standard XDG home directories, i
 
 What it does **not** mean yet:
 
-- GeminiOS still does not ship a Wayland compositor in-tree yet.
+- GeminiOS does not ship a Wayland compositor in-tree, but you can install any with `gpkg`.
 - The default desktop/session flow is still X11 unless you explicitly start a Wayland session.
-- Full GNOME still depends on the remaining desktop services being published and installed as `.gpkg` packages.
 
-So the current state is: **Wayland-capable userspace foundation plus a real session bootstrap path, but the compositor and the heavier GNOME services still need to be installed on top.**
+So the current state is: **Wayland-capable userspace foundation plus a real session bootstrap path, but the compositor still need to be installed on top.**
 
-Once a compositor or GNOME session package is installed, the intended manual smoke-test flow from a TTY is:
+Once a compositor package is installed, the intended manual smoke-test flow from a TTY is:
 
 ```bash
 wayland-session-report
@@ -155,10 +154,8 @@ startwayland <compositor-command>
 startgnome-wayland
 ```
 
-`wayland-session-report` is the quick sanity check before launching a compositor: it reports the current XDG session environment, runtime sockets, DRM/input device visibility, and whether `Xwayland`, portals, PipeWire, and GNOME session binaries are already installed.
+`wayland-session-report` is the quick sanity check before launching a compositor: it reports the current XDG session environment, runtime sockets, DRM/input device visibility, and whether `Xwayland`, portals, PipeWire binaries are already installed.
 Those wrappers are the supported bridge between GeminiOS login/PAM/elogind and imported desktop packages that normally expect `dbus-run-session` plus `systemd --user`-style session setup.
-
-The implementation roadmap for closing that gap is tracked in [GNOME_WAYLAND_SUPPORT.md](/home/creitin/Documents/geminios/to_dos/GNOME_WAYLAND_SUPPORT.md).
 
 ## Package Sources
 
