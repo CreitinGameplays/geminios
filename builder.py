@@ -148,6 +148,7 @@ SYSTEMD_PAYLOAD_KEEP_PATHS = {
     os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so.0"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libsystemd.pc"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_systemd.so"),
+    os.path.join("usr", "share", "mime", "text", "x-systemd-unit.xml"),
 }
 
 
