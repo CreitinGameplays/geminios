@@ -194,9 +194,15 @@ PKGCONFIG_LEGACY_LIBDIR_VALUES = {
     "${prefix}/lib/x86_64-linux-gnu",
 }
 DBUS_HELPER_REL_PATH = os.path.join("usr", "lib", "dbus-1.0", "dbus-daemon-launch-helper")
+LEGACY_DBUS_HELPER_REL_PATH = os.path.join("usr", "libexec", "dbus-daemon-launch-helper")
 DBUS_HELPER_REQUIRED_MODE = 0o4754
 DBUS_HELPER_REQUIRED_UID = 0
 DBUS_HELPER_REQUIRED_GID = 18
+GPKG_BASE_SYSTEM_REGISTRY_REL_PATH = os.path.join("usr", "share", "gpkg", "base-system.json")
+UDEV_RUNTIME_DIRS = [
+    os.path.join("usr", "lib", "udev"),
+    os.path.join("usr", "lib", "x86_64-linux-gnu", "udev"),
+]
 
 # Load Manifests
 try:
@@ -1172,6 +1178,280 @@ def collect_package_artifact_paths(pkg_name, root_dir=None):
             collected.append(real_path)
     return collected
 
+_PORT_DECLARED_VERSION_CACHE = {}
+
+def get_declared_port_version(pkg_name):
+    """Best-effort parse of the package version declared in a port build script."""
+    if pkg_name in _PORT_DECLARED_VERSION_CACHE:
+        return _PORT_DECLARED_VERSION_CACHE[pkg_name]
+
+    build_script = os.path.join(PORTS_DIR, pkg_name, "build.sh")
+    version = None
+    if os.path.exists(build_script):
+        try:
+            with open(build_script, "r", encoding="utf-8") as f:
+                script = f.read()
+        except OSError:
+            script = ""
+
+        pkg_token = re.sub(r"[^A-Za-z0-9]+", "_", pkg_name).upper()
+        version_patterns = [
+            rf"^{pkg_token}_VER\s*=\s*['\"]([^'\"]+)['\"]",
+            r"^PKG_VER\s*=\s*['\"]([^'\"]+)['\"]",
+            r"^VERSION\s*=\s*['\"]([^'\"]+)['\"]",
+        ]
+        for pattern in version_patterns:
+            match = re.search(pattern, script, re.MULTILINE)
+            if match:
+                version = match.group(1).strip()
+                break
+
+        if version is None:
+            generic_matches = re.findall(
+                r"^([A-Z0-9_]+_VER)\s*=\s*['\"]([^'\"]+)['\"]",
+                script,
+                re.MULTILINE,
+            )
+            unique_versions = []
+            seen_versions = set()
+            for _, value in generic_matches:
+                value = value.strip()
+                if not value or value in seen_versions:
+                    continue
+                seen_versions.add(value)
+                unique_versions.append(value)
+            if len(unique_versions) == 1:
+                version = unique_versions[0]
+
+    if version is None and pkg_name.startswith("geminios_"):
+        release = get_geminios_release_info()
+        version = release["build_id"]
+
+    _PORT_DECLARED_VERSION_CACHE[pkg_name] = version
+    return version
+
+def build_base_system_registry_entries(root_dir=None):
+    """Return builder-owned base-system package records for gpkg fallback upgrades."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    entries = []
+    entry_names = set()
+
+    package_names = list(PACKAGES)
+    for pkg_name in PACKAGE_MANIFESTS:
+        if pkg_name not in entry_names and pkg_name not in package_names:
+            package_names.append(pkg_name)
+
+    for pkg_name in package_names:
+        if pkg_name not in PACKAGE_MANIFESTS:
+            continue
+
+        version = get_declared_port_version(pkg_name)
+        if not version:
+            continue
+
+        artifact_paths = collect_package_artifact_paths(pkg_name, root_dir=root_dir)
+        if not artifact_paths:
+            continue
+
+        files = []
+        for path in sorted(artifact_paths):
+            rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+            if rel_path.startswith("../"):
+                continue
+            files.append("/" + rel_path.lstrip("/"))
+
+        if not files:
+            continue
+
+        entries.append({
+            "package": pkg_name,
+            "version": version,
+            "source_kind": "base_image",
+            "installed_from": "GeminiOS base image",
+            "files": files,
+        })
+        entry_names.add(pkg_name)
+
+    return sorted(entries, key=lambda entry: entry["package"])
+
+def write_gpkg_base_system_registry(root_dir=None):
+    """Write the shipped gpkg base-system registry used for upgrade detection."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    registry_path = os.path.join(root_dir, GPKG_BASE_SYSTEM_REGISTRY_REL_PATH)
+    os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+
+    entries = build_base_system_registry_entries(root_dir=root_dir)
+    with open(registry_path, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return entries
+
+def normalize_dbus_runtime_layout(root_dir=None):
+    """Ensure the final image contains only the canonical D-Bus helper path."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    helper_path = os.path.join(root_dir, DBUS_HELPER_REL_PATH)
+    legacy_helper_path = os.path.join(root_dir, LEGACY_DBUS_HELPER_REL_PATH)
+
+    if os.path.exists(legacy_helper_path) and not os.path.exists(helper_path):
+        os.makedirs(os.path.dirname(helper_path), exist_ok=True)
+        shutil.move(legacy_helper_path, helper_path)
+    elif os.path.exists(legacy_helper_path):
+        remove_path(legacy_helper_path)
+
+    helper_old = "/usr/libexec/dbus-daemon-launch-helper"
+    helper_new = "/" + DBUS_HELPER_REL_PATH.replace(os.sep, "/")
+    for rel_path in (
+        os.path.join("usr", "share", "dbus-1", "system.conf"),
+        os.path.join("etc", "dbus-1", "system.conf"),
+    ):
+        config_path = os.path.join(root_dir, rel_path)
+        if not os.path.exists(config_path):
+            continue
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            continue
+        updated = content.replace(helper_old, helper_new)
+        if updated != content:
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write(updated)
+
+def mirror_missing_tree_entries(source_dir, dest_dir):
+    """Copy missing files/symlinks from source_dir into dest_dir without symlinks."""
+    copied = 0
+    if not os.path.isdir(source_dir):
+        return copied
+
+    for current_root, dirnames, filenames in os.walk(source_dir):
+        rel_dir = os.path.relpath(current_root, source_dir)
+        dest_root = dest_dir if rel_dir == "." else os.path.join(dest_dir, rel_dir)
+        os.makedirs(dest_root, exist_ok=True)
+        for dirname in dirnames:
+            os.makedirs(os.path.join(dest_root, dirname), exist_ok=True)
+        for filename in filenames:
+            src_path = os.path.join(current_root, filename)
+            dest_path = os.path.join(dest_root, filename)
+            if os.path.lexists(dest_path):
+                continue
+            if os.path.islink(src_path):
+                os.symlink(os.readlink(src_path), dest_path)
+            else:
+                shutil.copy2(src_path, dest_path)
+            copied += 1
+    return copied
+
+def synchronize_udev_runtime_layout(root_dir=None):
+    """Keep canonical and multiarch udev runtime trees in sync without symlink shims."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    runtime_dirs = [os.path.join(root_dir, rel_dir) for rel_dir in UDEV_RUNTIME_DIRS]
+    if not any(os.path.isdir(path) for path in runtime_dirs):
+        return 0
+
+    copied = 0
+    copied += mirror_missing_tree_entries(runtime_dirs[0], runtime_dirs[1])
+    copied += mirror_missing_tree_entries(runtime_dirs[1], runtime_dirs[0])
+    return copied
+
+def strip_ignored_lightdm_options(root_dir=None):
+    """Remove config keys that this LightDM build ignores."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    config_paths = [
+        os.path.join(root_dir, "etc", "lightdm", "lightdm.conf"),
+        os.path.join(root_dir, "etc", "lightdm", "lightdm.conf.d", "50-geminios.conf"),
+    ]
+    ignored_option_re = re.compile(r"^\s*(logind-check-graphical|minimum-vt)\s*=.*(?:\n|$)", re.MULTILINE)
+
+    for path in config_paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            continue
+        updated = ignored_option_re.sub("", content)
+        if updated != content:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(updated)
+
+def get_dbus_configuration_issues(root_dir=None):
+    """Return staged D-Bus runtime layout/config issues."""
+    root_dir = root_dir or ROOTFS_DIR
+    issues = []
+
+    helper_path = os.path.join(root_dir, DBUS_HELPER_REL_PATH)
+    legacy_helper_path = os.path.join(root_dir, LEGACY_DBUS_HELPER_REL_PATH)
+    if os.path.exists(legacy_helper_path):
+        issues.append(
+            f"legacy D-Bus helper path still exists in the staged rootfs: "
+            f"{LEGACY_DBUS_HELPER_REL_PATH.replace(os.sep, '/')}"
+        )
+
+    share_config = os.path.join(root_dir, "usr", "share", "dbus-1", "system.conf")
+    if os.path.exists(share_config):
+        try:
+            with open(share_config, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError as exc:
+            issues.append(f"could not read usr/share/dbus-1/system.conf: {exc}")
+            return issues
+
+        if "/usr/libexec/dbus-daemon-launch-helper" in content:
+            issues.append("usr/share/dbus-1/system.conf still points at /usr/libexec/dbus-daemon-launch-helper")
+        if os.path.exists(helper_path) and "/" + DBUS_HELPER_REL_PATH.replace(os.sep, "/") not in content:
+            issues.append("usr/share/dbus-1/system.conf does not reference the canonical D-Bus helper path")
+
+    return issues
+
+def get_lightdm_config_issues(root_dir=None):
+    """Return staged LightDM config issues."""
+    root_dir = root_dir or ROOTFS_DIR
+    config_paths = [
+        os.path.join(root_dir, "etc", "lightdm", "lightdm.conf"),
+        os.path.join(root_dir, "etc", "lightdm", "lightdm.conf.d", "50-geminios.conf"),
+    ]
+    issues = []
+    ignored_keys = ("logind-check-graphical", "minimum-vt")
+    for path in config_paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError as exc:
+            issues.append(f"could not read {os.path.relpath(path, root_dir).replace(os.sep, '/')}: {exc}")
+            continue
+        for key in ignored_keys:
+            if re.search(rf"^\s*{re.escape(key)}\s*=", content, re.MULTILINE):
+                rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+                issues.append(f"{rel_path} still contains ignored LightDM option {key}")
+    return issues
+
+def get_gpkg_base_system_registry_issues(root_dir=None):
+    """Return base-system registry issues for gpkg fallback upgrades."""
+    root_dir = root_dir or ROOTFS_DIR
+    registry_path = os.path.join(root_dir, GPKG_BASE_SYSTEM_REGISTRY_REL_PATH)
+    if not os.path.exists(registry_path):
+        return [f"{GPKG_BASE_SYSTEM_REGISTRY_REL_PATH.replace(os.sep, '/')} is missing"]
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"could not read {GPKG_BASE_SYSTEM_REGISTRY_REL_PATH.replace(os.sep, '/')}: {exc}"]
+
+    if not isinstance(entries, list) or not entries:
+        return [f"{GPKG_BASE_SYSTEM_REGISTRY_REL_PATH.replace(os.sep, '/')} is empty"]
+
+    if not any(
+        isinstance(entry, dict) and entry.get("package") == "nano" and entry.get("version")
+        for entry in entries
+    ):
+        return [f"{GPKG_BASE_SYSTEM_REGISTRY_REL_PATH.replace(os.sep, '/')} does not record nano"]
+
+    return []
+
 def get_dbus_runtime_abi_issues(root_dir=None):
     """Return DBus runtime/library ABI mismatches inside the staged rootfs."""
     root_dir = root_dir or ROOTFS_DIR
@@ -2104,6 +2384,61 @@ def get_squashfs_metadata_issues(sfs_path, root_dir=None):
 
     return issues
 
+def get_live_image_runtime_issues(sfs_path):
+    """Return packed-image runtime issues that should never regress silently."""
+    if not shutil.which("unsquashfs"):
+        return []
+
+    issues = []
+
+    listing = subprocess.run(
+        ["unsquashfs", "-lln", sfs_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        detail = (listing.stderr or listing.stdout or f"exit code {listing.returncode}").strip().splitlines()
+        return [f"failed to inspect packed live image contents: {detail[-1] if detail else f'exit code {listing.returncode}'}"]
+
+    listing_text = listing.stdout or ""
+    canonical_helper = f"squashfs-root/{DBUS_HELPER_REL_PATH.replace(os.sep, '/')}"
+    legacy_helper = f"squashfs-root/{LEGACY_DBUS_HELPER_REL_PATH.replace(os.sep, '/')}"
+    if canonical_helper not in listing_text:
+        issues.append(f"{DBUS_HELPER_REL_PATH.replace(os.sep, '/')} is missing from packed live image")
+    if legacy_helper in listing_text:
+        issues.append(f"{LEGACY_DBUS_HELPER_REL_PATH.replace(os.sep, '/')} should not be present in packed live image")
+
+    for rel_path in (
+        "usr/share/dbus-1/system.conf",
+        "etc/lightdm/lightdm.conf",
+    ):
+        result = subprocess.run(
+            ["unsquashfs", "-cat", sfs_path, rel_path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
+            issues.append(
+                f"failed to inspect {rel_path} inside {os.path.basename(sfs_path)}: "
+                f"{detail[-1] if detail else f'exit code {result.returncode}'}"
+            )
+            continue
+
+        content = result.stdout or ""
+        if rel_path == "usr/share/dbus-1/system.conf":
+            if "/usr/libexec/dbus-daemon-launch-helper" in content:
+                issues.append("packed live image still points D-Bus at /usr/libexec/dbus-daemon-launch-helper")
+            if "/" + DBUS_HELPER_REL_PATH.replace(os.sep, "/") not in content:
+                issues.append("packed live image does not point D-Bus at the canonical helper path")
+        elif rel_path == "etc/lightdm/lightdm.conf":
+            if re.search(r"^\s*(logind-check-graphical|minimum-vt)\s*=", content, re.MULTILINE):
+                issues.append("packed live image still contains ignored LightDM options")
+
+    return issues
+
 def get_package_verification_issues(pkg_name, root_dir=None):
     """Return manifest and semantic verification issues for a package."""
     issues = []
@@ -3014,6 +3349,27 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] DBus helper staging permissions")
 
+    dbus_configuration_issues = get_dbus_configuration_issues(root_dir=FINAL_ROOTFS_DIR)
+    if dbus_configuration_issues:
+        print_error(f"  [FAILED] {dbus_configuration_issues[0]}")
+        print_error("           The final image still contains a stale or conflicting D-Bus helper layout.")
+        return False
+    print_success("  [OK] DBus runtime layout")
+
+    lightdm_config_issues = get_lightdm_config_issues(root_dir=FINAL_ROOTFS_DIR)
+    if lightdm_config_issues:
+        print_error(f"  [FAILED] {lightdm_config_issues[0]}")
+        print_error("           The staged LightDM config still contains unsupported seat options.")
+        return False
+    print_success("  [OK] LightDM config sanity")
+
+    gpkg_base_registry_issues = get_gpkg_base_system_registry_issues(root_dir=FINAL_ROOTFS_DIR)
+    if gpkg_base_registry_issues:
+        print_error(f"  [FAILED] {gpkg_base_registry_issues[0]}")
+        print_error("           The staged gpkg base-system registry is missing or incomplete.")
+        return False
+    print_success("  [OK] gpkg base-system registry")
+
     python_runtime_issues = get_python_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if python_runtime_issues:
         print_error(f"  [FAILED] {python_runtime_issues[0]}")
@@ -3028,6 +3384,15 @@ def verify_rootfs_integrity():
 def finalize_rootfs():
     print_section("\n=== Finalizing Rootfs (Glue & Fixups) ===")
     assemble_final_rootfs()
+
+    print_info("[*] Normalizing DBus, udev, LightDM, and gpkg runtime metadata...")
+    normalize_dbus_runtime_layout(root_dir=FINAL_ROOTFS_DIR)
+    copied_udev_entries = synchronize_udev_runtime_layout(root_dir=FINAL_ROOTFS_DIR)
+    if copied_udev_entries:
+        print_success(f"  ✓ Mirrored {copied_udev_entries} missing udev runtime entries between canonical and multiarch trees.")
+    strip_ignored_lightdm_options(root_dir=FINAL_ROOTFS_DIR)
+    base_registry_entries = write_gpkg_base_system_registry(root_dir=FINAL_ROOTFS_DIR)
+    print_success(f"  ✓ Wrote gpkg base-system registry: {len(base_registry_entries)} package records")
     
     # 1. Permissions (su/sudo + dbus helper)
     print_info("[*] Setting SUID permissions...")
@@ -4298,6 +4663,11 @@ def create_iso():
     squashfs_metadata_issues = get_squashfs_metadata_issues(sfs_path, root_dir=FINAL_ROOTFS_DIR)
     if squashfs_metadata_issues:
         print_error(f" [FAILED] (root.sfs metadata: {squashfs_metadata_issues[0]})")
+        return False
+
+    live_image_runtime_issues = get_live_image_runtime_issues(sfs_path)
+    if live_image_runtime_issues:
+        print_error(f" [FAILED] (root.sfs runtime: {live_image_runtime_issues[0]})")
         return False
         
     # 2. Build Minimal Initramfs
