@@ -315,14 +315,16 @@ tar -xf linux-6.19.10.tar.xz
 rm linux-6.19.10.tar.xz
 cd linux-6.19.10
 
-# 3. Configure and Compile
+# 1. Start from the upstream x86_64 default config
 make x86_64_defconfig
 
-# 1. Enable Framebuffer and QEMU Drivers
+# 2. Required GeminiOS boot, console and VM graphics support
 ./scripts/config --enable CONFIG_FB
 ./scripts/config --enable CONFIG_FB_VESA
 ./scripts/config --enable CONFIG_FB_EFI
 ./scripts/config --enable CONFIG_DRM
+./scripts/config --enable CONFIG_DRM_KMS_HELPER
+./scripts/config --enable CONFIG_DRM_SIMPLEDRM
 ./scripts/config --enable CONFIG_DRM_BOCHS
 ./scripts/config --enable CONFIG_DRM_VIRTIO_GPU
 ./scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
@@ -330,7 +332,7 @@ make x86_64_defconfig
 ./scripts/config --set-val CONFIG_DRM_FBDEV_OVERALLOC 100
 ./scripts/config --enable CONFIG_INPUT_EVDEV
 
-# 2. Enable SquashFS, OverlayFS and ISO9660 (Required for GeminiOS Live ISO)
+# 3. Required GeminiOS live ISO and rootfs support
 ./scripts/config --enable CONFIG_SQUASHFS
 ./scripts/config --enable CONFIG_SQUASHFS_ZSTD
 ./scripts/config --enable CONFIG_SQUASHFS_XZ
@@ -342,8 +344,10 @@ make x86_64_defconfig
 ./scripts/config --enable CONFIG_TMPFS
 ./scripts/config --enable CONFIG_MSDOS_PARTITION
 ./scripts/config --enable CONFIG_EFI_PARTITION
+./scripts/config --enable CONFIG_EXT4_FS
+./scripts/config --enable CONFIG_EXT4_USE_FOR_EXT2
 
-# 3. Enable SELinux and label/xattr support
+# 4. Required SELinux, audit and label/xattr support
 ./scripts/config --enable CONFIG_SECURITY
 ./scripts/config --enable CONFIG_SECURITYFS
 ./scripts/config --enable CONFIG_AUDIT
@@ -361,15 +365,146 @@ make x86_64_defconfig
 ./scripts/config --enable CONFIG_XFS_POSIX_ACL
 ./scripts/config --enable CONFIG_BTRFS_FS
 
-# 4. Finalize and Compile
+# 5. Optional but strongly recommended filesystem support
+# Use =y for simpler live media behavior when possible.
+./scripts/config --enable CONFIG_FUSE_FS
+./scripts/config --enable CONFIG_CUSE
+./scripts/config --enable CONFIG_VFAT_FS
+./scripts/config --enable CONFIG_EXFAT_FS
+./scripts/config --enable CONFIG_NTFS3_FS
+./scripts/config --enable CONFIG_EXT4_FS_POSIX_ACL
+./scripts/config --enable CONFIG_BTRFS_FS_POSIX_ACL
+./scripts/config --enable CONFIG_TMPFS_POSIX_ACL
+./scripts/config --enable CONFIG_FS_POSIX_ACL
+./scripts/config --enable CONFIG_AUTOFS_FS
+
+# 6. Optional but strongly recommended storage and removable media support
+./scripts/config --enable CONFIG_ATA
+./scripts/config --enable CONFIG_SATA_AHCI
+./scripts/config --enable CONFIG_SCSI
+./scripts/config --enable CONFIG_BLK_DEV_SD
+./scripts/config --enable CONFIG_CHR_DEV_SG
+./scripts/config --enable CONFIG_NVME_CORE
+./scripts/config --enable CONFIG_BLK_DEV_NVME
+./scripts/config --enable CONFIG_USB_STORAGE
+./scripts/config --enable CONFIG_MMC
+./scripts/config --enable CONFIG_MMC_BLOCK
+./scripts/config --enable CONFIG_DM_CRYPT
+./scripts/config --enable CONFIG_MD
+./scripts/config --enable CONFIG_BLK_DEV_DM
+
+# 7. Optional but strongly recommended desktop/laptop input support
+./scripts/config --enable CONFIG_INPUT_KEYBOARD
+./scripts/config --enable CONFIG_INPUT_MOUSE
+./scripts/config --enable CONFIG_INPUT_TOUCHSCREEN
+./scripts/config --enable CONFIG_HID
+./scripts/config --enable CONFIG_HID_GENERIC
+./scripts/config --enable CONFIG_HID_MULTITOUCH
+./scripts/config --enable CONFIG_I2C_HID
+./scripts/config --enable CONFIG_I2C_HID_ACPI
+./scripts/config --enable CONFIG_SERIO
+./scripts/config --enable CONFIG_SERIO_I8042
+./scripts/config --enable CONFIG_LEGACY_PTYS
+
+# 8. Optional but strongly recommended desktop graphics support
+./scripts/config --enable CONFIG_AGP
+./scripts/config --enable CONFIG_BACKLIGHT_CLASS_DEVICE
+./scripts/config --enable CONFIG_DRM_AMDGPU
+./scripts/config --enable CONFIG_DRM_RADEON
+./scripts/config --enable CONFIG_DRM_I915
+./scripts/config --enable CONFIG_DRM_NOUVEAU
+./scripts/config --enable CONFIG_FB_SIMPLE
+
+# 9. Optional but strongly recommended audio support
+./scripts/config --enable CONFIG_SOUND
+./scripts/config --enable CONFIG_SND
+./scripts/config --enable CONFIG_SND_HDA_INTEL
+./scripts/config --enable CONFIG_SND_HDA_CODEC_HDMI
+./scripts/config --enable CONFIG_SND_USB_AUDIO
+./scripts/config --enable CONFIG_SND_HRTIMER
+./scripts/config --enable CONFIG_SND_SEQ
+./scripts/config --enable CONFIG_SND_TIMER
+
+# 10. Optional but strongly recommended networking support
+./scripts/config --enable CONFIG_PACKET
+./scripts/config --enable CONFIG_UNIX
+./scripts/config --enable CONFIG_INET
+./scripts/config --enable CONFIG_IPV6
+./scripts/config --enable CONFIG_CFG80211
+./scripts/config --enable CONFIG_MAC80211
+./scripts/config --enable CONFIG_RFKILL
+./scripts/config --enable CONFIG_WLAN
+./scripts/config --enable CONFIG_BT
+./scripts/config --enable CONFIG_BT_BREDR
+./scripts/config --enable CONFIG_BT_RFCOMM
+./scripts/config --enable CONFIG_BT_HIDP
+
+# 11. Optional but strongly recommended common USB and peripheral support
+./scripts/config --enable CONFIG_USB_SUPPORT
+./scripts/config --enable CONFIG_USB_XHCI_HCD
+./scripts/config --enable CONFIG_USB_EHCI_HCD
+./scripts/config --enable CONFIG_USB_OHCI_HCD
+./scripts/config --enable CONFIG_USB_HID
+./scripts/config --enable CONFIG_USB_UAS
+./scripts/config --enable CONFIG_TYPEC
+./scripts/config --enable CONFIG_TYPEC_UCSI
+./scripts/config --enable CONFIG_UCSI_ACPI
+
+# 12. Optional but strongly recommended power, thermal and laptop support
+./scripts/config --enable CONFIG_ACPI
+./scripts/config --enable CONFIG_ACPI_BATTERY
+./scripts/config --enable CONFIG_ACPI_BUTTON
+./scripts/config --enable CONFIG_ACPI_VIDEO
+./scripts/config --enable CONFIG_CPU_FREQ
+./scripts/config --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+./scripts/config --enable CONFIG_CPU_IDLE
+./scripts/config --enable CONFIG_THERMAL
+./scripts/config --enable CONFIG_THERMAL_HWMON
+./scripts/config --enable CONFIG_HW_RANDOM
+
+# 13. Optional but strongly recommended virtualization and VM guest support
+./scripts/config --enable CONFIG_VIRTIO
+./scripts/config --enable CONFIG_VIRTIO_PCI
+./scripts/config --enable CONFIG_VIRTIO_BLK
+./scripts/config --enable CONFIG_VIRTIO_NET
+./scripts/config --enable CONFIG_VIRTIO_INPUT
+./scripts/config --enable CONFIG_VIRTIO_CONSOLE
+./scripts/config --enable CONFIG_VSOCKETS
+./scripts/config --enable CONFIG_HYPERV
+./scripts/config --enable CONFIG_HYPERV_STORAGE
+./scripts/config --enable CONFIG_HYPERV_NET
+./scripts/config --enable CONFIG_PARAVIRT
+
+# 14. Optional but strongly recommended container / modern userspace support
+./scripts/config --enable CONFIG_NAMESPACES
+./scripts/config --enable CONFIG_UTS_NS
+./scripts/config --enable CONFIG_IPC_NS
+./scripts/config --enable CONFIG_PID_NS
+./scripts/config --enable CONFIG_NET_NS
+./scripts/config --enable CONFIG_CGROUPS
+./scripts/config --enable CONFIG_CGROUP_FREEZER
+./scripts/config --enable CONFIG_CGROUP_DEVICE
+./scripts/config --enable CONFIG_CGROUP_PIDS
+./scripts/config --enable CONFIG_MEMCG
+./scripts/config --enable CONFIG_BPF
+./scripts/config --enable CONFIG_BPF_SYSCALL
+
+# 15. Finalize and compile
 make olddefconfig
 make -j$(nproc) bzImage
 ```
 
+Notes:
+
+- The blocks above are split into `required` and `optional but strongly recommended`.
+- GeminiOS can boot with a smaller kernel, but the optional blocks make it much more likely to work on real laptops, desktops, VMs and removable media without rebuilding the kernel again later.
+- For boot-critical features such as live ISO filesystems, root storage, basic display, input and `/dev/fuse`, prefer `=y` over `=m` unless you already have a reliable module-loading path.
+- `CONFIG_FUSE_FS=y` is the simplest way to avoid `/dev/fuse not found` issues during desktop sessions.
+
 Recommended verification before returning to `builder.py`:
 
 ```sh
-grep -E 'CONFIG_SECURITY_SELINUX=|CONFIG_DEFAULT_SECURITY_SELINUX=|CONFIG_SECURITYFS=|CONFIG_EXT4_FS_SECURITY=' .config
+grep -E 'CONFIG_SECURITY_SELINUX=|CONFIG_DEFAULT_SECURITY_SELINUX=|CONFIG_SECURITYFS=|CONFIG_EXT4_FS_SECURITY=|CONFIG_FUSE_FS=|CONFIG_SQUASHFS=|CONFIG_OVERLAY_FS=|CONFIG_DRM_SIMPLEDRM=|CONFIG_VIRTIO_GPU=|CONFIG_NVME_CORE=|CONFIG_SND_HDA_INTEL=' .config
 ```
 
 Expected result:
@@ -378,6 +513,16 @@ Expected result:
 - `CONFIG_DEFAULT_SECURITY_SELINUX=y`
 - `CONFIG_SECURITYFS=y`
 - `CONFIG_EXT4_FS_SECURITY=y`
+- `CONFIG_FUSE_FS=y`
+- `CONFIG_SQUASHFS=y`
+- `CONFIG_OVERLAY_FS=y`
+- `CONFIG_DRM_SIMPLEDRM=y`
+
+Optional but good signs:
+
+- `CONFIG_VIRTIO_GPU=y`
+- `CONFIG_NVME_CORE=y`
+- `CONFIG_SND_HDA_INTEL=y`
 
 GeminiOS now ships `/etc/selinux/config` with `SELINUX=enforcing` by default.
 The live ISO still drops to permissive mode during boot as a safety override, but installed systems are intended to run enforcing after relabeling.
