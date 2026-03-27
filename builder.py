@@ -142,6 +142,7 @@ SYSTEMD_PAYLOAD_GLOB_PATHS = (
     os.path.join("usr", "share", "zsh", "vendor-completions", "_systemd*"),
 )
 SYSTEMD_PAYLOAD_KEEP_PATHS = {
+    os.path.join("usr", "include", "elogind", "systemd"),
     os.path.join("usr", "include", "systemd"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so.0"),
@@ -2558,6 +2559,8 @@ def get_systemd_payload_paths(root_dir):
                 rel_path_norm = f"{rel_root}/{name}" if rel_root != "." else name
                 if rel_path_norm in keep_paths_norm:
                     continue
+                if rel_path_norm.startswith("usr/include/elogind/systemd/"):
+                    continue
                 if rel_path_norm.startswith("usr/include/systemd/"):
                     continue
                 rel_paths.add(rel_path_norm.replace("/", os.sep))
@@ -2603,11 +2606,6 @@ def restore_elogind_systemd_compat(root_dir, report=False):
             os.path.join("usr", "lib", "x86_64-linux-gnu", "libelogind.so.0"),
         ),
         (
-            os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libsystemd.pc"),
-            "libelogind.pc",
-            os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libelogind.pc"),
-        ),
-        (
             os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_systemd.so"),
             "pam_elogind.so",
             os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_elogind.so"),
@@ -2627,6 +2625,53 @@ def restore_elogind_systemd_compat(root_dir, report=False):
         os.makedirs(os.path.dirname(link_abs_path), exist_ok=True)
         os.symlink(target_name, link_abs_path)
         restored.append(rel_path)
+
+    libelogind_pc_rel = os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libelogind.pc")
+    libsystemd_pc_rel = os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libsystemd.pc")
+    libelogind_pc_abs = os.path.join(root_dir, libelogind_pc_rel)
+    libsystemd_pc_abs = os.path.join(root_dir, libsystemd_pc_rel)
+    if os.path.exists(libelogind_pc_abs):
+        with open(libelogind_pc_abs, "r", encoding="utf-8") as f:
+            pc_content = f.read()
+        compat_pc_content = re.sub(r"^includedir=.*$", "includedir=/usr/include", pc_content, flags=re.MULTILINE)
+        compat_pc_content = re.sub(r"^Name: .*$", "Name: systemd", compat_pc_content, flags=re.MULTILINE)
+        compat_pc_content = re.sub(
+            r"^Description: .*$",
+            "Description: systemd compatibility library provided by elogind",
+            compat_pc_content,
+            flags=re.MULTILINE,
+        )
+        current_pc_content = None
+        if os.path.exists(libsystemd_pc_abs) and not os.path.islink(libsystemd_pc_abs):
+            with open(libsystemd_pc_abs, "r", encoding="utf-8") as f:
+                current_pc_content = f.read()
+        if current_pc_content != compat_pc_content:
+            if os.path.lexists(libsystemd_pc_abs):
+                remove_path(libsystemd_pc_abs)
+            os.makedirs(os.path.dirname(libsystemd_pc_abs), exist_ok=True)
+            with open(libsystemd_pc_abs, "w", encoding="utf-8") as f:
+                f.write(compat_pc_content)
+            restored.append(libsystemd_pc_rel)
+
+    compat_header_source_dir = os.path.join(root_dir, "usr", "include", "elogind", "systemd")
+    compat_header_dest_dir = os.path.join(root_dir, "usr", "include", "systemd")
+    if os.path.isdir(compat_header_source_dir):
+        if os.path.islink(compat_header_dest_dir):
+            remove_path(compat_header_dest_dir)
+        os.makedirs(compat_header_dest_dir, exist_ok=True)
+        for header_name in sorted(os.listdir(compat_header_source_dir)):
+            source_abs_path = os.path.join(compat_header_source_dir, header_name)
+            if not os.path.isfile(source_abs_path):
+                continue
+            rel_path = os.path.join("usr", "include", "systemd", header_name)
+            dest_abs_path = os.path.join(root_dir, rel_path)
+            target_name = os.path.join("..", "elogind", "systemd", header_name)
+            if os.path.islink(dest_abs_path) and os.readlink(dest_abs_path) == target_name:
+                continue
+            if os.path.lexists(dest_abs_path):
+                remove_path(dest_abs_path)
+            os.symlink(target_name, dest_abs_path)
+            restored.append(rel_path)
 
     if report and restored:
         print_info(f"[*] Restoring elogind systemd-compat links in {root_dir}...")

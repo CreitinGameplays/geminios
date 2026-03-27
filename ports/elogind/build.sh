@@ -84,8 +84,23 @@ ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install
 
 mkdir -p "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig" "$ROOTFS/usr/include"
-ln -sf libelogind.pc "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/libsystemd.pc"
-ln -sf elogind "$ROOTFS/usr/include/systemd"
+mkdir -p "$ROOTFS/usr/include/systemd" "$ROOTFS/usr/include/elogind/systemd"
+
+for header_path in "$DEP_DIR/elogind-$ELOGIND_VER"/src/systemd/*.h; do
+    [ -f "$header_path" ] || continue
+    header_name="$(basename "$header_path")"
+    install -m 0644 "$header_path" "$ROOTFS/usr/include/elogind/systemd/$header_name"
+    ln -sfn "../elogind/systemd/$header_name" "$ROOTFS/usr/include/systemd/$header_name"
+done
+
+if [ -f "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/libelogind.pc" ]; then
+    sed \
+        -e 's|^includedir=.*|includedir=/usr/include|' \
+        -e 's|^Name: .*|Name: systemd|' \
+        -e 's|^Description: .*|Description: systemd compatibility library provided by elogind|' \
+        "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/libelogind.pc" \
+        > "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/libsystemd.pc"
+fi
 
 if [ -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libelogind.so" ]; then
     ln -sf libelogind.so "$ROOTFS/usr/lib/x86_64-linux-gnu/libsystemd.so"

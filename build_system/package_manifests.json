@@ -387,6 +387,7 @@
         "usr/lib/x86_64-linux-gnu/pkgconfig/libelogind.pc",
         "usr/lib/x86_64-linux-gnu/pkgconfig/libsystemd.pc",
         "usr/include/systemd",
+        "usr/include/systemd/sd-daemon.h",
         "etc/elogind/logind.conf"
     ],
     "wayland-protocols": [
