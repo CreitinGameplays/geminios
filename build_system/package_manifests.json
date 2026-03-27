@@ -603,6 +603,7 @@
         "usr/lib/ginit/services/udev-settle.gservice",
         "usr/lib/ginit/services/network.gservice",
         "usr/lib/ginit/services/sshd.gservice",
+        "etc/ssh/sshd_config",
         "etc/ssh/sshd_config.d/10-geminios.conf",
         "usr/libexec/geminios/ensure-fuse-device",
         "usr/libexec/geminios/sshd-launch",

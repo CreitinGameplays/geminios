@@ -190,6 +190,20 @@ PermitEmptyPasswords no
 PrintMotd no
 EOF
 
+if [ ! -f "$ROOTFS/etc/ssh/sshd_config" ]; then
+cat > "$ROOTFS/etc/ssh/sshd_config" <<'EOF'
+# GeminiOS base OpenSSH server configuration.
+# Site-specific policy belongs in /etc/ssh/sshd_config.d/*.conf.
+Include /etc/ssh/sshd_config.d/*.conf
+
+AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+Subsystem sftp internal-sftp
+EOF
+fi
+
 cat > "$ROOTFS/etc/security/limits.conf" <<EOF
 # GeminiOS PAM limits defaults
 *               soft    nofile          1024
@@ -561,6 +575,20 @@ ssh_keygen_bin="$(find_bin /usr/bin/ssh-keygen /bin/ssh-keygen /usr/sbin/ssh-key
 
 mkdir -p /etc/ssh /run/sshd /var/empty
 chmod 755 /run/sshd /var/empty 2>/dev/null || true
+
+if [ ! -f /etc/ssh/sshd_config ]; then
+    cat > /etc/ssh/sshd_config <<'CONFIG'
+# GeminiOS base OpenSSH server configuration.
+# Site-specific policy belongs in /etc/ssh/sshd_config.d/*.conf.
+Include /etc/ssh/sshd_config.d/*.conf
+
+AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+Subsystem sftp internal-sftp
+CONFIG
+fi
 
 if [ -n "$ssh_keygen_bin" ]; then
     "$ssh_keygen_bin" -A >/dev/null 2>&1 || {
