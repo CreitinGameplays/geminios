@@ -68,6 +68,9 @@
         "usr/include/zconf.h"
     ],
     "openssl": [
+        "usr/include/openssl/sha.h",
+        "usr/include/openssl/ssl.h",
+        "usr/lib/x86_64-linux-gnu/libcrypto.so.3",
         "usr/lib/x86_64-linux-gnu/libssl.so.3",
         "usr/lib/x86_64-linux-gnu/pkgconfig/openssl.pc"
     ],
@@ -76,11 +79,13 @@
         "etc/ssl/cert.pem"
     ],
     "zstd": [
+        "usr/include/zstd.h",
         "usr/lib/x86_64-linux-gnu/libzstd.so",
         "usr/lib/x86_64-linux-gnu/pkgconfig/libzstd.pc"
     ],
     "xz": [
         "usr/bin/xz",
+        "usr/include/lzma.h",
         "usr/lib/x86_64-linux-gnu/liblzma.so",
         "usr/lib/x86_64-linux-gnu/pkgconfig/liblzma.pc"
     ],

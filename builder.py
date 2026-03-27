@@ -118,6 +118,36 @@ GPKG_DEFAULT_SOURCES_FILE = os.environ.get(
 HOST_DEV_OVERLAY_FILE = os.path.join(ROOT_DIR, ".host_dev_overlay_paths.json")
 PKGCONFIG_CANONICAL_LIBDIR = "/usr/lib/x86_64-linux-gnu"
 PKGCONFIG_MULTIARCH_DIR = os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig")
+BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS = (
+    "systemd",
+    "systemd-*",
+)
+SYSTEMD_PAYLOAD_EXACT_PATHS = (
+    os.path.join("etc", "systemd"),
+    os.path.join("etc", "xdg", "systemd"),
+    os.path.join("usr", "lib", "systemd"),
+    os.path.join("usr", "lib", "x86_64-linux-gnu", "systemd"),
+    os.path.join("usr", "lib", "modprobe.d", "systemd.conf"),
+    os.path.join("usr", "lib", "pam.d", "systemd-user"),
+    os.path.join("usr", "lib", "lsb", "init-functions.d", "40-systemd"),
+    os.path.join("usr", "lib", "udev", "rules.d", "99-systemd.rules"),
+    os.path.join("var", "lib", "systemd"),
+)
+SYSTEMD_PAYLOAD_GLOB_PATHS = (
+    os.path.join("etc", "profile.d", "*systemd*"),
+    os.path.join("etc", "ssh", "ssh_config.d", "*systemd*"),
+    os.path.join("usr", "lib", "tmpfiles.d", "*systemd*"),
+    os.path.join("usr", "lib", "sysusers.d", "*systemd*"),
+    os.path.join("usr", "share", "man", "man?", "*systemd*"),
+    os.path.join("usr", "share", "zsh", "vendor-completions", "_systemd*"),
+)
+SYSTEMD_PAYLOAD_KEEP_PATHS = {
+    os.path.join("usr", "include", "systemd"),
+    os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so"),
+    os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so.0"),
+    os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libsystemd.pc"),
+    os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_systemd.so"),
+}
 
 
 def read_env_config_export(var_name, default_value):
@@ -426,7 +456,7 @@ PACKAGE_DEPENDENCIES = {
         "ninja",
     ],
     "geminios_core": ["kernel_headers", "glibc", "dbus", "eudev", "linux-pam", "elogind"],
-    "geminios_complex": ["kernel_headers", "glibc", "geminios_core"],
+    "geminios_complex": ["kernel_headers", "glibc", "zlib", "openssl", "zstd", "xz", "geminios_core"],
 }
 
 def resolve_requested_packages(requested_packages):
@@ -789,6 +819,10 @@ def normalize_dependency_name(token):
     token = re.sub(r"\[.*?\]", "", token).strip()
     return token
 
+def is_bootstrap_excluded_package(package_name):
+    """Return whether a Debian bootstrap package is intentionally excluded."""
+    return any(fnmatch.fnmatch(package_name, pattern) for pattern in BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS)
+
 def resolve_bootstrap_requested_packages(index, requested_patterns):
     """Resolve manifest entries to concrete Debian package names."""
     resolved = set()
@@ -798,11 +832,12 @@ def resolve_bootstrap_requested_packages(index, requested_patterns):
             matches = [name for name in available_names if fnmatch.fnmatch(name, pattern)]
             if not matches:
                 raise RuntimeError(f"Bootstrap manifest pattern matched no Debian packages: {pattern}")
-            resolved.update(matches)
+            resolved.update(name for name in matches if not is_bootstrap_excluded_package(name))
         else:
             if pattern not in index:
                 raise RuntimeError(f"Bootstrap manifest package not found in Debian metadata: {pattern}")
-            resolved.add(pattern)
+            if not is_bootstrap_excluded_package(pattern):
+                resolved.add(pattern)
     return sorted(resolved)
 
 def resolve_bootstrap_dependency_closure(index, requested_packages):
@@ -812,7 +847,11 @@ def resolve_bootstrap_dependency_closure(index, requested_packages):
 
     while queue:
         package_name = queue.pop()
-        if package_name in resolved or package_name not in index:
+        if (
+            package_name in resolved
+            or package_name not in index
+            or is_bootstrap_excluded_package(package_name)
+        ):
             continue
         resolved.add(package_name)
         entry = index[package_name]
@@ -822,7 +861,12 @@ def resolve_bootstrap_dependency_closure(index, requested_packages):
                 continue
             for dep_token in raw_value.split(","):
                 dep_name = normalize_dependency_name(dep_token)
-                if dep_name and dep_name in index and dep_name not in resolved:
+                if (
+                    dep_name
+                    and dep_name in index
+                    and dep_name not in resolved
+                    and not is_bootstrap_excluded_package(dep_name)
+                ):
                     queue.append(dep_name)
 
     return sorted(resolved)
@@ -978,17 +1022,23 @@ def ensure_debian_bootstrap():
         and open(sysroot_stamp, "r").read() == desired_sysroot_stamp
     )
     if runtime_stage_ready and sysroot_stage_ready:
+        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
         return
 
     print_section("\n=== Bootstrapping Debian Base Stages ===")
 
     print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
     bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
+    prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
     with open(runtime_stamp, "w") as f:
         f.write(desired_runtime_stamp)
 
     print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
     bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
+    prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+    restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
     with open(sysroot_stamp, "w") as f:
         f.write(desired_sysroot_stamp)
 
@@ -1038,6 +1088,8 @@ def assemble_final_rootfs():
         leaked_abs_path = os.path.join(FINAL_ROOTFS_DIR, leaked_path)
         if os.path.lexists(leaked_abs_path):
             remove_path(leaked_abs_path)
+    prune_systemd_payload(FINAL_ROOTFS_DIR, report=True)
+    restore_elogind_systemd_compat(FINAL_ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
@@ -2475,6 +2527,114 @@ def remove_path(path):
     elif os.path.lexists(path):
         os.unlink(path)
 
+def get_systemd_payload_paths(root_dir):
+    """Return staged paths that belong to the imported systemd userspace payload."""
+    root_dir = root_dir or ROOTFS_DIR
+    rel_paths = set()
+    keep_paths_norm = {path.replace(os.sep, "/") for path in SYSTEMD_PAYLOAD_KEEP_PATHS}
+
+    for rel_path in SYSTEMD_PAYLOAD_EXACT_PATHS:
+        abs_path = os.path.join(root_dir, rel_path)
+        if os.path.lexists(abs_path):
+            rel_paths.add(rel_path)
+
+    for pattern in SYSTEMD_PAYLOAD_GLOB_PATHS:
+        for abs_path in glob.glob(os.path.join(root_dir, pattern)):
+            if os.path.lexists(abs_path):
+                rel_paths.add(os.path.relpath(abs_path, root_dir))
+
+    compat_link = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "libsystemd.so.0")
+    compat_target = ""
+    if os.path.islink(compat_link):
+        compat_target = os.path.basename(os.readlink(compat_link))
+
+    usr_root = os.path.join(root_dir, "usr")
+    if os.path.isdir(usr_root):
+        for current_root, dirnames, filenames in os.walk(usr_root, followlinks=False):
+            rel_root = os.path.relpath(current_root, root_dir).replace(os.sep, "/")
+            for name in dirnames + filenames:
+                if "systemd" not in name:
+                    continue
+                rel_path_norm = f"{rel_root}/{name}" if rel_root != "." else name
+                if rel_path_norm in keep_paths_norm:
+                    continue
+                if rel_path_norm.startswith("usr/include/systemd/"):
+                    continue
+                rel_paths.add(rel_path_norm.replace("/", os.sep))
+
+    for abs_path in glob.glob(os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "libsystemd.so.*")):
+        base_name = os.path.basename(abs_path)
+        if base_name in {"libsystemd.so", "libsystemd.so.0"}:
+            continue
+        if compat_target and base_name == compat_target:
+            continue
+        rel_paths.add(os.path.relpath(abs_path, root_dir))
+
+    return sorted(rel_paths)
+
+def prune_systemd_payload(root_dir, report=False):
+    """Remove imported systemd payloads while preserving GeminiOS elogind compatibility shims."""
+    removed_rel_paths = []
+    for rel_path in get_systemd_payload_paths(root_dir):
+        abs_path = os.path.join(root_dir, rel_path)
+        if not os.path.lexists(abs_path):
+            continue
+        remove_path(abs_path)
+        removed_rel_paths.append(rel_path)
+
+    if report and removed_rel_paths:
+        print_info(f"[*] Pruning imported systemd payloads from {root_dir}...")
+        for rel_path in removed_rel_paths:
+            print_info(f"  Removed /{rel_path}")
+
+    return removed_rel_paths
+
+def restore_elogind_systemd_compat(root_dir, report=False):
+    """Restore the elogind-provided libsystemd/pam_systemd compatibility links."""
+    compat_links = [
+        (
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so"),
+            "libelogind.so",
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "libelogind.so"),
+        ),
+        (
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so.0"),
+            "libelogind.so.0",
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "libelogind.so.0"),
+        ),
+        (
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libsystemd.pc"),
+            "libelogind.pc",
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libelogind.pc"),
+        ),
+        (
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_systemd.so"),
+            "pam_elogind.so",
+            os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_elogind.so"),
+        ),
+    ]
+
+    restored = []
+    for rel_path, target_name, required_rel_path in compat_links:
+        required_abs_path = os.path.join(root_dir, required_rel_path)
+        link_abs_path = os.path.join(root_dir, rel_path)
+        if not os.path.lexists(required_abs_path):
+            continue
+        if os.path.islink(link_abs_path) and os.readlink(link_abs_path) == target_name:
+            continue
+        if os.path.lexists(link_abs_path):
+            remove_path(link_abs_path)
+        os.makedirs(os.path.dirname(link_abs_path), exist_ok=True)
+        os.symlink(target_name, link_abs_path)
+        restored.append(rel_path)
+
+    if report and restored:
+        print_info(f"[*] Restoring elogind systemd-compat links in {root_dir}...")
+        for rel_path in restored:
+            print_info(f"  Restored /{rel_path}")
+
+    return restored
+
 def resolve_rootfs_copy_destination(dest_path):
     """Follow an existing rootfs symlink destination so host overlay copies land on the canonical path."""
     if os.path.islink(dest_path):
@@ -3277,6 +3437,12 @@ def verify_rootfs_integrity():
         if not os.path.exists(path):
             print_error(f"  [MISSING] {rel_path}")
             return False
+
+    systemd_payload_issues = get_systemd_payload_paths(FINAL_ROOTFS_DIR)
+    if systemd_payload_issues:
+        print_error(f"  [FAILED] unexpected systemd payload in final rootfs: /{systemd_payload_issues[0]}")
+        print_error("           GeminiOS keeps elogind compatibility shims, but full systemd userspace must not ship.")
+        return False
 
     shadowed_runtime_issues = get_shadowed_runtime_library_issues(root_dir=FINAL_ROOTFS_DIR)
     if shadowed_runtime_issues:
