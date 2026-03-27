@@ -150,7 +150,7 @@
         "usr/bin/dbus-daemon",
         "usr/bin/dbus-launch",
         "usr/bin/dbus-run-session",
-        "usr/libexec/dbus-daemon-launch-helper",
+        "usr/lib/dbus-1.0/dbus-daemon-launch-helper",
         "usr/lib/x86_64-linux-gnu/libdbus-1.so.3.32.4",
         "usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"
     ],
@@ -361,7 +361,16 @@
     ],
     "eudev": [
         "usr/lib/x86_64-linux-gnu/libudev.so",
-        "usr/lib/x86_64-linux-gnu/pkgconfig/libudev.pc"
+        "usr/lib/x86_64-linux-gnu/pkgconfig/libudev.pc",
+        "usr/bin/udevadm",
+        "usr/sbin/udevd",
+        "usr/lib/udev",
+        "usr/lib/udev/rules.d/50-udev-default.rules",
+        "usr/lib/udev/rules.d/60-drm.rules",
+        "usr/lib/udev/rules.d/60-input-id.rules",
+        "usr/lib/udev/rules.d/60-persistent-input.rules",
+        "usr/lib/udev/rules.d/71-seat.rules",
+        "usr/lib/udev/rules.d/73-seat-late.rules"
     ],
     "elogind": [
         "usr/bin/loginctl",

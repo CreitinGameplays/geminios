@@ -19,6 +19,7 @@ find "$ROOTFS/usr/lib/x86_64-linux-gnu" "$ROOTFS/lib/x86_64-linux-gnu" "$ROOTFS/
 # fail with GLIBC_PRIVATE symbol errors before the actual build starts.
 ./configure --prefix=/usr \
             --libdir=/usr/lib/x86_64-linux-gnu \
+            --libexecdir=/usr/lib/dbus-1.0 \
             --sysconfdir=/etc \
             --localstatedir=/var \
             --disable-static \
@@ -33,12 +34,13 @@ find "$ROOTFS/usr/lib/x86_64-linux-gnu" "$ROOTFS/lib/x86_64-linux-gnu" "$ROOTFS/
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
-helper="$ROOTFS/usr/libexec/dbus-daemon-launch-helper"
+helper="$ROOTFS/usr/lib/dbus-1.0/dbus-daemon-launch-helper"
 if [ -f "$helper" ]; then
-    # A non-root build skips upstream's install-exec-hook, but the final image
-    # still needs the helper to be setuid-ready so system bus activation works.
-    chmod 4750 "$helper"
-    chown 0:18 "$helper" 2>/dev/null || true
+    # Debian configures the system bus helper as root:messagebus 4754. During
+    # unprivileged builds we can still at least stamp the setuid mode here; the
+    # ISO builder later fixes the ownership metadata when packing the image.
+    chmod 4754 "$helper"
+    chown root:messagebus "$helper" 2>/dev/null || true
 fi
 
 # FIX: Remove empty Libs.private from .pc file

@@ -193,8 +193,8 @@ PKGCONFIG_LEGACY_LIBDIR_VALUES = {
     "${prefix}/lib64",
     "${prefix}/lib/x86_64-linux-gnu",
 }
-DBUS_HELPER_REL_PATH = os.path.join("usr", "libexec", "dbus-daemon-launch-helper")
-DBUS_HELPER_REQUIRED_MODE = 0o4750
+DBUS_HELPER_REL_PATH = os.path.join("usr", "lib", "dbus-1.0", "dbus-daemon-launch-helper")
+DBUS_HELPER_REQUIRED_MODE = 0o4754
 DBUS_HELPER_REQUIRED_UID = 0
 DBUS_HELPER_REQUIRED_GID = 18
 
@@ -2902,7 +2902,7 @@ def verify_rootfs_integrity():
         "usr/lib/x86_64-linux-gnu/libinput.so",
         "usr/share/mime/magic",
         "bin/apps/system/gpkg-worker",
-        "usr/libexec/dbus-daemon-launch-helper",
+        "usr/lib/dbus-1.0/dbus-daemon-launch-helper",
         "usr/share/glib-2.0/schemas/gschemas.compiled",
         "usr/share/fonts/TTF/Inter-Regular.otf",
         "usr/bin/Xwayland",
@@ -3010,7 +3010,7 @@ def verify_rootfs_integrity():
     dbus_helper_permission_issues = get_dbus_helper_permission_issues(root_dir=FINAL_ROOTFS_DIR)
     if dbus_helper_permission_issues:
         print_error(f"  [FAILED] {dbus_helper_permission_issues[0]}")
-        print_error("           The D-Bus system activation helper must be staged with setuid mode 4750.")
+        print_error("           The D-Bus system activation helper must be staged with setuid mode 4754.")
         return False
     print_success("  [OK] DBus helper staging permissions")
 
