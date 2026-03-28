@@ -159,6 +159,19 @@ have() {
     command -v "$1" >/dev/null 2>&1
 }
 
+pick_runtime_elf_source() {
+    local candidate
+    for candidate in \
+        /lib/x86_64-linux-gnu/libzstd.so.1 \
+        /lib/x86_64-linux-gnu/libc.so.6 \
+        /usr/lib/x86_64-linux-gnu/libzstd.so.1 \
+        /usr/lib/x86_64-linux-gnu/libc.so.6 \
+        "$GPKG_WORKER_BIN"; do
+        [[ -r "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
+    done
+    return 1
+}
+
 resolve_binary() {
     local current="$1"
     shift
@@ -783,6 +796,42 @@ run_repair_and_worker_tests() {
 
     expect_success "gpkg-worker-refresh-runtime-linker-state" \
         "$GPKG_WORKER_BIN" --jobs "$CPU_JOBS" --refresh-runtime-linker-state || return 1
+
+    local temp_root source_elf
+    temp_root="$(mktemp -d /tmp/gpkg-shadow-runtime.XXXXXX)"
+    source_elf="$(pick_runtime_elf_source || true)"
+    if [[ -z "$source_elf" ]]; then
+        rm -rf "$temp_root"
+        skip "Skipping shadowed runtime cleanup regression; no reusable ELF source was found"
+    else
+        mkdir -p \
+            "$temp_root/etc" \
+            "$temp_root/lib/x86_64-linux-gnu" \
+            "$temp_root/usr/lib/x86_64-linux-gnu" \
+            "$temp_root/var/lib/gpkg/info"
+        cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1"
+        cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.2"
+        ln -s libgpkgshadow.so.1.2 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1"
+
+        expect_success "gpkg-worker-shadowed-runtime-prune" \
+            "$GPKG_WORKER_BIN" --jobs "$CPU_JOBS" --root "$temp_root" --refresh-runtime-linker-state --verbose || {
+                rm -rf "$temp_root"
+                return 1
+            }
+
+        if [[ -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1" ]]; then
+            fail "gpkg-worker left a shadowed stale runtime library behind in the fake upgrade root"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.2" ]]; then
+            fail "gpkg-worker removed the active runtime provider in the fake upgrade root"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        ok "gpkg-worker pruned a shadowed stale runtime library in an isolated fake upgrade root"
+        rm -rf "$temp_root"
+    fi
 
     verify_package_set "touched-packages" "${TOUCHED_PACKAGES[@]}" || return 1
     if [[ "$VERIFY_ALL" == "1" ]]; then

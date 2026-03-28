@@ -62,6 +62,10 @@ canon() {
     readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
 }
 
+shell_quote() {
+    printf '%q' "$1"
+}
+
 display_path() {
     local p="${1:-}"
     if [[ "$ROOT" == "/" ]]; then
@@ -389,6 +393,148 @@ runtime_alias_candidate_dirs_for_file() {
     esac | awk '!seen[$0]++'
 }
 
+find_gpkg_owner_for_path() {
+    local path="${1-}"
+    [[ -n "$path" ]] || return 1
+
+    local info_dir rel list pkg
+    info_dir="$(root_path /var/lib/gpkg/info)"
+    [[ -d "$info_dir" ]] || return 1
+
+    rel="$(display_path "$path")"
+    while IFS= read -r -d '' list; do
+        if grep -Fqx -- "$rel" "$list" 2>/dev/null; then
+            pkg="$(basename "$list" .list)"
+            printf '%s\n' "$pkg"
+            return 0
+        fi
+    done < <(find "$info_dir" -maxdepth 1 -name '*.list' -print0 2>/dev/null | sort -z)
+
+    return 1
+}
+
+write_shadowed_soname_cleanup_artifacts() {
+    local candidates_tsv="${1-}"
+    local report_out="${2-}"
+    local script_out="${3-}"
+
+    [[ -s "$candidates_tsv" ]] || return 1
+
+    local count=0
+    : > "$report_out"
+
+    {
+        printf 'GeminiOS Shadowed SONAME Providers\n'
+        printf 'Root: %s\n' "$ROOT"
+        printf '\n'
+        printf 'These files are older versioned shared libraries that are no longer the active SONAME target.\n'
+        printf 'The runtime loader currently resolves the SONAME to the newer provider listed as alias-real.\n'
+        printf 'When gpkg verification, ELF closure, ldconfig, and live loader checks are clean, these are usually stale leftovers after upgrades.\n'
+        printf '\n'
+        printf 'Cleanup helper: %s --dry-run | --apply\n' "$(display_path "$script_out")"
+        printf '\n'
+    } >> "$report_out"
+
+    while IFS=$'\t' read -r stale soname alias alias_real owner; do
+        [[ -n "$stale" ]] || continue
+        count=$((count + 1))
+        {
+            printf '%s\n' "$stale"
+            printf '  soname: %s\n' "$soname"
+            printf '  active alias: %s\n' "$alias"
+            printf '  active provider: %s\n' "$alias_real"
+            if [[ -n "$owner" ]]; then
+                printf '  gpkg owner: %s\n' "$owner"
+                printf '  recommended action: inspect manually before removal; the file is still recorded in gpkg metadata.\n'
+            else
+                printf '  gpkg owner: none detected\n'
+                printf '  recommended action: safe cleanup candidate if the helper still confirms it is shadowed.\n'
+            fi
+            printf '\n'
+        } >> "$report_out"
+    done < "$candidates_tsv"
+
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'set -Eeuo pipefail\n\n'
+        printf 'MODE="${1:---dry-run}"\n'
+        printf 'if [[ "$MODE" != "--dry-run" && "$MODE" != "--apply" ]]; then\n'
+        printf '    echo "Usage: $0 [--dry-run|--apply]" >&2\n'
+        printf '    exit 2\n'
+        printf 'fi\n\n'
+        printf 'need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }; }\n'
+        printf 'need_cmd readelf\n'
+        printf 'need_cmd readlink\n'
+        printf 'canon() { readlink -f "$1" 2>/dev/null || printf '\''%%s\\n'\'' "$1"; }\n'
+        printf 'elf_soname() { readelf -d "$1" 2>/dev/null | sed -n '\''s/.*Library soname: \\[\\(.*\\)\\].*/\\1/p'\''; }\n'
+        printf 'is_elf() { readelf -h "$1" >/dev/null 2>&1; }\n'
+        printf 'removed=0\n'
+        printf 'skipped=0\n'
+        printf 'planned=0\n\n'
+        while IFS=$'\t' read -r stale soname alias alias_real owner; do
+            [[ -n "$stale" ]] || continue
+            printf 'stale=%s\n' "$(shell_quote "$stale")"
+            printf 'soname=%s\n' "$(shell_quote "$soname")"
+            printf 'alias=%s\n' "$(shell_quote "$alias")"
+            printf 'alias_real_expected=%s\n' "$(shell_quote "$alias_real")"
+            printf 'owner=%s\n' "$(shell_quote "$owner")"
+            printf 'if [[ ! -e "$stale" && ! -L "$stale" ]]; then\n'
+            printf '    echo "skip missing: $stale"\n'
+            printf '    skipped=$((skipped + 1))\n'
+            printf '    continue\n'
+            printf 'fi\n'
+            printf 'if [[ ! -e "$alias" && ! -L "$alias" ]]; then\n'
+            printf '    echo "skip alias missing: $stale (alias $alias)"\n'
+            printf '    skipped=$((skipped + 1))\n'
+            printf '    continue\n'
+            printf 'fi\n'
+            printf 'if [[ -n "$owner" ]]; then\n'
+            printf '    echo "skip owned-by-gpkg $owner: $stale"\n'
+            printf '    skipped=$((skipped + 1))\n'
+            printf '    continue\n'
+            printf 'fi\n'
+            printf 'if ! is_elf "$stale"; then\n'
+            printf '    echo "skip non-ELF: $stale"\n'
+            printf '    skipped=$((skipped + 1))\n'
+            printf '    continue\n'
+            printf 'fi\n'
+            printf 'current_real="$(canon "$stale")"\n'
+            printf 'current_alias_real="$(canon "$alias")"\n'
+            printf 'current_soname="$(elf_soname "$stale")"\n'
+            printf 'current_alias_soname=""\n'
+            printf 'if [[ -e "$current_alias_real" || -L "$current_alias_real" ]] && is_elf "$current_alias_real"; then\n'
+            printf '    current_alias_soname="$(elf_soname "$current_alias_real")"\n'
+            printf 'fi\n'
+            printf 'if [[ "$current_real" == "$current_alias_real" ]]; then\n'
+            printf '    echo "skip no-longer-shadowed: $stale"\n'
+            printf '    skipped=$((skipped + 1))\n'
+            printf '    continue\n'
+            printf 'fi\n'
+            printf 'if [[ "$current_soname" != "$soname" || "$current_alias_soname" != "$soname" ]]; then\n'
+            printf '    echo "skip SONAME changed: $stale"\n'
+            printf '    skipped=$((skipped + 1))\n'
+            printf '    continue\n'
+            printf 'fi\n'
+            printf 'echo "candidate shadowed stale library: $stale -> $current_alias_real"\n'
+            printf 'planned=$((planned + 1))\n'
+            printf 'if [[ "$MODE" == "--apply" ]]; then\n'
+            printf '    rm -f -- "$stale"\n'
+            printf '    removed=$((removed + 1))\n'
+            printf 'fi\n\n'
+        done < "$candidates_tsv"
+        printf 'done < %s\n' "$(shell_quote "$candidates_tsv")"
+        printf 'if [[ "$MODE" == "--apply" && "$removed" -gt 0 ]]; then\n'
+        printf '    if command -v ldconfig >/dev/null 2>&1; then\n'
+        printf '        ldconfig || true\n'
+        printf '    fi\n'
+        printf 'fi\n'
+        printf 'echo "planned: $planned, removed: $removed, skipped: $skipped"\n'
+    } > "$script_out"
+
+    chmod +x "$script_out"
+    printf '%s\n' "$count"
+}
+
 check_soname_links() {
     say "== SONAME/linker alias audit =="
 
@@ -422,8 +568,12 @@ check_soname_links() {
 
     local out="$REPORT_DIR/soname-link-issues.txt"
     local shadowed_out="$REPORT_DIR/shadowed-soname-providers.txt"
+    local shadowed_candidates="$REPORT_DIR/shadowed-soname-candidates.tsv"
+    local shadowed_cleanup_report="$REPORT_DIR/shadowed-soname-cleanup.txt"
+    local shadowed_cleanup_script="$REPORT_DIR/shadowed-soname-cleanup.sh"
     : > "$out"
     : > "$shadowed_out"
+    : > "$shadowed_candidates"
     local count=0
     declare -A seen=()
 
@@ -483,15 +633,28 @@ check_soname_links() {
                 fi
 
                 if [[ -n "$alias_target_soname" && "$alias_target_soname" == "$soname" ]]; then
+                    local owner=""
+                    owner="$(find_gpkg_owner_for_path "$f" || true)"
                     {
                         printf '%s\n' "$(display_path "$f")"
                         printf '  soname: %s\n' "$soname"
                         printf '  real: %s\n' "$(display_path "$real")"
                         printf '  alias: %s\n' "$(display_path "$first_existing_alias")"
                         printf '  alias-real: %s\n' "$(display_path "$first_existing_alias_real")"
+                        if [[ -n "$owner" ]]; then
+                            printf '  gpkg-owner: %s\n' "$owner"
+                        else
+                            printf '  gpkg-owner: none detected\n'
+                        fi
                         printf '  issue: shadowed stale versioned library file (SONAME currently resolves to a different valid provider)\n'
                         printf '\n'
                     } >> "$shadowed_out"
+                    printf '%s\t%s\t%s\t%s\t%s\n' \
+                        "$(display_path "$f")" \
+                        "$soname" \
+                        "$(display_path "$first_existing_alias")" \
+                        "$(display_path "$first_existing_alias_real")" \
+                        "$owner" >> "$shadowed_candidates"
                     continue
                 fi
 
@@ -525,7 +688,12 @@ check_soname_links() {
     if [[ -s "$out" ]]; then
         fail "SONAME/linker alias audit found broken library aliasing. See $out"
     elif [[ -s "$shadowed_out" ]]; then
-        warn "SONAME/linker alias audit found shadowed stale versioned libraries. See $shadowed_out"
+        local shadowed_count
+        shadowed_count="$(write_shadowed_soname_cleanup_artifacts \
+            "$shadowed_candidates" \
+            "$shadowed_cleanup_report" \
+            "$shadowed_cleanup_script")"
+        warn "SONAME/linker alias audit found $shadowed_count shadowed stale versioned librar$( [[ "$shadowed_count" == "1" ]] && printf 'y' || printf 'ies' ). See $shadowed_out, $shadowed_cleanup_report, and $shadowed_cleanup_script"
     else
         ok "SONAME/linker alias audit passed for $count versioned shared object(s)"
     fi
