@@ -14,7 +14,7 @@ cd -
 # Keep a boot-compatible /sbin/init entrypoint, but do not ship /bin/init
 # as a general user-facing command alias.
 rm -f "$ROOTFS/init" "$ROOTFS/bin/init"
-ln -sf /bin/ginit "$ROOTFS/sbin/init"
+ln -sfn ../bin/ginit "$ROOTFS/sbin/init"
 
 ln -sf bash "$ROOTFS/bin/sh"
 ln -sf /bin/apps/system/gpkg "$ROOTFS/bin/gpkg"

@@ -1681,7 +1681,7 @@ def get_util_linux_runtime_issues(root_dir=None):
 def find_existing_rootfs_relpath(root_dir, relpaths):
     """Return the first existing rootfs-relative path from the given candidates."""
     for relpath in relpaths:
-        if os.path.exists(os.path.join(root_dir, relpath)):
+        if rootfs_entry_exists(root_dir, relpath):
             return relpath
     return None
 
@@ -3458,7 +3458,7 @@ def verify_rootfs_integrity():
     missing = False
     for f in critical_files:
         path = os.path.join(FINAL_ROOTFS_DIR, f)
-        if not os.path.exists(path):
+        if not rootfs_entry_exists(FINAL_ROOTFS_DIR, f):
             print_error(f"  [MISSING] {f}")
             missing = True
             
@@ -3479,8 +3479,7 @@ def verify_rootfs_integrity():
         "usr/share/glvnd/egl_vendor.d/50_mesa.json",
     ]
     for rel_path in required_runtime_libs:
-        path = os.path.join(FINAL_ROOTFS_DIR, rel_path)
-        if not os.path.exists(path):
+        if not rootfs_entry_exists(FINAL_ROOTFS_DIR, rel_path):
             print_error(f"  [MISSING] {rel_path}")
             return False
 
@@ -4044,6 +4043,11 @@ def resolve_rootfs_path(rootfs_dir, path, max_depth=40):
             current = os.path.normpath(os.path.join(os.path.dirname(current), target))
 
     return current
+
+def rootfs_entry_exists(rootfs_dir, rel_or_abs_path):
+    """Return True when a staged rootfs path exists after resolving in-root symlinks."""
+    candidate = resolve_rootfs_path(rootfs_dir, rel_or_abs_path)
+    return os.path.exists(candidate)
 
 def expand_rootfs_runtime_search_dirs(rootfs_dir, current_path=None, rpaths=None):
     """Map ELF RPATH/RUNPATH entries into concrete directories inside the staged rootfs."""
