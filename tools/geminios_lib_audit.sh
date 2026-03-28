@@ -30,6 +30,7 @@ need_cmd() {
 
 need_cmd bash
 need_cmd find
+need_cmd grep
 need_cmd readelf
 need_cmd sed
 need_cmd awk
@@ -54,6 +55,15 @@ canon() {
     readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
 }
 
+display_path() {
+    local p="${1:-}"
+    if [[ "$ROOT" == "/" ]]; then
+        printf '%s\n' "$p"
+    else
+        printf '%s\n' "${p#$ROOT}"
+    fi
+}
+
 is_elf() {
     readelf -h "$1" >/dev/null 2>&1
 }
@@ -64,6 +74,10 @@ elf_interp() {
 
 elf_needed() {
     readelf -d "$1" 2>/dev/null | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'
+}
+
+elf_soname() {
+    readelf -d "$1" 2>/dev/null | sed -n 's/.*Library soname: \[\(.*\)\].*/\1/p'
 }
 
 elf_runpath() {
@@ -101,6 +115,25 @@ STANDARD_DIRS=(
     "$(root_path /usr/local/lib64)"
 )
 
+RUNTIME_PATHS=(
+    "$(root_path /lib)"
+    "$(root_path /lib64)"
+    "$(root_path /lib/x86_64-linux-gnu)"
+    "$(root_path /lib64/x86_64-linux-gnu)"
+    "$(root_path /usr/lib)"
+    "$(root_path /usr/lib64)"
+    "$(root_path /usr/lib/x86_64-linux-gnu)"
+    "$(root_path /usr/lib64/x86_64-linux-gnu)"
+    "$(root_path /usr/local/lib)"
+    "$(root_path /usr/local/lib64)"
+    "$(root_path /bin)"
+    "$(root_path /sbin)"
+    "$(root_path /usr/bin)"
+    "$(root_path /usr/sbin)"
+    "$(root_path /usr/libexec)"
+    "$(root_path /bin/apps/system)"
+)
+
 check_broken_symlinks() {
     say "== Broken symlink scan =="
     local roots=()
@@ -132,6 +165,57 @@ check_broken_symlinks() {
         fail "Found broken symlinks. See $out"
     else
         ok "No broken symlinks found in core runtime paths"
+    fi
+    say
+}
+
+check_pending_runtime_fixups() {
+    say "== Pending runtime fixup audit =="
+
+    local trigger_dir
+    trigger_dir="$(root_path /var/lib/gpkg/triggers)"
+    local pending="$REPORT_DIR/pending-runtime-fixups.txt"
+    : > "$pending"
+
+    if [[ -s "$trigger_dir/selinux-relabel.list" ]]; then
+        printf '%s\n' "$(display_path "$trigger_dir/selinux-relabel.list")" >> "$pending"
+    fi
+
+    if [[ -e "$(root_path /.autorelabel)" ]]; then
+        warn "SELinux autorelabel is pending ($(display_path "$(root_path /.autorelabel)"))"
+    fi
+
+    if [[ -s "$pending" ]]; then
+        fail "Pending gpkg runtime fixups detected. See $pending"
+    else
+        ok "No pending gpkg runtime fixup queues detected"
+    fi
+    say
+}
+
+check_leftover_runtime_package_artifacts() {
+    say "== Leftover runtime package artifact scan =="
+
+    local out="$REPORT_DIR/runtime-package-artifacts.txt"
+    : > "$out"
+    local roots=()
+    local d
+    for d in "${RUNTIME_PATHS[@]}"; do
+        [[ -e "$d" || -L "$d" ]] && roots+=("$d")
+    done
+
+    if ((${#roots[@]})); then
+        while IFS= read -r -d '' p; do
+            printf '%s\n' "$(display_path "$p")" >> "$out"
+        done < <(find "${roots[@]}" \
+            \( -name '*.gpkg-new' -o -name '*.gpkg-tmp' -o -name '*.dpkg-new' -o -name '*.dpkg-tmp' \) \
+            -print0 2>/dev/null || true)
+    fi
+
+    if [[ -s "$out" ]]; then
+        fail "Found leftover package-manager runtime artifacts. See $out"
+    else
+        ok "No leftover package-manager runtime artifacts found in runtime paths"
     fi
     say
 }
@@ -189,6 +273,105 @@ check_multiarch_alias_family() {
         fail "Multiarch aliases diverge in $label. See $REPORT_DIR/multiarch-alias-mismatches.txt"
     else
         ok "Multiarch aliases look consistent for $label"
+    fi
+    say
+}
+
+runtime_alias_candidate_dirs_for_file() {
+    local path="$1"
+    case "$path" in
+        "$(root_path /lib/x86_64-linux-gnu)"/*|"$(root_path /lib64)"/*|"$(root_path /lib64/x86_64-linux-gnu)"/*)
+            printf '%s\n' \
+                "$(root_path /lib/x86_64-linux-gnu)" \
+                "$(root_path /lib64)" \
+                "$(root_path /lib64/x86_64-linux-gnu)"
+            ;;
+        "$(root_path /usr/lib/x86_64-linux-gnu)"/*|"$(root_path /usr/lib64)"/*|"$(root_path /usr/lib64/x86_64-linux-gnu)"/*)
+            printf '%s\n' \
+                "$(root_path /usr/lib/x86_64-linux-gnu)" \
+                "$(root_path /usr/lib64)" \
+                "$(root_path /usr/lib64/x86_64-linux-gnu)"
+            ;;
+        *)
+            dirname "$path"
+            ;;
+    esac | awk '!seen[$0]++'
+}
+
+check_soname_links() {
+    say "== SONAME/linker alias audit =="
+
+    local roots=()
+    local d
+    for d in \
+        "$(root_path /lib)" \
+        "$(root_path /lib64)" \
+        "$(root_path /lib/x86_64-linux-gnu)" \
+        "$(root_path /lib64/x86_64-linux-gnu)" \
+        "$(root_path /usr/lib)" \
+        "$(root_path /usr/lib64)" \
+        "$(root_path /usr/lib/x86_64-linux-gnu)" \
+        "$(root_path /usr/lib64/x86_64-linux-gnu)" \
+        "$(root_path /usr/local/lib)" \
+        "$(root_path /usr/local/lib64)"; do
+        [[ -e "$d" || -L "$d" ]] && roots+=("$d")
+    done
+
+    local out="$REPORT_DIR/soname-link-issues.txt"
+    : > "$out"
+    local count=0
+
+    if ((${#roots[@]})); then
+        while IFS= read -r -d '' f; do
+            is_elf "$f" || continue
+            local soname base real found_same found_any non_symlink
+            soname="$(elf_soname "$f")"
+            [[ -n "$soname" ]] || continue
+            base="$(basename "$f")"
+            [[ "$base" == "$soname" ]] && continue
+
+            count=$((count + 1))
+            real="$(canon "$f")"
+            found_same=0
+            found_any=0
+            non_symlink=0
+
+            while IFS= read -r dir; do
+                [[ -n "$dir" ]] || continue
+                local cand="$dir/$soname"
+                if [[ -e "$cand" || -L "$cand" ]]; then
+                    found_any=1
+                    [[ "$(canon "$cand")" == "$real" ]] && found_same=1
+                    [[ -L "$cand" ]] || non_symlink=1
+                fi
+            done < <(runtime_alias_candidate_dirs_for_file "$f")
+
+            if [[ "$found_any" -eq 0 || "$found_same" -eq 0 || "$non_symlink" -eq 1 ]]; then
+                {
+                    printf '%s\n' "$(display_path "$f")"
+                    printf '  soname: %s\n' "$soname"
+                    printf '  real: %s\n' "$(display_path "$real")"
+                    if [[ "$found_any" -eq 0 ]]; then
+                        printf '  issue: missing SONAME entry\n'
+                    elif [[ "$found_same" -eq 0 ]]; then
+                        printf '  issue: SONAME entry does not resolve to the same file\n'
+                    fi
+                    if [[ "$non_symlink" -eq 1 ]]; then
+                        printf '  issue: SONAME entry exists but is not a symlink\n'
+                    fi
+                    printf '\n'
+                } >> "$out"
+            fi
+        done < <(find "${roots[@]}" -maxdepth 1 \
+            \( -type f -o -type l \) \
+            \( -name '*.so' -o -name '*.so.*' -o -name 'ld-linux*.so*' \) \
+            -print0 2>/dev/null || true)
+    fi
+
+    if [[ -s "$out" ]]; then
+        fail "SONAME/linker alias audit found broken library aliasing. See $out"
+    else
+        ok "SONAME/linker alias audit passed for $count versioned shared object(s)"
     fi
     say
 }
@@ -323,6 +506,68 @@ check_ldconfig() {
         fi
     else
         warn "ldconfig not available; skipped"
+    fi
+    say
+}
+
+check_live_ldd_bindings() {
+    say "== Live loader/binding audit =="
+
+    if [[ "$ROOT" != "/" ]]; then
+        warn "Skipping live ldd binding audit for non-live root $ROOT"
+        say
+        return
+    fi
+
+    have ldd || {
+        warn "ldd not available; skipped"
+        say
+        return
+    }
+
+    local targets=(
+        "/bin/bash"
+        "/usr/bin/gpkg"
+        "/bin/apps/system/gpkg-worker"
+        "/usr/bin/python3"
+        "/usr/bin/perl"
+        "/usr/bin/nano"
+        "/usr/sbin/ldconfig"
+        "/usr/lib/x86_64-linux-gnu/libc.so.6"
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
+        "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0"
+    )
+
+    local out="$REPORT_DIR/live-ldd-bindings.txt"
+    local failures="$REPORT_DIR/live-ldd-bindings-failures.txt"
+    : > "$out"
+    : > "$failures"
+
+    local target full rc checked=0
+    for target in "${targets[@]}"; do
+        full="$(root_path "$target")"
+        [[ -e "$full" || -L "$full" ]] || continue
+        is_elf "$full" || continue
+        checked=$((checked + 1))
+
+        local target_out="$REPORT_DIR/ldd-$(sed 's#[^A-Za-z0-9._-]#_#g' <<<"$target").txt"
+        printf '### %s\n' "$target" >> "$out"
+        set +e
+        ldd -r "$full" > "$target_out" 2>&1
+        rc=$?
+        set -e
+        cat "$target_out" >> "$out"
+        printf '\n' >> "$out"
+
+        if [[ "$rc" -ne 0 ]] || grep -Eq 'not found|undefined symbol' "$target_out"; then
+            printf '%s\n' "$target" >> "$failures"
+        fi
+    done
+
+    if [[ -s "$failures" ]]; then
+        fail "Live loader/binding audit found unresolved runtime issues. See $out and $failures"
+    else
+        ok "Live loader/binding audit passed for $checked critical object(s)"
     fi
     say
 }
@@ -464,11 +709,15 @@ dump_versions() {
     say
 }
 
+check_pending_runtime_fixups
 check_broken_symlinks
+check_leftover_runtime_package_artifacts
 check_multiarch_alias_family "/lib/x86_64-linux-gnu" "/lib64" "/lib64/x86_64-linux-gnu" "system runtime"
 check_multiarch_alias_family "/usr/lib/x86_64-linux-gnu" "/usr/lib64" "/usr/lib64/x86_64-linux-gnu" "user runtime"
+check_soname_links
 check_elf_closure
 check_ldconfig
+check_live_ldd_bindings
 run_smoke_tests
 run_gpkg_verify
 dump_versions
