@@ -102,28 +102,17 @@ This ensures that every package build automagically targets GeminiOS without req
     python3 builder.py --clean
     ```
 
-### VM SSH Debugging
-
-The live image ships `sshd`, but it is off by default. Enable it when needed for VM debugging instead of exposing SSH on every boot.
+### VM Console Debugging
 
 Recommended QEMU launch:
 
 ```bash
 qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm \
-  -nic user,model=e1000,hostfwd=tcp::2222-:22
-```
-
-Then connect from the host with:
-
-```bash
-ssh -o StrictHostKeyChecking=no -p 2222 root@127.0.0.1
+  -nic user,model=e1000
 ```
 
 - Live/default root password: `geminios`
-- Enable the service when you want remote access: `ginit start sshd`
-- To enable it persistently at boot, run `ginit enable sshd`
-- The live image permits root SSH login for debugging once `sshd` is started.
-- Installed systems do not start `sshd` by default; the GeminiOS SSH launcher only forces root SSH login on the live image. Add a normal user or change `/etc/ssh` policy if you want a different installed-system setup.
+- Use the serial console for early boot and login debugging; no SSH service is included in the base image.
 
 ## Development Workflow
 

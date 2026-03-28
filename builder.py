@@ -150,6 +150,53 @@ SYSTEMD_PAYLOAD_KEEP_PATHS = {
     os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_systemd.so"),
     os.path.join("usr", "share", "mime", "text", "x-systemd-unit.xml"),
 }
+SSH_PAYLOAD_EXACT_PATHS = (
+    os.path.join("etc", "default", "ssh"),
+    os.path.join("etc", "init.d", "ssh"),
+    os.path.join("etc", "pam.d", "sshd"),
+    os.path.join("etc", "ssh"),
+    os.path.join("etc", "sv", "ssh"),
+    os.path.join("etc", "ufw", "applications.d", "openssh-server"),
+    os.path.join("run", "sshd"),
+    os.path.join("usr", "lib", "ginit", "services", "sshd.gservice"),
+    os.path.join("usr", "lib", "openssh"),
+    os.path.join("usr", "lib", "sftp-server"),
+    os.path.join("usr", "lib", "sysusers.d", "openssh-client.conf"),
+    os.path.join("usr", "lib", "sysusers.d", "openssh-server.conf"),
+    os.path.join("usr", "lib", "tmpfiles.d", "openssh-client.conf"),
+    os.path.join("usr", "lib", "tmpfiles.d", "openssh-server.conf"),
+    os.path.join("usr", "libexec", "geminios", "sshd-launch"),
+    os.path.join("usr", "sbin", "sshd"),
+    os.path.join("usr", "share", "doc", "openssh-client"),
+    os.path.join("usr", "share", "doc", "openssh-server"),
+    os.path.join("usr", "share", "doc", "openssh-sftp-server"),
+    os.path.join("usr", "share", "openssh"),
+    os.path.join("usr", "share", "runit", "meta", "ssh"),
+    os.path.join("usr", "share", "selinux", "default", "ssh.pp.bz2"),
+    os.path.join("var", "log", "runit", "ssh"),
+)
+SSH_PAYLOAD_GLOB_PATHS = (
+    os.path.join("usr", "bin", "ssh*"),
+    os.path.join("usr", "bin", "scp*"),
+    os.path.join("usr", "bin", "sftp*"),
+    os.path.join("usr", "bin", "slogin*"),
+    os.path.join("usr", "share", "apport", "package-hooks", "openssh-*.py"),
+    os.path.join("usr", "share", "doc", "openssh-*"),
+    os.path.join("usr", "share", "lintian", "overrides", "openssh-*"),
+    os.path.join("usr", "share", "man", "man1", "ssh*.1*"),
+    os.path.join("usr", "share", "man", "man1", "scp*.1*"),
+    os.path.join("usr", "share", "man", "man1", "sftp*.1*"),
+    os.path.join("usr", "share", "man", "man1", "slogin*.1*"),
+    os.path.join("usr", "share", "man", "man5", "ssh*.5*"),
+    os.path.join("usr", "share", "man", "man8", "ssh*.8*"),
+    os.path.join("usr", "share", "man", "man8", "sftp*.8*"),
+)
+SSH_ACCOUNT_FILES = (
+    os.path.join("etc", "passwd"),
+    os.path.join("etc", "group"),
+    os.path.join("etc", "shadow"),
+)
+SSH_ACCOUNT_PREFIXES = ("sshd:",)
 
 
 def read_env_config_export(var_name, default_value):
@@ -1025,7 +1072,9 @@ def ensure_debian_bootstrap():
     )
     if runtime_stage_ready and sysroot_stage_ready:
         prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
         prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
         restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
         return
 
@@ -1034,12 +1083,14 @@ def ensure_debian_bootstrap():
     print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
     bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
     prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+    prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
     with open(runtime_stamp, "w") as f:
         f.write(desired_runtime_stamp)
 
     print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
     bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
     prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+    prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
     restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
     with open(sysroot_stamp, "w") as f:
         f.write(desired_sysroot_stamp)
@@ -1091,6 +1142,7 @@ def assemble_final_rootfs():
         if os.path.lexists(leaked_abs_path):
             remove_path(leaked_abs_path)
     prune_systemd_payload(FINAL_ROOTFS_DIR, report=True)
+    prune_ssh_payload(FINAL_ROOTFS_DIR, report=True)
     restore_elogind_systemd_compat(FINAL_ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
@@ -2529,6 +2581,30 @@ def remove_path(path):
     elif os.path.lexists(path):
         os.unlink(path)
 
+def prune_text_file_entries(path, prefixes):
+    """Remove text-file lines that start with any of the provided prefixes."""
+    if not os.path.isfile(path):
+        return []
+
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    kept_lines = []
+    removed_entries = []
+    for line in lines:
+        if any(line.startswith(prefix) for prefix in prefixes):
+            removed_entries.append(line.rstrip("\n"))
+            continue
+        kept_lines.append(line)
+
+    if not removed_entries:
+        return []
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(kept_lines)
+
+    return removed_entries
+
 def get_systemd_payload_paths(root_dir):
     """Return staged paths that belong to the imported systemd userspace payload."""
     root_dir = root_dir or ROOTFS_DIR
@@ -2576,6 +2652,37 @@ def get_systemd_payload_paths(root_dir):
 
     return sorted(rel_paths)
 
+def get_ssh_payload_paths(root_dir):
+    """Return staged paths that belong to OpenSSH or GeminiOS sshd integration."""
+    root_dir = root_dir or ROOTFS_DIR
+    rel_paths = set()
+
+    for rel_path in SSH_PAYLOAD_EXACT_PATHS:
+        abs_path = os.path.join(root_dir, rel_path)
+        if os.path.lexists(abs_path):
+            rel_paths.add(rel_path)
+
+    for pattern in SSH_PAYLOAD_GLOB_PATHS:
+        for abs_path in glob.glob(os.path.join(root_dir, pattern)):
+            if os.path.lexists(abs_path):
+                rel_paths.add(os.path.relpath(abs_path, root_dir))
+
+    return sorted(rel_paths)
+
+def get_ssh_account_entries(root_dir):
+    """Return passwd/group/shadow entries that still reference the removed sshd user."""
+    root_dir = root_dir or ROOTFS_DIR
+    entries = []
+    for rel_path in SSH_ACCOUNT_FILES:
+        abs_path = os.path.join(root_dir, rel_path)
+        if not os.path.isfile(abs_path):
+            continue
+        with open(abs_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if any(line.startswith(prefix) for prefix in SSH_ACCOUNT_PREFIXES):
+                    entries.append(f"{rel_path}: {line.rstrip()}")
+    return entries
+
 def prune_systemd_payload(root_dir, report=False):
     """Remove imported systemd payloads while preserving GeminiOS elogind compatibility shims."""
     removed_rel_paths = []
@@ -2592,6 +2699,36 @@ def prune_systemd_payload(root_dir, report=False):
             print_info(f"  Removed /{rel_path}")
 
     return removed_rel_paths
+
+def prune_ssh_payload(root_dir, report=False):
+    """Remove OpenSSH payloads and stale sshd account records from a staged rootfs."""
+    removed_rel_paths = []
+    for rel_path in get_ssh_payload_paths(root_dir):
+        abs_path = os.path.join(root_dir, rel_path)
+        if not os.path.lexists(abs_path):
+            continue
+        remove_path(abs_path)
+        removed_rel_paths.append(rel_path)
+
+    removed_account_entries = []
+    for rel_path in SSH_ACCOUNT_FILES:
+        abs_path = os.path.join(root_dir, rel_path)
+        removed_entries = prune_text_file_entries(abs_path, SSH_ACCOUNT_PREFIXES)
+        if removed_entries:
+            removed_account_entries.append((rel_path, removed_entries))
+
+    if report and removed_rel_paths:
+        print_info(f"[*] Pruning OpenSSH payloads from {root_dir}...")
+        for rel_path in removed_rel_paths:
+            print_info(f"  Removed /{rel_path}")
+    if report and removed_account_entries:
+        if not removed_rel_paths:
+            print_info(f"[*] Pruning OpenSSH payloads from {root_dir}...")
+        for rel_path, entries in removed_account_entries:
+            for entry in entries:
+                print_info(f"  Removed {entry} from /{rel_path}")
+
+    return removed_rel_paths, removed_account_entries
 
 def restore_elogind_systemd_compat(root_dir, report=False):
     """Restore the elogind-provided libsystemd/pam_systemd compatibility links."""
@@ -3417,6 +3554,7 @@ def prepare_rootfs():
     prepare_stage_dirs()
     if not prepare_build_system_helpers():
         sys.exit(1)
+    prune_ssh_payload(ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=True)
     subprocess.run(f"find {ROOTFS_DIR} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
 
@@ -3487,6 +3625,18 @@ def verify_rootfs_integrity():
     if systemd_payload_issues:
         print_error(f"  [FAILED] unexpected systemd payload in final rootfs: /{systemd_payload_issues[0]}")
         print_error("           GeminiOS keeps elogind compatibility shims, but full systemd userspace must not ship.")
+        return False
+
+    ssh_payload_issues = get_ssh_payload_paths(FINAL_ROOTFS_DIR)
+    if ssh_payload_issues:
+        print_error(f"  [FAILED] unexpected OpenSSH payload in final rootfs: /{ssh_payload_issues[0]}")
+        print_error("           GeminiOS base images must not ship SSH binaries, services, configuration, or docs.")
+        return False
+
+    ssh_account_issues = get_ssh_account_entries(FINAL_ROOTFS_DIR)
+    if ssh_account_issues:
+        print_error(f"  [FAILED] stale sshd account entry remains in final rootfs: {ssh_account_issues[0]}")
+        print_error("           Remove bootstrap sshd passwd/group/shadow entries alongside the SSH payload.")
         return False
 
     shadowed_runtime_issues = get_shadowed_runtime_library_issues(root_dir=FINAL_ROOTFS_DIR)
@@ -5040,10 +5190,9 @@ def main():
             
     if create_iso():
         print_success("\n[!] Build completed successfully!")
-        print_info("\nRun: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm -nic user,model=e1000,hostfwd=tcp::2222-:22")
-        print_info("Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm -nic user,model=e1000,hostfwd=tcp::2222-:22")
-        print_info("Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm -nic user,model=e1000,hostfwd=tcp::2222-:22")
-        print_info("SSH debug login: ssh -o StrictHostKeyChecking=no -p 2222 root@127.0.0.1  (password: geminios)")
+        print_info("\nRun: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm -nic user,model=e1000")
+        print_info("Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm -nic user,model=e1000")
+        print_info("Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm -nic user,model=e1000")
         print(color("Remove the -enable-kvm flag if your host does not support it.", Colors.DIM))
     else:
         print_error("\nFATAL: ISO creation failed")

@@ -40,7 +40,6 @@ libuuid1
 libxml2-16
 libzstd1
 openssl
-openssh-server
 policycoreutils
 selinux-policy-default
 selinux-utils
