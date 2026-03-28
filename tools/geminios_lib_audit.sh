@@ -42,6 +42,13 @@ have() {
     command -v "$1" >/dev/null 2>&1
 }
 
+trim_whitespace() {
+    local s="${1-}"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s\n' "$s"
+}
+
 root_path() {
     local p="${1:-/}"
     if [[ "$ROOT" == "/" ]]; then
@@ -115,6 +122,11 @@ STANDARD_DIRS=(
     "$(root_path /usr/local/lib64)"
 )
 
+declare -A LOADER_CONF_SEEN=()
+declare -A LOADER_DIR_SEEN=()
+declare -A LIVE_LDD_CACHE=()
+LOADER_CONFIG_DIRS=()
+
 RUNTIME_PATHS=(
     "$(root_path /lib)"
     "$(root_path /lib64)"
@@ -133,6 +145,87 @@ RUNTIME_PATHS=(
     "$(root_path /usr/libexec)"
     "$(root_path /bin/apps/system)"
 )
+
+add_loader_config_dir() {
+    local dir="${1-}"
+    [[ -n "$dir" ]] || return 0
+    [[ -d "$dir" || -L "$dir" ]] || return 0
+    [[ -n "${LOADER_DIR_SEEN[$dir]:-}" ]] && return 0
+    LOADER_DIR_SEEN["$dir"]=1
+    LOADER_CONFIG_DIRS+=("$dir")
+    return 0
+}
+
+parse_ld_so_conf_file() {
+    local file="${1-}"
+    [[ -n "$file" ]] || return 0
+    [[ -e "$file" || -L "$file" ]] || return 0
+
+    local key
+    key="$(canon "$file")"
+    [[ -n "${LOADER_CONF_SEEN[$key]:-}" ]] && return 0
+    LOADER_CONF_SEEN["$key"]=1
+
+    local line pattern actual_pattern match dir
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        line="$(trim_whitespace "$line")"
+        [[ -n "$line" ]] || continue
+
+        if [[ "$line" =~ ^include[[:space:]]+(.+)$ ]]; then
+            pattern="$(trim_whitespace "${BASH_REMATCH[1]}")"
+            if [[ "$pattern" == /* ]]; then
+                actual_pattern="$(root_path "$pattern")"
+            else
+                actual_pattern="$(dirname "$file")/$pattern"
+            fi
+            for match in $actual_pattern; do
+                [[ -e "$match" || -L "$match" ]] || continue
+                parse_ld_so_conf_file "$match"
+            done
+            continue
+        fi
+
+        [[ "$line" =~ ^hwcap([[:space:]]|$) ]] && continue
+
+        if [[ "$line" == /* ]]; then
+            dir="$(root_path "$line")"
+        else
+            dir="$(dirname "$file")/$line"
+        fi
+        add_loader_config_dir "$dir"
+    done < "$file"
+}
+
+load_loader_config_dirs() {
+    parse_ld_so_conf_file "$(root_path /etc/ld.so.conf)"
+}
+
+live_ldd_output() {
+    local file="${1-}"
+    [[ "$ROOT" == "/" ]] || return 1
+    have ldd || return 1
+
+    if [[ -z "${LIVE_LDD_CACHE[$file]+x}" ]]; then
+        LIVE_LDD_CACHE["$file"]="$(ldd "$file" 2>&1 || true)"
+    fi
+    printf '%s\n' "${LIVE_LDD_CACHE[$file]}"
+}
+
+live_ldd_resolves_needed() {
+    local file="${1-}"
+    local needed="${2-}"
+    [[ -n "$file" && -n "$needed" ]] || return 1
+
+    local out line
+    out="$(live_ldd_output "$file")" || return 1
+    line="$(grep -F "$needed" <<<"$out" | head -n 1 || true)"
+    [[ -n "$line" ]] || return 1
+    grep -Eq '=>[[:space:]]*not found|not found' <<<"$line" && return 1
+    return 0
+}
+
+load_loader_config_dirs
 
 check_broken_symlinks() {
     say "== Broken symlink scan =="
@@ -320,51 +413,63 @@ check_soname_links() {
     local out="$REPORT_DIR/soname-link-issues.txt"
     : > "$out"
     local count=0
+    declare -A seen=()
 
     if ((${#roots[@]})); then
         while IFS= read -r -d '' f; do
             is_elf "$f" || continue
-            local soname base real found_same found_any non_symlink
+            local soname base real alias_path key
             soname="$(elf_soname "$f")"
             [[ -n "$soname" ]] || continue
             base="$(basename "$f")"
             [[ "$base" == "$soname" ]] && continue
 
-            count=$((count + 1))
             real="$(canon "$f")"
-            found_same=0
-            found_any=0
-            non_symlink=0
+            key="$real|$soname"
+            [[ -n "${seen[$key]:-}" ]] && continue
+            seen["$key"]=1
+            count=$((count + 1))
 
-            while IFS= read -r dir; do
-                [[ -n "$dir" ]] || continue
-                local cand="$dir/$soname"
-                if [[ -e "$cand" || -L "$cand" ]]; then
-                    found_any=1
-                    [[ "$(canon "$cand")" == "$real" ]] && found_same=1
-                    [[ -L "$cand" ]] || non_symlink=1
-                fi
-            done < <(runtime_alias_candidate_dirs_for_file "$f")
-
-            if [[ "$found_any" -eq 0 || "$found_same" -eq 0 || "$non_symlink" -eq 1 ]]; then
+            alias_path="$(dirname "$f")/$soname"
+            if [[ ! -e "$alias_path" && ! -L "$alias_path" ]]; then
                 {
                     printf '%s\n' "$(display_path "$f")"
                     printf '  soname: %s\n' "$soname"
                     printf '  real: %s\n' "$(display_path "$real")"
-                    if [[ "$found_any" -eq 0 ]]; then
-                        printf '  issue: missing SONAME entry\n'
-                    elif [[ "$found_same" -eq 0 ]]; then
-                        printf '  issue: SONAME entry does not resolve to the same file\n'
-                    fi
-                    if [[ "$non_symlink" -eq 1 ]]; then
-                        printf '  issue: SONAME entry exists but is not a symlink\n'
-                    fi
+                    printf '  issue: missing SONAME entry in %s\n' "$(display_path "$(dirname "$f")")"
+                    printf '\n'
+                } >> "$out"
+                continue
+            fi
+
+            if [[ "$alias_path" -ef "$f" ]]; then
+                continue
+            fi
+
+            if [[ ! "$alias_path" -ef "$real" ]]; then
+                {
+                    printf '%s\n' "$(display_path "$f")"
+                    printf '  soname: %s\n' "$soname"
+                    printf '  real: %s\n' "$(display_path "$real")"
+                    printf '  alias: %s\n' "$(display_path "$alias_path")"
+                    printf '  issue: SONAME entry does not resolve to the same file\n'
+                    printf '\n'
+                } >> "$out"
+                continue
+            fi
+
+            if [[ ! -L "$alias_path" ]]; then
+                {
+                    printf '%s\n' "$(display_path "$f")"
+                    printf '  soname: %s\n' "$soname"
+                    printf '  real: %s\n' "$(display_path "$real")"
+                    printf '  alias: %s\n' "$(display_path "$alias_path")"
+                    printf '  issue: SONAME entry exists but is not a symlink\n'
                     printf '\n'
                 } >> "$out"
             fi
-        done < <(find "${roots[@]}" -maxdepth 1 \
-            \( -type f -o -type l \) \
-            \( -name '*.so' -o -name '*.so.*' -o -name 'ld-linux*.so*' \) \
+        done < <(find "${roots[@]}" -maxdepth 1 -type f \
+            \( -name '*.so.[0-9]*' -o -name 'ld-linux*.so*' \) \
             -print0 2>/dev/null || true)
     fi
 
@@ -425,6 +530,10 @@ audit_one_elf() {
     fi
 
     local p
+    for p in "${LOADER_CONFIG_DIRS[@]}"; do
+        search_dirs+=("$p")
+    done
+
     for p in "${STANDARD_DIRS[@]}"; do
         search_dirs+=("$p")
     done
@@ -434,6 +543,8 @@ audit_one_elf() {
         [[ -n "$needed" ]] || continue
         local resolved=""
         if resolved="$(resolve_needed "$needed" "${search_dirs[@]}")"; then
+            :
+        elif live_ldd_resolves_needed "$f" "$needed"; then
             :
         else
             missing=1
@@ -528,11 +639,16 @@ check_live_ldd_bindings() {
     local targets=(
         "/bin/bash"
         "/usr/bin/gpkg"
+        "/usr/bin/apt-sortpkgs"
+        "/usr/bin/apt-ftparchive"
         "/bin/apps/system/gpkg-worker"
         "/usr/bin/python3"
         "/usr/bin/perl"
         "/usr/bin/nano"
         "/usr/sbin/ldconfig"
+        "/usr/lib/apt/solvers/solver3"
+        "/usr/lib/apt/solvers/apt"
+        "/usr/lib/apt/planners/apt"
         "/usr/lib/x86_64-linux-gnu/libc.so.6"
         "/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
         "/usr/lib/x86_64-linux-gnu/libglib-2.0.so.0"
