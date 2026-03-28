@@ -373,14 +373,12 @@ check_multiarch_alias_family() {
 runtime_alias_candidate_dirs_for_file() {
     local path="$1"
     case "$path" in
-        "$(root_path /lib/x86_64-linux-gnu)"/*|"$(root_path /lib64)"/*|"$(root_path /lib64/x86_64-linux-gnu)"/*)
+        "$(root_path /lib/x86_64-linux-gnu)"/*|"$(root_path /lib64)"/*|"$(root_path /lib64/x86_64-linux-gnu)"/*|\
+        "$(root_path /usr/lib/x86_64-linux-gnu)"/*|"$(root_path /usr/lib64)"/*|"$(root_path /usr/lib64/x86_64-linux-gnu)"/*)
             printf '%s\n' \
                 "$(root_path /lib/x86_64-linux-gnu)" \
                 "$(root_path /lib64)" \
-                "$(root_path /lib64/x86_64-linux-gnu)"
-            ;;
-        "$(root_path /usr/lib/x86_64-linux-gnu)"/*|"$(root_path /usr/lib64)"/*|"$(root_path /usr/lib64/x86_64-linux-gnu)"/*)
-            printf '%s\n' \
+                "$(root_path /lib64/x86_64-linux-gnu)" \
                 "$(root_path /usr/lib/x86_64-linux-gnu)" \
                 "$(root_path /usr/lib64)" \
                 "$(root_path /usr/lib64/x86_64-linux-gnu)"
@@ -395,6 +393,8 @@ check_soname_links() {
     say "== SONAME/linker alias audit =="
 
     local roots=()
+    local canonical_roots=()
+    declare -A root_seen=()
     local d
     for d in \
         "$(root_path /lib)" \
@@ -410,15 +410,29 @@ check_soname_links() {
         [[ -e "$d" || -L "$d" ]] && roots+=("$d")
     done
 
+    for d in "${roots[@]}"; do
+        local canonical
+        canonical="$(canon "$d")"
+        [[ -n "$canonical" ]] || canonical="$d"
+        [[ -e "$canonical" || -L "$canonical" ]] || continue
+        [[ -n "${root_seen[$canonical]:-}" ]] && continue
+        root_seen["$canonical"]=1
+        canonical_roots+=("$canonical")
+    done
+
     local out="$REPORT_DIR/soname-link-issues.txt"
+    local shadowed_out="$REPORT_DIR/shadowed-soname-providers.txt"
     : > "$out"
+    : > "$shadowed_out"
     local count=0
     declare -A seen=()
 
-    if ((${#roots[@]})); then
+    if ((${#canonical_roots[@]})); then
         while IFS= read -r -d '' f; do
             is_elf "$f" || continue
-            local soname base real alias_path key
+            local soname base real alias_path alias_real alias_target_soname key
+            local matched_alias="" first_existing_alias="" first_existing_alias_real=""
+            local first_non_symlink_alias=""
             soname="$(elf_soname "$f")"
             [[ -n "$soname" ]] || continue
             base="$(basename "$f")"
@@ -430,51 +444,88 @@ check_soname_links() {
             seen["$key"]=1
             count=$((count + 1))
 
-            alias_path="$(dirname "$f")/$soname"
-            if [[ ! -e "$alias_path" && ! -L "$alias_path" ]]; then
+            while IFS= read -r alias_dir; do
+                [[ -n "$alias_dir" ]] || continue
+                alias_path="$alias_dir/$soname"
+                if [[ ! -e "$alias_path" && ! -L "$alias_path" ]]; then
+                    continue
+                fi
+
+                alias_real="$(canon "$alias_path")"
+                [[ -n "$first_existing_alias" ]] || first_existing_alias="$alias_path"
+                [[ -n "$first_existing_alias_real" ]] || first_existing_alias_real="$alias_real"
+
+                if [[ "$alias_path" -ef "$f" ]] || [[ "$alias_path" -ef "$real" ]] || [[ "$alias_real" == "$real" ]]; then
+                    matched_alias="$alias_path"
+                    if [[ ! -L "$alias_path" && -z "$first_non_symlink_alias" ]]; then
+                        first_non_symlink_alias="$alias_path"
+                    fi
+                    break
+                fi
+            done < <(runtime_alias_candidate_dirs_for_file "$f")
+
+            if [[ -z "$matched_alias" && -z "$first_existing_alias" ]]; then
                 {
                     printf '%s\n' "$(display_path "$f")"
                     printf '  soname: %s\n' "$soname"
                     printf '  real: %s\n' "$(display_path "$real")"
-                    printf '  issue: missing SONAME entry in %s\n' "$(display_path "$(dirname "$f")")"
+                    printf '  issue: missing SONAME entry in runtime alias dirs for %s\n' "$(display_path "$(dirname "$f")")"
                     printf '\n'
                 } >> "$out"
                 continue
             fi
 
-            if [[ "$alias_path" -ef "$f" ]]; then
-                continue
-            fi
+            if [[ -z "$matched_alias" ]]; then
+                alias_target_soname=""
+                if [[ -n "$first_existing_alias_real" && ( -e "$first_existing_alias_real" || -L "$first_existing_alias_real" ) ]] &&
+                   is_elf "$first_existing_alias_real"; then
+                    alias_target_soname="$(elf_soname "$first_existing_alias_real")"
+                fi
 
-            if [[ ! "$alias_path" -ef "$real" ]]; then
+                if [[ -n "$alias_target_soname" && "$alias_target_soname" == "$soname" ]]; then
+                    {
+                        printf '%s\n' "$(display_path "$f")"
+                        printf '  soname: %s\n' "$soname"
+                        printf '  real: %s\n' "$(display_path "$real")"
+                        printf '  alias: %s\n' "$(display_path "$first_existing_alias")"
+                        printf '  alias-real: %s\n' "$(display_path "$first_existing_alias_real")"
+                        printf '  issue: shadowed stale versioned library file (SONAME currently resolves to a different valid provider)\n'
+                        printf '\n'
+                    } >> "$shadowed_out"
+                    continue
+                fi
+
                 {
                     printf '%s\n' "$(display_path "$f")"
                     printf '  soname: %s\n' "$soname"
                     printf '  real: %s\n' "$(display_path "$real")"
-                    printf '  alias: %s\n' "$(display_path "$alias_path")"
+                    printf '  alias: %s\n' "$(display_path "$first_existing_alias")"
+                    printf '  alias-real: %s\n' "$(display_path "$first_existing_alias_real")"
                     printf '  issue: SONAME entry does not resolve to the same file\n'
                     printf '\n'
                 } >> "$out"
                 continue
             fi
 
-            if [[ ! -L "$alias_path" ]]; then
+            if [[ -n "$first_non_symlink_alias" ]]; then
                 {
                     printf '%s\n' "$(display_path "$f")"
                     printf '  soname: %s\n' "$soname"
                     printf '  real: %s\n' "$(display_path "$real")"
-                    printf '  alias: %s\n' "$(display_path "$alias_path")"
+                    printf '  alias: %s\n' "$(display_path "$first_non_symlink_alias")"
                     printf '  issue: SONAME entry exists but is not a symlink\n'
                     printf '\n'
                 } >> "$out"
             fi
-        done < <(find "${roots[@]}" -maxdepth 1 -type f \
+        done < <(find "${canonical_roots[@]}" -maxdepth 1 -type f \
             \( -name '*.so.[0-9]*' -o -name 'ld-linux*.so*' \) \
             -print0 2>/dev/null || true)
     fi
 
     if [[ -s "$out" ]]; then
         fail "SONAME/linker alias audit found broken library aliasing. See $out"
+    elif [[ -s "$shadowed_out" ]]; then
+        warn "SONAME/linker alias audit found shadowed stale versioned libraries. See $shadowed_out"
     else
         ok "SONAME/linker alias audit passed for $count versioned shared object(s)"
     fi
