@@ -25,6 +25,7 @@ mkdir -p "$ROOTFS/etc/selinux"
 # 1. /etc/passwd - Use /bin/bash as shell
 cat > "$ROOTFS/etc/passwd" <<EOF
 root:x:0:0:System Administrator:/root:/bin/bash
+sshd:x:74:74:Privilege-separated SSH:/run/sshd:/usr/sbin/nologin
 lightdm:x:620:620:Light Display Manager:/var/lib/lightdm:/bin/false
 messagebus:x:18:18:D-Bus Message Daemon User:/var/run/dbus:/bin/false
 EOF
@@ -50,6 +51,7 @@ input:x:101:
 render:x:102:
 sgx:x:103:
 tape:x:26:
+sshd:x:74:
 kvm:x:78:
 systemd-journal:x:190:
 adm:x:191:
@@ -60,6 +62,7 @@ EOF
 # 3. /etc/shadow
 cat > "$ROOTFS/etc/shadow" <<EOF
 root:\$5\$GEMINI_SALT\$eBv4S.VF3SzMsgDgFmF1JdfMnXTId9IOAZUzSXVN6P9:19000:0:99999:7:::
+sshd:!:19000:0:99999:7:::
 lightdm:!:19000:0:99999:7:::
 messagebus:!:19000:0:99999:7:::
 EOF
