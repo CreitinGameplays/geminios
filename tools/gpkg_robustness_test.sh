@@ -669,6 +669,21 @@ run_doctor_and_selinux_tests() {
     say
 }
 
+run_upgrade_planner_guardrail_tests() {
+    say "== Upgrade Planner Guardrails =="
+    expect_success "gpkg-doctor-verbose" "$GPKG_BIN" -v doctor || return 1
+    assert_last_log_not_contains 'Conflict detected in transaction!' \
+        "verbose gpkg doctor does not surface planner conflicts" || return 1
+
+    expect_success "gpkg-upgrade-planner-dry-run" \
+        bash -lc 'printf "n\n" | "$1" upgrade --recommended-no --suggested-no' _ "$GPKG_BIN" || return 1
+    assert_last_log_not_contains 'Conflict detected in transaction!' \
+        "gpkg upgrade reaches the confirmation prompt without planner conflicts" || return 1
+    assert_last_log_contains 'Do you want to continue\?|All packages are up to date\.' \
+        "gpkg upgrade builds a usable plan before confirmation" || return 1
+    say
+}
+
 run_protection_tests() {
     say "== Protection Tests =="
     pick_protected_package
@@ -835,6 +850,7 @@ preflight || main_rc=1
 if [[ "$main_rc" -eq 0 ]]; then run_cli_guardrail_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_repo_and_query_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_doctor_and_selinux_tests || main_rc=1; fi
+if [[ "$main_rc" -eq 0 ]]; then run_upgrade_planner_guardrail_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_protection_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_transaction_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_clean_and_index_tests || main_rc=1; fi
