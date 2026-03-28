@@ -3423,7 +3423,7 @@ def prepare_rootfs():
 def verify_rootfs_integrity():
     print_section("\n=== Verifying Rootfs Integrity ===")
     critical_files = [
-        "bin/init",
+        "sbin/init",
         "bin/bash",
         "bin/sh",
         "bin/login",
@@ -4827,7 +4827,7 @@ umount /mnt/cdrom
 
 # Switch root
 echo "Switching to real root..."
-exec switch_root /new_root /bin/init
+exec switch_root /new_root /sbin/init
 """
         with open(os.path.join(work_dir, "init"), "w") as f:
             f.write(init_script)

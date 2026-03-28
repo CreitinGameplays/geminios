@@ -586,7 +586,7 @@
         "usr/share/keymaps"
     ],
     "geminios_core": [
-        "bin/init",
+        "sbin/init",
         "bin/login",
         "sbin/getty",
         "etc/pam.d/common-session-noninteractive",

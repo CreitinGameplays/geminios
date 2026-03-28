@@ -104,7 +104,7 @@ This ensures that every package build automagically targets GeminiOS without req
 
 ### VM SSH Debugging
 
-The live image now starts `sshd` by default so the guest can be debugged from the host without relying only on the serial console.
+The live image ships `sshd`, but it is off by default. Enable it when needed for VM debugging instead of exposing SSH on every boot.
 
 Recommended QEMU launch:
 
@@ -120,9 +120,10 @@ ssh -o StrictHostKeyChecking=no -p 2222 root@127.0.0.1
 ```
 
 - Live/default root password: `geminios`
-- The live image permits root SSH login for debugging.
-- Installed systems still start `sshd` by default, but the GeminiOS SSH launcher only forces root SSH login on the live image. Add a normal user or change `/etc/ssh` policy if you want a different installed-system setup.
-- To disable the default boot-time SSH service, add `-sshd` to `/etc/ginit/boot-services.conf`.
+- Enable the service when you want remote access: `ginit start sshd`
+- To enable it persistently at boot, run `ginit enable sshd`
+- The live image permits root SSH login for debugging once `sshd` is started.
+- Installed systems do not start `sshd` by default; the GeminiOS SSH launcher only forces root SSH login on the live image. Add a normal user or change `/etc/ssh` policy if you want a different installed-system setup.
 
 ## Development Workflow
 
@@ -289,7 +290,7 @@ That policy file is shared with the Debian import/publisher tooling so the testi
 
 ## Ginit (Init System)
 
-Ginit is modularized for easier development. It provides `init`, `login`, and `getty`.
+Ginit is modularized for easier development. It provides `ginit`, `login`, and `getty`, while `/sbin/init` remains only as the boot entrypoint.
 To build it manually:
 ```bash
 cd ginit && make
