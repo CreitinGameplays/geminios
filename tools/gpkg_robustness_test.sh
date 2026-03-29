@@ -803,6 +803,8 @@ run_transaction_tests() {
 
     expect_success "gpkg-install-fixtures" \
         "$GPKG_BIN" -y install --recommended-no --suggested-no "${install_set[@]}" || return 1
+    assert_last_log_contains 'Processing triggers\.\.\.' \
+        "gpkg install processes post-transaction triggers for fixture installs" || return 1
 
     expect_success "gpkg-show-primary-installed" "$GPKG_BIN" show "$PRIMARY_PKG" || return 1
     assert_last_log_contains '^  Installed:[[:space:]]+yes|^  Installed:[[:space:]]+base system' \
