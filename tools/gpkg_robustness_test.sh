@@ -812,6 +812,10 @@ run_repair_and_worker_tests() {
         cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1"
         cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.2"
         ln -s libgpkgshadow.so.1.2 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1"
+        ln -s libgpkgshadow.so.9 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so"
+        ln -s libgpkgbroken.so.1 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgbroken.so"
+        printf '/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1\n' \
+            > "$temp_root/var/lib/gpkg/info/libgpkgshadowtest.list"
 
         expect_success "gpkg-worker-shadowed-runtime-prune" \
             "$GPKG_WORKER_BIN" --jobs "$CPU_JOBS" --root "$temp_root" --refresh-runtime-linker-state --verbose || {
@@ -819,17 +823,32 @@ run_repair_and_worker_tests() {
                 return 1
             }
 
-        if [[ -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1" ]]; then
-            fail "gpkg-worker left a shadowed stale runtime library behind in the fake upgrade root"
+        if [[ ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1" ]]; then
+            fail "gpkg-worker removed the package-owned runtime provider in the fake upgrade root"
             rm -rf "$temp_root"
             return 1
         fi
-        if [[ ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.2" ]]; then
-            fail "gpkg-worker removed the active runtime provider in the fake upgrade root"
+        if [[ -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.2" ]]; then
+            fail "gpkg-worker left an unowned shadowed runtime provider behind in the fake upgrade root"
             rm -rf "$temp_root"
             return 1
         fi
-        ok "gpkg-worker pruned a shadowed stale runtime library in an isolated fake upgrade root"
+        if [[ ! -L "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so" ]]; then
+            fail "gpkg-worker did not repair the broken runtime linker symlink in the fake upgrade root"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so" ]]; then
+            fail "gpkg-worker left the repaired runtime linker symlink dangling in the fake upgrade root"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgbroken.so" || -L "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgbroken.so" ]]; then
+            fail "gpkg-worker left a broken unowned runtime linker symlink behind in the fake upgrade root"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        ok "gpkg-worker repaired broken linker symlinks and pruned stale runtime leftovers in an isolated fake upgrade root"
         rm -rf "$temp_root"
     fi
 

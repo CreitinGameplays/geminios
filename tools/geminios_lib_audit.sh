@@ -66,6 +66,39 @@ shell_quote() {
     printf '%q' "$1"
 }
 
+is_unversioned_library_linker_name() {
+    local name="${1-}"
+    [[ "$name" == lib*.so ]]
+}
+
+is_library_runtime_path() {
+    local path="${1-}"
+    case "$path" in
+        "$(root_path /lib)"/*|\
+        "$(root_path /lib64)"/*|\
+        "$(root_path /lib/x86_64-linux-gnu)"/*|\
+        "$(root_path /lib64/x86_64-linux-gnu)"/*|\
+        "$(root_path /usr/lib)"/*|\
+        "$(root_path /usr/lib64)"/*|\
+        "$(root_path /usr/lib/x86_64-linux-gnu)"/*|\
+        "$(root_path /usr/lib64/x86_64-linux-gnu)"/*|\
+        "$(root_path /usr/local/lib)"/*|\
+        "$(root_path /usr/local/lib64)"/*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+is_nonruntime_broken_linker_symlink() {
+    local path="${1-}"
+    local name
+    name="$(basename "$path")"
+    is_library_runtime_path "$path" || return 1
+    is_unversioned_library_linker_name "$name" || return 1
+    return 0
+}
+
 display_path() {
     local p="${1:-}"
     if [[ "$ROOT" == "/" ]]; then
@@ -250,16 +283,24 @@ check_broken_symlinks() {
     done
 
     local out="$REPORT_DIR/broken-symlinks.txt"
+    local linker_out="$REPORT_DIR/broken-linker-symlinks.txt"
     : > "$out"
+    : > "$linker_out"
 
     if ((${#roots[@]})); then
         while IFS= read -r -d '' p; do
-            printf '%s\n' "$p" >> "$out"
+            if is_nonruntime_broken_linker_symlink "$p"; then
+                printf '%s\n' "$(display_path "$p")" >> "$linker_out"
+            else
+                printf '%s\n' "$(display_path "$p")" >> "$out"
+            fi
         done < <(find "${roots[@]}" -xtype l -print0 2>/dev/null || true)
     fi
 
     if [[ -s "$out" ]]; then
         fail "Found broken symlinks. See $out"
+    elif [[ -s "$linker_out" ]]; then
+        warn "Found broken unversioned library linker symlinks that do not affect runtime loading. See $linker_out; run 'gpkg repair' or 'gpkg-worker --refresh-runtime-linker-state' to clean them."
     else
         ok "No broken symlinks found in core runtime paths"
     fi
@@ -819,7 +860,8 @@ check_ldconfig() {
     say "== ldconfig sanity check =="
     local out="$REPORT_DIR/ldconfig.txt"
     local actionable="$REPORT_DIR/ldconfig-actionable.txt"
-    local benign_re="Path \`.*' given more than once|Can't stat /usr/local/lib(64)?(/x86_64-linux-gnu)?: No such file or directory|is the dynamic linker, ignoring"
+    local warnings_only="$REPORT_DIR/ldconfig-warnings.txt"
+    local benign_re="^ldconfig: (Path \`.*' given more than once|Can't stat /usr/local/lib(64)?(/x86_64-linux-gnu)?: No such file or directory|is the dynamic linker, ignoring)$|^ldconfig: Cannot stat .*/lib[^/]+\\.so: No such file or directory$"
     if have ldconfig; then
         if [[ "$ROOT" == "/" ]]; then
             ldconfig -v -N -X >"$out" 2>&1 || true
@@ -827,7 +869,8 @@ check_ldconfig() {
             ldconfig -r "$ROOT" -v -N -X >"$out" 2>&1 || true
         fi
 
-        grep -Ev "$benign_re" "$out" >"$actionable" || true
+        grep -E '^ldconfig:' "$out" >"$warnings_only" || true
+        grep -Ev "$benign_re" "$warnings_only" >"$actionable" || true
 
         if grep -Eq "not found|No such file|cannot open shared object file|is not a symbolic link|Can't stat " "$actionable"; then
             warn "ldconfig reported actionable warnings. See $actionable"
