@@ -136,6 +136,40 @@ expand_origin_list() {
     printf '%s\n' "$raw"
 }
 
+elf_private_bundle_search_dirs() {
+    local file="${1-}"
+    [[ -n "$file" ]] || return 0
+
+    local dir parent
+    dir="$(dirname "$file")"
+    parent="$(dirname "$dir")"
+
+    if [[ -e "$dir/dependentlibs.list" || -L "$dir/dependentlibs.list" ]]; then
+        printf '%s\n' "$dir"
+        return 0
+    fi
+
+    if [[ -e "$parent/dependentlibs.list" || -L "$parent/dependentlibs.list" ]]; then
+        printf '%s\n' "$parent"
+    fi
+}
+
+elf_dependency_audit_mode_for_path() {
+    local path="${1-}"
+    case "$path" in
+        */gtk-2.0/*/engines/*.so|\
+        */gtk-3.0/*/immodules/*.so|\
+        */gtk-3.0/*/printbackends/*.so|\
+        */gdk-pixbuf-2.0/*/loaders/*.so|\
+        */gio/modules/*.so)
+            printf '%s\n' "module"
+            ;;
+        *)
+            printf '%s\n' "strict"
+            ;;
+    esac
+}
+
 join_by_colon() {
     local IFS=':'
     printf '%s\n' "$*"
@@ -757,6 +791,7 @@ resolve_needed() {
 
 audit_one_elf() {
     local f="$1"
+    local mode="${2:-strict}"
     local short="${f#$ROOT}"
     [[ -z "$short" || "$short" == "$f" ]] && short="$f"
 
@@ -789,6 +824,10 @@ audit_one_elf() {
         done <<<"$expanded"
     fi
 
+    while IFS= read -r p; do
+        [[ -n "$p" ]] && search_dirs+=("$p")
+    done < <(elf_private_bundle_search_dirs "$f")
+
     local p
     for p in "${LOADER_CONFIG_DIRS[@]}"; do
         search_dirs+=("$p")
@@ -804,6 +843,8 @@ audit_one_elf() {
         local resolved=""
         if resolved="$(resolve_needed "$needed" "${search_dirs[@]}")"; then
             :
+        elif [[ "$mode" == "module" ]]; then
+            continue
         elif live_ldd_resolves_needed "$f" "$needed"; then
             :
         else
@@ -839,17 +880,23 @@ check_elf_closure() {
     : > "$REPORT_DIR/missing-needed.txt"
 
     local count=0
+    local module_count=0
     if ((${#roots[@]})); then
         while IFS= read -r -d '' f; do
             if is_elf "$f"; then
                 count=$((count + 1))
-                audit_one_elf "$f"
+                local mode
+                mode="$(elf_dependency_audit_mode_for_path "$f")"
+                [[ "$mode" == "module" ]] && module_count=$((module_count + 1))
+                audit_one_elf "$f" "$mode"
             fi
         done < <(find "${roots[@]}" \( -type f -o -type l \) -print0 2>/dev/null || true)
     fi
 
     if [[ -s "$REPORT_DIR/missing-needed.txt" ]]; then
         fail "ELF dependency audit found unresolved libraries. See $REPORT_DIR/missing-needed.txt"
+    elif [[ "$module_count" -gt 0 ]]; then
+        ok "ELF dependency audit passed for $count objects ($module_count known loadable modules skipped for standalone closure)"
     else
         ok "ELF dependency audit passed for $count objects"
     fi

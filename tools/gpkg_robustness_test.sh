@@ -54,7 +54,7 @@ FULL_UPGRADE="${GPKG_TEST_FULL_UPGRADE:-0}"
 VERIFY_ALL="${GPKG_TEST_VERIFY_ALL:-1}"
 POSITIVE_REPO_URL="${GPKG_TEST_REPO_URL:-}"
 TRANSACTION_CANDIDATES="${GPKG_TEST_TRANSACTION_CANDIDATES:-nano file tree jq htop bc less patch}"
-PROTECTED_CANDIDATES="${GPKG_TEST_PROTECTED_CANDIDATES:-libc6 libc-bin ca-certificates}"
+PROTECTED_CANDIDATES="${GPKG_TEST_PROTECTED_CANDIDATES:-ca-certificates libc-bin libc6}"
 GPKG_BIN="${GPKG_BIN:-}"
 GPKG_WORKER_BIN="${GPKG_WORKER_BIN:-}"
 ALLOW_NON_ROOT="${GPKG_ALLOW_NON_ROOT:-0}"
@@ -425,18 +425,32 @@ pick_transaction_packages() {
 }
 
 pick_protected_package() {
+    local -a installed_candidates=()
+    local -a base_candidates=()
     local candidate
     for candidate in $PROTECTED_CANDIDATES; do
         pkg_available "$candidate" || continue
         local state
         state="$(pkg_installed_state "$candidate")"
         case "$state" in
-            installed|base-system)
-                PROTECTED_PKG="$candidate"
-                return 0
+            installed)
+                installed_candidates+=("$candidate")
+                ;;
+            base-system)
+                base_candidates+=("$candidate")
                 ;;
         esac
     done
+
+    if ((${#installed_candidates[@]})); then
+        PROTECTED_PKG="${installed_candidates[0]}"
+        return 0
+    fi
+    if ((${#base_candidates[@]})); then
+        PROTECTED_PKG="${base_candidates[0]}"
+        return 0
+    fi
+
     PROTECTED_PKG=""
 }
 
@@ -707,7 +721,9 @@ run_protection_tests() {
     fi
 
     expect_failure "gpkg-protected-remove-$PROTECTED_PKG" "$GPKG_BIN" -y remove "$PROTECTED_PKG" || return 1
-    assert_last_log_contains 'Refusing to remove|marked essential|base system|upgradeable base system' \
+    assert_last_log_not_contains 'The following packages will be REMOVED:|Do you want to continue\?' \
+        "gpkg does not build a removal transaction for protected package $PROTECTED_PKG" || return 1
+    assert_last_log_contains "Refusing to remove|marked essential|upgradeable base system|base system image|priority is 'required'" \
         "gpkg refuses to remove protected package $PROTECTED_PKG" || return 1
     say
 }
