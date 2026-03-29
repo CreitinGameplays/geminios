@@ -203,10 +203,10 @@ sudo gpkg add-repo https://repo.creitingameplays.com
 
 What each step verifies:
 - `gpkg list-repos`: Shows the built-in Debian testing backend plus any configured S2 repos.
-- `gpkg update`: Downloads and merges Debian testing metadata with all configured `.gpkg` repository indices.
+- `gpkg update`: Downloads and merges Debian testing metadata with all configured `.gpkg` repository indices, then refreshes the cached Debian preview used by `search` and `install`.
 - `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
-- `gpkg search <query>`: Searches the merged local cache and shows where the chosen candidate comes from.
-- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, converts testing packages to `.gpkg`, and installs the prepared archive.
+- `gpkg search <query>`: Searches the merged local cache plus the cached Debian preview, using apt-like output while keeping installability diagnostics for `show` and `install`.
+- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, converts testing packages to `.gpkg`, and now reports exact-package "available but not installable" cases before dependency resolution falls back to generic errors.
 - `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
 - `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
 
