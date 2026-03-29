@@ -674,6 +674,24 @@ run_repo_and_query_tests() {
     assert_last_log_contains '^  Version:' "gpkg show prints package version" || return 1
     assert_last_log_contains '^  Installed:' "gpkg show prints installed state" || return 1
 
+    if command -v nano >/dev/null 2>&1; then
+        expect_success "gpkg-show-nano-live" "$GPKG_BIN" show nano || return 1
+        assert_last_log_not_contains '^  Installed:[[:space:]]+no$' \
+            "gpkg show reflects a live nano install when nano is present on the system" || return 1
+
+        if sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" | grep -Eq \
+            '^  Installed:[[:space:]]+yes[[:space:]]+\\(.*unmanaged live system\\)$|^  Installed:[[:space:]]+base system[[:space:]]+\\('; then
+            expect_success "gpkg-install-nano-dry-run" \
+                bash -lc 'printf "n\n" | "$1" install nano' _ "$GPKG_BIN" || return 1
+            assert_last_log_not_contains '^Nothing to do\\.$' \
+                "gpkg install nano no longer treats unmanaged or base-backed live installs as already handled" || return 1
+            assert_last_log_contains 'Do you want to continue\\?|The following packages will be installed:|The following packages will be upgraded:|The following packages will be reinstalled:' \
+                "gpkg install nano builds a real transaction when only a live unmanaged copy is present" || return 1
+        fi
+    else
+        skip "Skipping live nano adoption regression because nano is not present on the tested system"
+    fi
+
     if [[ -n "$SECONDARY_PKG" ]]; then
         expect_success "gpkg-show-secondary" "$GPKG_BIN" show "$SECONDARY_PKG" || return 1
     fi

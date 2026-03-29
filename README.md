@@ -12,7 +12,7 @@ The project now follows a clear model:
 
 Versioning follows a rolling `stream + snapshot` model:
 
-- the named stream is kept in [`src/sys_info.h`](/home/creitin/Documents/geminios/src/sys_info.h) as the human release line.
+- the named stream is kept in [`src/sys_info.h`](src/sys_info.h) as the human release line.
 - each built image gets a UTC snapshot date like `2026.03.23`
 - `/etc/os-release` keeps `VERSION_ID="rolling"` and uses `BUILD_ID` / `IMAGE_VERSION` for the exact image snapshot
 
