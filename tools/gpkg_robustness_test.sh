@@ -53,7 +53,7 @@ KEEP_CHANGES="${GPKG_TEST_KEEP_CHANGES:-0}"
 FULL_UPGRADE="${GPKG_TEST_FULL_UPGRADE:-0}"
 VERIFY_ALL="${GPKG_TEST_VERIFY_ALL:-1}"
 POSITIVE_REPO_URL="${GPKG_TEST_REPO_URL:-}"
-TRANSACTION_CANDIDATES="${GPKG_TEST_TRANSACTION_CANDIDATES:-nano file tree jq htop bc less patch}"
+TRANSACTION_CANDIDATES="${GPKG_TEST_TRANSACTION_CANDIDATES:-file tree jq less patch bc nano htop}"
 PROTECTED_CANDIDATES="${GPKG_TEST_PROTECTED_CANDIDATES:-ca-certificates libc-bin libc6}"
 GPKG_BIN="${GPKG_BIN:-}"
 GPKG_WORKER_BIN="${GPKG_WORKER_BIN:-}"
@@ -287,7 +287,7 @@ expect_failure() {
 assert_last_log_contains() {
     local pattern="$1"
     local message="$2"
-    if grep -Eq -- "$pattern" "$LAST_LOG"; then
+    if sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" | grep -Eq -- "$pattern"; then
         ok "$message"
         return 0
     fi
@@ -298,12 +298,28 @@ assert_last_log_contains() {
 assert_last_log_not_contains() {
     local pattern="$1"
     local message="$2"
-    if grep -Eq -- "$pattern" "$LAST_LOG"; then
+    if sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" | grep -Eq -- "$pattern"; then
         fail "$message (unexpected pattern found in $LAST_LOG)"
         return 1
     fi
     ok "$message"
     return 0
+}
+
+assert_last_log_first_package_is() {
+    local expected="$1"
+    local message="$2"
+    local first_package
+    first_package="$(
+        sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" |
+        awk '/^[[:alnum:].+_-]+\/[[:alnum:].+_-]+[[:space:]]/ { sub(/\/.*/, "", $1); print $1; exit }'
+    )"
+    if [[ "$first_package" == "$expected" ]]; then
+        ok "$message"
+        return 0
+    fi
+    fail "$message (first result was '${first_package:-<none>}' in $LAST_LOG)"
+    return 1
 }
 
 escape_ere() {
@@ -648,6 +664,7 @@ run_repo_and_query_tests() {
 
     expect_success "gpkg-search-fixture" "$GPKG_BIN" search "$PACKAGE_QUERY" || return 1
     assert_last_log_contains "$PACKAGE_QUERY" "gpkg search finds the chosen fixture query" || return 1
+    assert_last_log_first_package_is "$PACKAGE_QUERY" "gpkg search ranks an exact package-name match first" || return 1
 
     expect_success "gpkg-show-primary" "$GPKG_BIN" show "$PRIMARY_PKG" || return 1
     assert_last_log_contains '^  Version:' "gpkg show prints package version" || return 1
@@ -656,6 +673,40 @@ run_repo_and_query_tests() {
     if [[ -n "$SECONDARY_PKG" ]]; then
         expect_success "gpkg-show-secondary" "$GPKG_BIN" show "$SECONDARY_PKG" || return 1
     fi
+    say
+}
+
+run_task_metapackage_tests() {
+    say "== Task Metapackage Tests =="
+
+    expect_success "gpkg-show-tasksel" "$GPKG_BIN" show tasksel || return 1
+    assert_last_log_contains '^  Version:' "gpkg show exposes tasksel metadata" || return 1
+    assert_last_log_not_contains 'Availability:[[:space:]]+unavailable.*apt' \
+        "gpkg show no longer blames apt for tasksel availability" || return 1
+
+    expect_success "gpkg-show-lxqt" "$GPKG_BIN" show lxqt || return 1
+    assert_last_log_contains '^  Version:' "gpkg show resolves the lxqt metapackage" || return 1
+
+    expect_success "gpkg-show-lxqt-core" "$GPKG_BIN" show lxqt-core || return 1
+    assert_last_log_contains '^  Version:' "gpkg show resolves the lxqt-core metapackage" || return 1
+
+    expect_success "gpkg-install-task-mate-desktop-dry-run" \
+        bash -lc 'printf "n\n" | "$1" install --recommended-no --suggested-no task-mate-desktop' _ "$GPKG_BIN" || return 1
+    assert_last_log_contains 'Do you want to continue\?|All packages are up to date\.' \
+        "task-mate-desktop resolves to an install plan" || return 1
+    assert_last_log_not_contains 'has no installation candidate|Unable to locate package|required dependency missing from imported set: tasksel|unresolved required dependency group\(s\): tasksel' \
+        "task-mate-desktop no longer fails through tasksel" || return 1
+
+    expect_success "gpkg-install-task-lxqt-desktop-dry-run" \
+        bash -lc 'printf "n\n" | "$1" install --recommended-no --suggested-no task-lxqt-desktop' _ "$GPKG_BIN" || return 1
+    assert_last_log_contains 'Do you want to continue\?|All packages are up to date\.' \
+        "task-lxqt-desktop resolves to an install plan" || return 1
+    assert_last_log_not_contains 'has no installation candidate|Unable to locate package|unresolved required dependency group\(s\): lxqt|required dependency missing from imported set: tasksel' \
+        "task-lxqt-desktop no longer fails through lxqt or tasksel" || return 1
+
+    expect_failure "gpkg-install-apt-blocked" "$GPKG_BIN" install apt || return 1
+    assert_last_log_contains 'blocked by GeminiOS import policy|has no installation candidate|available, but it is not installable' \
+        "gpkg still blocks direct apt installation" || return 1
     say
 }
 
@@ -742,14 +793,22 @@ run_transaction_tests() {
     expect_success "gpkg-install-fixtures" \
         "$GPKG_BIN" -y install --recommended-no --suggested-no "${install_set[@]}" || return 1
 
-    verify_package_set "fixtures-post-install" "${install_set[@]}" || return 1
-
-    expect_success "gpkg-search-primary-installed" "$GPKG_BIN" search "$PRIMARY_PKG" || return 1
-    assert_last_log_contains '\[installed|Installed:' "gpkg search reports installed status for the primary fixture" || return 1
-
     expect_success "gpkg-show-primary-installed" "$GPKG_BIN" show "$PRIMARY_PKG" || return 1
     assert_last_log_contains '^  Installed:[[:space:]]+yes|^  Installed:[[:space:]]+base system' \
         "gpkg show reports primary fixture as installed after install" || return 1
+
+    if [[ -n "$SECONDARY_PKG" ]]; then
+        expect_success "gpkg-show-secondary-installed" "$GPKG_BIN" show "$SECONDARY_PKG" || return 1
+        assert_last_log_contains '^  Installed:[[:space:]]+yes|^  Installed:[[:space:]]+base system' \
+            "gpkg show reports secondary fixture as installed after install" || return 1
+    fi
+
+    verify_package_set "fixtures-post-install" "${install_set[@]}" || return 1
+
+    expect_success "gpkg-search-primary-installed" "$GPKG_BIN" search "$PRIMARY_PKG" || return 1
+    assert_last_log_first_package_is "$PRIMARY_PKG" "gpkg search keeps the exact primary fixture first after install" || return 1
+    assert_last_log_contains "^.*$(escape_ere "$PRIMARY_PKG")/.*\\[installed" \
+        "gpkg search reports installed status for the primary fixture" || return 1
 
     expect_success "gpkg-reinstall-primary" \
         "$GPKG_BIN" -y install --reinstall --recommended-no --suggested-no "$PRIMARY_PKG" || return 1
@@ -933,6 +992,7 @@ main_rc=0
 preflight || main_rc=1
 if [[ "$main_rc" -eq 0 ]]; then run_cli_guardrail_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_repo_and_query_tests || main_rc=1; fi
+if [[ "$main_rc" -eq 0 ]]; then run_task_metapackage_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_doctor_and_selinux_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_upgrade_planner_guardrail_tests || main_rc=1; fi
 if [[ "$main_rc" -eq 0 ]]; then run_protection_tests || main_rc=1; fi

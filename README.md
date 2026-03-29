@@ -205,7 +205,7 @@ What each step verifies:
 - `gpkg list-repos`: Shows the built-in Debian testing backend plus any configured S2 repos.
 - `gpkg update`: Downloads and merges Debian testing metadata with all configured `.gpkg` repository indices, then refreshes the cached Debian preview used by `search` and `install`.
 - `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
-- `gpkg search <query>`: Searches the merged local cache plus the cached Debian preview, using apt-like output while keeping installability diagnostics for `show` and `install`.
+- `gpkg search <query>`: Searches the merged local cache plus the cached Debian preview, puts exact and prefix package-name matches ahead of description-only hits, and uses a pager on interactive terminals to avoid flooding the screen while keeping installability diagnostics for `show` and `install`.
 - `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, converts testing packages to `.gpkg`, and now reports exact-package "available but not installable" cases before dependency resolution falls back to generic errors.
 - `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
 - `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
@@ -220,6 +220,7 @@ Manual configuration is also supported by writing one repository URL per line in
 Important:
 - Debian testing is configured through `/etc/gpkg/debian.conf`; the v1 default backend is `main/binary-amd64`.
 - The testing importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through testing import.
+- Debian `task-*` desktop metapackages are supported as dependency anchors through import-policy overrides; GeminiOS keeps `apt` blocked, but packages such as `task-mate-desktop`, `task-lxqt-desktop`, and `tasksel` can still resolve when their policy-approved dependencies are available.
 - The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
 - Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
 - `gpkg update` merges Debian testing metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
