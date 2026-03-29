@@ -650,6 +650,10 @@ run_repo_and_query_tests() {
     expect_success "gpkg-update" "$GPKG_BIN" -y update || return 1
     assert_path_exists "$PACKAGES_JSON" "Merged package index exists after gpkg update" || return 1
 
+    expect_success "gpkg-update-reuse" "$GPKG_BIN" -y update || return 1
+    assert_last_log_contains 'Reused cached packages index|Updated packages index' \
+        "gpkg update reuses cached Debian import data when possible" || return 1
+
     pick_transaction_packages
     if [[ -z "$PRIMARY_PKG" ]]; then
         fail "Could not discover any suitable package fixture from: $TRANSACTION_CANDIDATES"
@@ -703,6 +707,13 @@ run_task_metapackage_tests() {
         "task-lxqt-desktop resolves to an install plan" || return 1
     assert_last_log_not_contains 'has no installation candidate|Unable to locate package|unresolved required dependency group\(s\): lxqt|required dependency missing from imported set: tasksel' \
         "task-lxqt-desktop no longer fails through lxqt or tasksel" || return 1
+
+    expect_success "gpkg-install-task-gnome-desktop-dry-run" \
+        bash -lc 'printf "n\n" | "$1" install --recommended-no --suggested-no task-gnome-desktop' _ "$GPKG_BIN" || return 1
+    assert_last_log_contains 'Do you want to continue\?|All packages are up to date\.' \
+        "task-gnome-desktop resolves to an install plan" || return 1
+    assert_last_log_not_contains 'has no installation candidate|Unable to locate package|unresolved required dependency group\(s\): libpam-systemd, systemd' \
+        "task-gnome-desktop no longer fails through rewritten logind/systemd dependencies" || return 1
 
     expect_failure "gpkg-install-apt-blocked" "$GPKG_BIN" install apt || return 1
     assert_last_log_contains 'blocked by GeminiOS import policy|has no installation candidate|available, but it is not installable' \
