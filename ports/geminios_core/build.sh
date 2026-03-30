@@ -6,17 +6,25 @@ cd "$ROOT_DIR/ginit"
 make install DESTDIR="$ROOTFS"
 cd -
 
-# Additional setup for ginit
-# ginit Makefile now installs binaries to /bin and /sbin
-# and services to /usr/lib/ginit/services
+# Additional setup for ginit.
+# The ginit Makefile installs the real login/getty binaries to /usr/bin and /usr/sbin.
+# Only create /bin and /sbin compatibility links when those are separate directories.
 
 # The live initramfs hands off with switch_root /new_root /sbin/init.
 # Keep a boot-compatible /sbin/init entrypoint, but do not ship /bin/init
 # as a general user-facing command alias.
 rm -f "$ROOTFS/init" "$ROOTFS/bin/init"
 ln -sfn ../bin/ginit "$ROOTFS/sbin/init"
-ln -sfn ../usr/bin/login "$ROOTFS/bin/login"
-ln -sfn ../usr/sbin/getty "$ROOTFS/sbin/getty"
+
+if [ ! -L "$ROOTFS/bin" ]; then
+    rm -f "$ROOTFS/bin/login"
+    ln -sfn ../usr/bin/login "$ROOTFS/bin/login"
+fi
+
+if [ ! -L "$ROOTFS/sbin" ]; then
+    rm -f "$ROOTFS/sbin/getty"
+    ln -sfn ../usr/sbin/getty "$ROOTFS/sbin/getty"
+fi
 
 ln -sf bash "$ROOTFS/bin/sh"
 ln -sf /bin/apps/system/gpkg "$ROOTFS/bin/gpkg"
