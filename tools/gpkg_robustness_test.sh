@@ -287,7 +287,9 @@ expect_failure() {
 assert_last_log_contains() {
     local pattern="$1"
     local message="$2"
-    if sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" | grep -Eq -- "$pattern"; then
+    local sanitized_log
+    sanitized_log="$(sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG")"
+    if grep -Eq -- "$pattern" <<<"$sanitized_log"; then
         ok "$message"
         return 0
     fi
@@ -298,7 +300,9 @@ assert_last_log_contains() {
 assert_last_log_not_contains() {
     local pattern="$1"
     local message="$2"
-    if sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" | grep -Eq -- "$pattern"; then
+    local sanitized_log
+    sanitized_log="$(sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG")"
+    if grep -Eq -- "$pattern" <<<"$sanitized_log"; then
         fail "$message (unexpected pattern found in $LAST_LOG)"
         return 1
     fi
@@ -309,11 +313,10 @@ assert_last_log_not_contains() {
 assert_last_log_first_package_is() {
     local expected="$1"
     local message="$2"
+    local sanitized_log
     local first_package
-    first_package="$(
-        sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" |
-        awk '/^[[:alnum:].+_-]+\/[[:alnum:].+_-]+[[:space:]]/ { sub(/\/.*/, "", $1); print $1; exit }'
-    )"
+    sanitized_log="$(sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG")"
+    first_package="$(awk '/^[[:alnum:].+_-]+\/[[:alnum:].+_-]+[[:space:]]/ { sub(/\/.*/, "", $1); print $1; exit }' <<<"$sanitized_log")"
     if [[ "$first_package" == "$expected" ]]; then
         ok "$message"
         return 0
@@ -679,8 +682,11 @@ run_repo_and_query_tests() {
         assert_last_log_not_contains '^  Installed:[[:space:]]+no$' \
             "gpkg show reflects a live nano install when nano is present on the system" || return 1
 
-        if sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG" | grep -Eq \
-            '^  Installed:[[:space:]]+yes[[:space:]]+\\(.*unmanaged live system\\)$|^  Installed:[[:space:]]+base system[[:space:]]+\\('; then
+        local sanitized_nano_show
+        sanitized_nano_show="$(sed -E $'s/\x1B\\[[0-9;]*m//g' "$LAST_LOG")"
+        if grep -Eq \
+            '^  Installed:[[:space:]]+yes[[:space:]]+\\(.*unmanaged live system\\)$|^  Installed:[[:space:]]+base system[[:space:]]+\\(' \
+            <<<"$sanitized_nano_show"; then
             expect_success "gpkg-install-nano-dry-run" \
                 bash -lc 'printf "n\n" | "$1" install nano' _ "$GPKG_BIN" || return 1
             assert_last_log_not_contains '^Nothing to do\\.$' \
