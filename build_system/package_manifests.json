@@ -589,6 +589,8 @@
         "sbin/init",
         "bin/login",
         "sbin/getty",
+        "usr/bin/login",
+        "usr/sbin/getty",
         "etc/pam.d/common-session-noninteractive",
         "etc/lightdm/lightdm.conf",
         "etc/lightdm/Xsession",

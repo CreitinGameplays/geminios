@@ -428,6 +428,12 @@ bool seed_home_layout(const User& user) {
         }
     }
 
+    if (path_exists("/etc/skel/.bash_logout")) {
+        if (!install_shell_file(user.home + "/.bash_logout", {"/etc/skel/.bash_logout"}, user.uid, user.gid, 0644)) {
+            return false;
+        }
+    }
+
     best_effort_restorecon(user.home, true);
     return true;
 }

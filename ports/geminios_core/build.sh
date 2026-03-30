@@ -15,6 +15,8 @@ cd -
 # as a general user-facing command alias.
 rm -f "$ROOTFS/init" "$ROOTFS/bin/init"
 ln -sfn ../bin/ginit "$ROOTFS/sbin/init"
+ln -sfn ../usr/bin/login "$ROOTFS/bin/login"
+ln -sfn ../usr/sbin/getty "$ROOTFS/sbin/getty"
 
 ln -sf bash "$ROOTFS/bin/sh"
 ln -sf /bin/apps/system/gpkg "$ROOTFS/bin/gpkg"
@@ -109,6 +111,10 @@ cat > "$ROOTFS/etc/skel/.profile" <<'EOF'
 if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
     . "$HOME/.bashrc"
 fi
+EOF
+
+cat > "$ROOTFS/etc/skel/.bash_logout" <<'EOF'
+# GeminiOS user logout file
 EOF
 
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"

@@ -35,6 +35,47 @@ std::string kernel_root_argument(const InstallArtifacts& artifacts) {
     return {};
 }
 
+bool remove_path_recursive(const std::string& path) {
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0) {
+        return errno == ENOENT;
+    }
+
+    if (S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) {
+        DIR* dir = opendir(path.c_str());
+        if (!dir) {
+            log_message("WARN", "Failed to open " + path + " for cleanup: " + std::strerror(errno));
+            return false;
+        }
+
+        bool ok = true;
+        while (dirent* entry = readdir(dir)) {
+            const std::string name = entry->d_name;
+            if (name == "." || name == "..") continue;
+            if (!remove_path_recursive(path + "/" + name)) ok = false;
+        }
+        closedir(dir);
+
+        if (rmdir(path.c_str()) != 0) {
+            log_message("WARN", "Failed to remove directory " + path + ": " + std::strerror(errno));
+            return false;
+        }
+        return ok;
+    }
+
+    if (unlink(path.c_str()) != 0) {
+        log_message("WARN", "Failed to remove " + path + ": " + std::strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+bool looks_like_live_root(const std::string& candidate) {
+    return directory_exists(candidate) &&
+           directory_exists(candidate + "/usr") &&
+           file_exists(candidate + "/etc/geminios-live");
+}
+
 struct LiveBaseMount {
     std::string temp_dir;
     std::string media_mount;
@@ -49,14 +90,8 @@ struct LiveBaseMount {
         if (media_mounted) {
             unmount_path(media_mount);
         }
-        if (!root_mount.empty()) {
-            rmdir(root_mount.c_str());
-        }
-        if (!media_mount.empty()) {
-            rmdir(media_mount.c_str());
-        }
         if (!temp_dir.empty()) {
-            rmdir(temp_dir.c_str());
+            remove_path_recursive(temp_dir);
         }
     }
 };
@@ -80,9 +115,7 @@ bool find_pristine_live_source_root(
     };
     for (const char* candidate_path : kDirectCandidates) {
         const std::string candidate = candidate_path;
-        if (directory_exists(candidate) &&
-            directory_exists(candidate + "/usr") &&
-            file_exists(candidate + "/etc/geminios-live")) {
+        if (looks_like_live_root(candidate)) {
             source_root = candidate;
             return true;
         }
@@ -139,13 +172,17 @@ bool find_pristine_live_source_root(
                 tools.mount,
                 {"-t", "squashfs", "-o", "loop,ro", root_sfs, mount_state.root_mount}
             );
-            if (result.success &&
-                directory_exists(mount_state.root_mount + "/usr") &&
-                file_exists(mount_state.root_mount + "/etc/geminios-live")) {
+            if (result.success && looks_like_live_root(mount_state.root_mount)) {
                 closedir(dir);
                 mount_state.root_mounted = true;
                 source_root = mount_state.root_mount;
                 return true;
+            }
+            if (!result.success) {
+                log_message(
+                    "WARN",
+                    "Failed to mount " + root_sfs + " as squashfs; the installer will fall back to the running live root if needed."
+                );
             }
         }
 
@@ -156,6 +193,104 @@ bool find_pristine_live_source_root(
 
     error = "Unable to locate and mount the pristine live base image (root.sfs).";
     return false;
+}
+
+bool sanitize_target_accounts_after_live_fallback(std::string& error) {
+    const std::string passwd_path = kTargetRoot + "/etc/passwd";
+    const std::string shadow_path = kTargetRoot + "/etc/shadow";
+    const std::string group_path = kTargetRoot + "/etc/group";
+
+    std::vector<std::string> passwd_lines;
+    std::vector<std::string> shadow_lines;
+    std::vector<std::string> group_lines;
+    if (!read_lines(passwd_path, passwd_lines) ||
+        !read_lines(shadow_path, shadow_lines) ||
+        !read_lines(group_path, group_lines)) {
+        error = "Failed to sanitize copied account database files from the live environment.";
+        return false;
+    }
+
+    std::set<std::string> removed_users;
+    std::vector<std::string> sanitized_passwd;
+    for (const auto& line : passwd_lines) {
+        auto fields = split_preserve_empty(line, ':');
+        if (fields.size() < 3) {
+            sanitized_passwd.push_back(line);
+            continue;
+        }
+
+        int uid = -1;
+        if (!parse_int(fields[2], uid)) {
+            sanitized_passwd.push_back(line);
+            continue;
+        }
+
+        if (uid >= 1000 && uid != 65534) {
+            removed_users.insert(fields[0]);
+            continue;
+        }
+        sanitized_passwd.push_back(line);
+    }
+    passwd_lines.swap(sanitized_passwd);
+
+    if (!removed_users.empty()) {
+        std::vector<std::string> sanitized_shadow;
+        for (const auto& line : shadow_lines) {
+            auto fields = split_preserve_empty(line, ':');
+            if (!fields.empty() && removed_users.count(fields[0]) != 0) continue;
+            sanitized_shadow.push_back(line);
+        }
+        shadow_lines.swap(sanitized_shadow);
+    }
+
+    std::vector<std::string> sanitized_group;
+    for (const auto& line : group_lines) {
+        auto fields = split_preserve_empty(line, ':');
+        if (fields.size() < 4) {
+            sanitized_group.push_back(line);
+            continue;
+        }
+
+        int gid = -1;
+        const bool has_gid = parse_int(fields[2], gid);
+        if (has_gid && gid >= 1000 && gid != 65534) {
+            continue;
+        }
+
+        std::vector<std::string> kept_members;
+        std::stringstream members(fields[3]);
+        std::string member;
+        while (std::getline(members, member, ',')) {
+            member = trim(member);
+            if (member.empty() || removed_users.count(member) != 0) continue;
+            kept_members.push_back(member);
+        }
+        fields[3] = join_strings(kept_members, ",");
+        sanitized_group.push_back(join_strings(fields, ":"));
+    }
+    group_lines.swap(sanitized_group);
+
+    if (!write_lines(passwd_path, passwd_lines, 0644) ||
+        !write_lines(shadow_path, shadow_lines, 0600) ||
+        !write_lines(group_path, group_lines, 0644)) {
+        error = "Failed to write sanitized account database files.";
+        return false;
+    }
+
+    return true;
+}
+
+bool sanitize_target_after_live_root_fallback(std::string& error) {
+    ensure_file_removed(kTargetRoot + "/etc/geminios-live");
+    ensure_file_removed(kTargetRoot + "/etc/machine-id");
+    ensure_file_removed(kTargetRoot + "/var/lib/dbus/machine-id");
+    ensure_file_removed(kTargetRoot + "/root/.bash_history");
+
+    if (!sanitize_target_accounts_after_live_fallback(error)) {
+        return false;
+    }
+
+    return true;
 }
 
 std::string normalize_machine_id(std::string value) {
@@ -369,12 +504,22 @@ bool prepare_target_mounts(const InstallerConfig& config, InstallArtifacts& arti
 bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) {
     const bool is_live = file_exists("/etc/geminios-live");
     std::string base_source_root = "/";
+    bool using_live_root_fallback = false;
     LiveBaseMount live_base_mount;
     if (is_live) {
-        if (!find_pristine_live_source_root(tools, live_base_mount, base_source_root, error)) {
-            return false;
+        std::string pristine_error;
+        if (!find_pristine_live_source_root(tools, live_base_mount, base_source_root, pristine_error)) {
+            using_live_root_fallback = true;
+            base_source_root = "/";
+            log_message("WARN", pristine_error + " Falling back to the running live root snapshot.");
+            print_notice("!", C_YELLOW, "Pristine live image unavailable; installing from the current live root snapshot.");
         }
-        log_message("INFO", "Installing base system from pristine live image at " + base_source_root);
+        log_message(
+            "INFO",
+            std::string("Installing base system from ") +
+                (using_live_root_fallback ? "the running live root at " : "pristine live image at ") +
+                base_source_root
+        );
     }
 
     const std::vector<std::string> essential_paths = {
@@ -418,6 +563,12 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
     }
 
     ensure_file_removed(kTargetRoot + "/etc/geminios-live");
+
+    if (using_live_root_fallback) {
+        if (!sanitize_target_after_live_root_fallback(error)) {
+            return false;
+        }
+    }
 
     if (!file_exists(kTargetRoot + "/lib")) {
         ensure_symlink("lib64", kTargetRoot + "/lib");

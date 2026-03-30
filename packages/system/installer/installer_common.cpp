@@ -737,6 +737,7 @@ ToolRegistry detect_tools() {
     ToolRegistry tools;
     tools.cp = find_executable("cp");
     tools.mount = find_executable("mount");
+    tools.unsquashfs = find_executable("unsquashfs");
     tools.sfdisk = find_executable("sfdisk");
     tools.mkfs_ext4 = find_executable("mkfs.ext4");
     tools.mkfs_xfs = find_executable("mkfs.xfs");
@@ -756,6 +757,7 @@ void print_environment_summary(const ToolRegistry& tools) {
     std::cout << "  Log file:       " << kLogPath << "\n";
     std::cout << "  Session boot:   " << boot_mode_label(detect_live_boot_mode()) << "\n";
     std::cout << "  mount:          " << (tools.mount.empty() ? "missing" : tools.mount) << "\n";
+    std::cout << "  unsquashfs:     " << (tools.unsquashfs.empty() ? "missing" : tools.unsquashfs) << "\n";
     std::cout << "  sfdisk:         " << (tools.sfdisk.empty() ? "missing" : tools.sfdisk) << "\n";
     std::cout << "  GRUB:           " << (tools.grub_install.empty() ? "missing" : tools.grub_install) << "\n";
     std::cout << "  blkid:          " << (tools.blkid.empty() ? "missing" : tools.blkid) << "\n";
