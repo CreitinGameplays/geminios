@@ -749,7 +749,7 @@ bool relabel_selinux_target(const ToolRegistry& tools, std::string& error) {
     }
 
     ensure_file_removed(kTargetRoot + "/.autorelabel");
-    return write_selinux_config("enforcing", error);
+    return write_selinux_config("permissive", error);
 }
 
 bool replace_shadow_password(std::vector<std::string>& lines, const std::string& username, const std::string& password_hash) {

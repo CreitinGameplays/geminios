@@ -688,6 +688,9 @@ run_cli_guardrail_tests() {
     expect_failure "gpkg-invalid-optional-flags" "$GPKG_BIN" --recommended-no search nano || return 1
     assert_last_log_contains 'optional dependency flags are only valid' "gpkg rejects optional dependency flags on non-transactional commands" || return 1
 
+    expect_failure "gpkg-invalid-optional-flags-alias" "$GPKG_BIN" search nano -nrec || return 1
+    assert_last_log_contains 'optional dependency flags are only valid' "gpkg rejects short optional dependency flags on non-transactional commands" || return 1
+
     expect_failure "gpkg-invalid-add-repo-scheme" "$GPKG_BIN" add-repo ftp://invalid.example/repo || return 1
     assert_last_log_contains 'Invalid repository URL' "gpkg add-repo rejects non-http(s) URLs" || return 1
 
@@ -938,6 +941,13 @@ run_transaction_tests() {
     assert_last_log_first_package_is "$PRIMARY_PKG" "gpkg search keeps the exact primary fixture first after install" || return 1
     assert_last_log_contains "^.*$(escape_ere "$PRIMARY_PKG")/.*\\[installed" \
         "gpkg search reports installed status for the primary fixture" || return 1
+
+    expect_failure "gpkg-short-optional-flags-after-install-command" \
+        bash -lc 'printf "n\n" | "$1" install -nrec -nsug "$2"' _ "$GPKG_BIN" "$PRIMARY_PKG" || return 1
+    assert_last_log_contains 'The following packages will be installed:' \
+        "gpkg accepts short optional dependency flags after install command position" || return 1
+    assert_last_log_not_contains 'Unable to locate package -nrec|Failed to resolve dependencies for -nrec|Unable to locate package -nsug|Failed to resolve dependencies for -nsug' \
+        "gpkg no longer treats short optional dependency flags as package operands" || return 1
 
     expect_success "gpkg-reinstall-primary" \
         "$GPKG_BIN" -y install --reinstall --recommended-no --suggested-no "$PRIMARY_PKG" || return 1

@@ -4052,7 +4052,8 @@ def stage_selinux_rootfs_labels(root_dir=None):
         detail_lines = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
         detail = detail_lines[-1] if detail_lines else f"exit code {result.returncode}"
         print_warning(
-            "  Staged SELinux relabel failed; the build will continue in permissive-live mode. "
+            "  Staged SELinux relabel failed; the build will continue with SELinux disabled in live boot, "
+            "and installed systems will still default to permissive mode. "
             f"Detail: {detail}"
         )
         return

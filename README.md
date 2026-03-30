@@ -536,8 +536,8 @@ Optional but good signs:
 - `CONFIG_NVME_CORE=y`
 - `CONFIG_SND_HDA_INTEL=y`
 
-GeminiOS now ships `/etc/selinux/config` with `SELINUX=enforcing` by default.
-The live ISO boots with SELinux enabled in permissive mode as a safety override, while installed systems are intended to run enforcing after relabeling.
+GeminiOS keeps `/etc/selinux/config` in the base rootfs with `SELINUX=enforcing`.
+The live ISO currently boots with `selinux=0`, and the installer writes installed systems with `SELINUX=permissive` by default after labeling.
 
 ## Kernel Packages
 
