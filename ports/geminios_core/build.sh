@@ -37,6 +37,7 @@ mkdir -p "$ROOTFS/etc/selinux"
 cat > "$ROOTFS/etc/passwd" <<EOF
 root:x:0:0:System Administrator:/root:/bin/bash
 lightdm:x:620:620:Light Display Manager:/var/lib/lightdm:/bin/false
+sddm:x:621:621:Simple Desktop Display Manager:/var/lib/sddm:/bin/false
 messagebus:x:18:18:D-Bus Message Daemon User:/var/run/dbus:/bin/false
 EOF
 
@@ -66,12 +67,14 @@ systemd-journal:x:190:
 adm:x:191:
 messagebus:x:18:
 lightdm:x:620:
+sddm:x:621:
 EOF
 
 # 3. /etc/shadow
 cat > "$ROOTFS/etc/shadow" <<EOF
 root:\$5\$GEMINI_SALT\$eBv4S.VF3SzMsgDgFmF1JdfMnXTId9IOAZUzSXVN6P9:19000:0:99999:7:::
 lightdm:!:19000:0:99999:7:::
+sddm:!:19000:0:99999:7:::
 messagebus:!:19000:0:99999:7:::
 EOF
 chmod 600 "$ROOTFS/etc/shadow"
@@ -130,11 +133,12 @@ mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg
 mkdir -p "$ROOTFS/usr/libexec/geminios/session-env.d"
 mkdir -p "$ROOTFS/usr/share/fastfetch/logos"
 mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
-mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm"
+mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm" "$ROOTFS/var/lib/sddm"
 if [ "$(id -u)" -eq 0 ]; then
     chown -R 620:620 "$ROOTFS/var/lib/lightdm" "$ROOTFS/var/cache/lightdm"
+    chown -R 621:621 "$ROOTFS/var/lib/sddm"
 else
-    echo "[*] Skipping LightDM directory ownership fixups during unprivileged build; runtime setup must create/chown them on the target system."
+    echo "[*] Skipping display-manager directory ownership fixups during unprivileged build; runtime setup must create/chown them on the target system."
 fi
 
 cat > "$ROOTFS/etc/environment" <<EOF
@@ -1066,123 +1070,12 @@ exec /usr/libexec/geminios/session-launch wayland "$desktop" "$@"
 EOF
 chmod 755 "$ROOTFS/bin/startwayland"
 
-cat > "$ROOTFS/bin/startweston" <<'EOF'
-#!/bin/sh
-set -eu
-
-if command -v weston >/dev/null 2>&1; then
-    exec env GEMINIOS_WAYLAND_DESKTOP=Weston /bin/startwayland weston "$@"
-fi
-
-echo "E: weston is not installed." >&2
-exit 1
-EOF
-chmod 755 "$ROOTFS/bin/startweston"
-
-cat > "$ROOTFS/bin/startgnome-wayland" <<'EOF'
-#!/bin/sh
-set -eu
-
-export GNOME_SHELL_SESSION_MODE="${GNOME_SHELL_SESSION_MODE:-user}"
-exec env GEMINIOS_WAYLAND_DESKTOP=GNOME /bin/startwayland /usr/libexec/geminios/gnome-session-entry "$@"
-EOF
-chmod 755 "$ROOTFS/bin/startgnome-wayland"
-
-cat > "$ROOTFS/usr/libexec/geminios/gnome-session-entry" <<'EOF'
-#!/bin/sh
-set -eu
-
-user_id="$(id -u)"
-bg_pids=""
-
-start_bg_process() {
-    pattern="$1"
-    shift
-    if [ "$#" -eq 0 ]; then
-        return 0
-    fi
-    if command -v pgrep >/dev/null 2>&1 && pgrep -u "$user_id" -f "$pattern" >/dev/null 2>&1; then
-        return 0
-    fi
-    "$@" >/dev/null 2>&1 &
-    bg_pids="$bg_pids $!"
-}
-
-cleanup() {
-    for pid in $bg_pids; do
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
-    done
-}
-trap cleanup EXIT HUP INT TERM
-
-have_user_systemd_bus() {
-    if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] || ! command -v dbus-send >/dev/null 2>&1; then
-        return 1
-    fi
-    dbus-send --session --print-reply \
-        --dest=org.freedesktop.systemd1 \
-        /org/freedesktop/systemd1 \
-        org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1
-}
-
-export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-GNOME}"
-export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-GNOME}"
-export DESKTOP_SESSION="${DESKTOP_SESSION:-GNOME}"
-export XDG_MENU_PREFIX="${XDG_MENU_PREFIX:-gnome-}"
-export GNOME_SHELL_SESSION_MODE="${GNOME_SHELL_SESSION_MODE:-user}"
-export GSETTINGS_BACKEND="${GSETTINGS_BACKEND:-dconf}"
-
-if have_user_systemd_bus && command -v gnome-session >/dev/null 2>&1; then
-    exec gnome-session --session=gnome "$@"
-fi
-
-if ! command -v gnome-shell >/dev/null 2>&1; then
-    echo "E: GNOME requires either gnome-session with a user systemd bus or a standalone gnome-shell binary." >&2
-    exit 1
-fi
-
-echo "[*] org.freedesktop.systemd1 is unavailable on the user bus; starting standalone GNOME Shell mode." >&2
-echo "[*] This is a GeminiOS compatibility path, not a full upstream gnome-session environment." >&2
-
-if command -v gnome-settings-daemon >/dev/null 2>&1; then
-    start_bg_process "gnome-settings-daemon" gnome-settings-daemon
-fi
-if command -v gnome-shell-calendar-server >/dev/null 2>&1; then
-    start_bg_process "gnome-shell-calendar-server" gnome-shell-calendar-server
-fi
-if command -v ibus-daemon >/dev/null 2>&1; then
-    start_bg_process "ibus-daemon" ibus-daemon --replace --xim
-fi
-
-exec gnome-shell --wayland --display-server "$@"
-EOF
-chmod 755 "$ROOTFS/usr/libexec/geminios/gnome-session-entry"
-
 # Prepare runtime/session paths used by Wayland-capable applications.
 mkdir -p "$ROOTFS/run/user"
 chmod 755 "$ROOTFS/run/user"
 mkdir -p "$ROOTFS/run/systemd" "$ROOTFS/run/systemd/inhibit" "$ROOTFS/run/systemd/seats"
 mkdir -p "$ROOTFS/run/systemd/sessions" "$ROOTFS/run/systemd/users" "$ROOTFS/var/lib/elogind"
 mkdir -p "$ROOTFS/usr/share/wayland-sessions"
-
-cat > "$ROOTFS/usr/share/wayland-sessions/geminios-weston.desktop" <<'EOF'
-[Desktop Entry]
-Name=Weston
-Comment=Weston Wayland compositor session
-Exec=/bin/startweston
-Type=Application
-DesktopNames=Weston
-EOF
-
-cat > "$ROOTFS/usr/share/wayland-sessions/geminios-gnome.desktop" <<'EOF'
-[Desktop Entry]
-Name=GNOME
-Comment=GNOME Shell on Wayland
-Exec=/bin/startgnome-wayland
-Type=Application
-DesktopNames=GNOME
-EOF
 
 # Fix /var/run -> /run
 mkdir -p "$ROOTFS/var"

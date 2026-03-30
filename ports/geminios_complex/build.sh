@@ -4,7 +4,7 @@ set -e
 GINIT_SRC="$ROOT_DIR/ginit/src"
 GINIT_LIB="$ROOT_DIR/ginit/lib"
 SRC="$ROOT_DIR/src"
-PKGS="$ROOT_DIR/packages/system"
+PKGS="$ROOT_DIR/src/packages/system"
 GPKG_DIR="$ROOT_DIR/gpkg"
 TARGET_MULTIARCH="x86_64-linux-gnu"
 TARGET_CXX_VERSION="$(find "$ROOTFS/usr/include/c++" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | grep -E '^[0-9]+$' | sort -V | tail -n1)"

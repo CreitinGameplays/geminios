@@ -4,7 +4,7 @@
 Implement a low-level package worker binary (`gpkg-worker`) that handles the actual file system operations for package installation and removal, mimicking `dpkg`'s safety mechanisms.
 
 ## Architecture & Setup
-- [x] Create project structure for `gpkg-worker` (likely in `packages/system/gpkg-worker/` or integrated into `gpkg` source tree).
+- [x] Create project structure for `gpkg-worker` (likely in `src/packages/system/gpkg-worker/` or integrated into `gpkg` source tree).
 - [x] Define the interface/arguments for `gpkg-worker` (e.g., `--install <package_file>`, `--remove <package_name>`).
 - [x] Establish the "database" location (e.g., `/var/lib/gpkg/info/` or similar) for tracking file ownership.
 

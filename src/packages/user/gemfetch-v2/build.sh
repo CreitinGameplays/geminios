@@ -16,9 +16,9 @@ strip root/bin/gemfetch
 echo "--- Packaging GemFetch v2 ---"
 
 # 2. Build the package using the v2 tool
-# We assume we are in packages/user/gemfetch-v2/
-# The tools are in ../../../tools/gpkg-devel/
-python3 ../../../tools/gpkg-devel/gpkg-build.py . -o ../../../export/x86_64/gemfetch/gemfetch_1.0.0_x86_64.gpkg
+# We assume we are in src/packages/user/gemfetch-v2/
+# The tools are in ../../../../tools/gpkg-devel/
+python3 ../../../../tools/gpkg-devel/gpkg-build.py . -o ../../../../export/x86_64/gemfetch/gemfetch_1.0.0_x86_64.gpkg
 
 echo "--- Done! ---"
 echo "Artifact: export/x86_64/gemfetch/gemfetch_1.0.0_x86_64.gpkg"

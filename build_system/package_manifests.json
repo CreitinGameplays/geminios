@@ -608,21 +608,16 @@
         "usr/libexec/geminios/session-common",
         "usr/libexec/geminios/session-runtime",
         "usr/libexec/geminios/session-launch",
-        "usr/libexec/geminios/gnome-session-entry",
         "usr/libexec/geminios/wayland-session-report",
         "usr/lib/x86_64-linux-gnu/security/pam_systemd.so",
         "bin/startxfce4",
         "bin/startwayland",
-        "bin/startweston",
-        "bin/startgnome-wayland",
         "bin/wayland-session-report",
         "usr/libexec/geminios/lightdm-prepare",
         "usr/libexec/geminios/lightdm-greeter-launch",
         "usr/share/fastfetch/logos/geminios-ascii.txt",
         "usr/share/fastfetch/logos/geminios-rainbow.ans",
-        "usr/share/xgreeters/lightdm-greeter.desktop",
-        "usr/share/wayland-sessions/geminios-weston.desktop",
-        "usr/share/wayland-sessions/geminios-gnome.desktop"
+        "usr/share/xgreeters/lightdm-greeter.desktop"
     ],
     "geminios_pkgs": [
         "bin/apps/system/gtop",

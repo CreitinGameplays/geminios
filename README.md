@@ -123,7 +123,7 @@ qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enab
 
 - **Package Manager (GPKG)**: The package manager now lives in the top-level `gpkg/` directory, with its own `src/`, `README`, and `Makefile`. It is integrated into the OS through the `geminios_complex` port, but can also be built independently.
 
-- **Userspace Packages**: Most other system utilities are in `packages/` (system utilities).
+- **Userspace Packages**: Most other system utilities are in `src/packages/` (system utilities).
 
 - **Verification**: The build system now uses a manifest-based verification system (`build_system/package_manifests.json`). If a package build fails or artifacts are missing, the builder will report exactly what is missing.
 
