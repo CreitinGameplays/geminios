@@ -532,8 +532,19 @@ std::string filesystem_label(FilesystemType type) {
         case FilesystemType::Ext4: return "ext4";
         case FilesystemType::Xfs: return "xfs";
         case FilesystemType::Btrfs: return "btrfs";
+        case FilesystemType::F2fs: return "f2fs";
     }
     return "unknown";
+}
+
+std::string filesystem_grub_module(FilesystemType type) {
+    switch (type) {
+        case FilesystemType::Ext4: return "ext2";
+        case FilesystemType::Xfs: return "xfs";
+        case FilesystemType::Btrfs: return "btrfs";
+        case FilesystemType::F2fs: return "f2fs";
+    }
+    return "ext2";
 }
 
 std::string bootloader_label(BootloaderChoice choice) {
@@ -640,6 +651,7 @@ std::string filesystem_mkfs_tool(const ToolRegistry& tools, FilesystemType type)
         case FilesystemType::Ext4: return tools.mkfs_ext4;
         case FilesystemType::Xfs: return tools.mkfs_xfs;
         case FilesystemType::Btrfs: return tools.mkfs_btrfs;
+        case FilesystemType::F2fs: return tools.mkfs_f2fs;
     }
     return "";
 }
@@ -732,8 +744,8 @@ std::string capture_blkid_value(const ToolRegistry& tools, const std::string& de
 
 bool create_swapfile(const ToolRegistry& tools, const InstallerConfig& config) {
     if (config.swap_mode != SwapMode::Swapfile || config.swap_size_mb <= 0) return true;
-    if (config.filesystem == FilesystemType::Btrfs) {
-        log_message("ERROR", "Swapfiles on Btrfs are not supported by this installer yet. Use a swap partition instead.");
+    if (config.filesystem == FilesystemType::Btrfs || config.filesystem == FilesystemType::F2fs) {
+        log_message("ERROR", "Swapfiles on " + filesystem_label(config.filesystem) + " are not supported by this installer yet. Use a swap partition instead.");
         return false;
     }
 
@@ -784,6 +796,7 @@ ToolRegistry detect_tools() {
     tools.mkfs_ext4 = find_executable("mkfs.ext4");
     tools.mkfs_xfs = find_executable("mkfs.xfs");
     tools.mkfs_btrfs = find_executable("mkfs.btrfs");
+    tools.mkfs_f2fs = find_executable("mkfs.f2fs");
     tools.mkfs_vfat = find_executable("mkfs.vfat");
     tools.mkswap = find_executable("mkswap");
     tools.blkid = find_executable("blkid");
@@ -807,6 +820,7 @@ void print_environment_summary(const ToolRegistry& tools) {
     std::cout << "  ext4 support:   " << (tools.mkfs_ext4.empty() ? "missing" : "available") << "\n";
     std::cout << "  xfs support:    " << (tools.mkfs_xfs.empty() ? "missing" : "available") << "\n";
     std::cout << "  btrfs support:  " << (tools.mkfs_btrfs.empty() ? "missing" : "available") << "\n";
+    std::cout << "  f2fs support:   " << (tools.mkfs_f2fs.empty() ? "missing" : "available") << "\n";
     std::cout << "  vfat support:   " << (tools.mkfs_vfat.empty() ? "missing" : "available") << "\n";
 }
 

@@ -78,8 +78,9 @@ std::vector<std::string> validate_configuration(const InstallerConfig& config, c
     if (config.swap_mode == SwapMode::Swapfile && config.swap_size_mb < 256) {
         errors.push_back("Swapfile size must be at least 256 MiB.");
     }
-    if (config.swap_mode == SwapMode::Swapfile && config.filesystem == FilesystemType::Btrfs) {
-        errors.push_back("Btrfs installs cannot use a swapfile yet. Select a swap partition or disable swap.");
+    if (config.swap_mode == SwapMode::Swapfile &&
+        (config.filesystem == FilesystemType::Btrfs || config.filesystem == FilesystemType::F2fs)) {
+        errors.push_back(filesystem_label(config.filesystem) + " installs cannot use a swapfile yet. Select a swap partition or disable swap.");
     }
     if (config.partition_mode == PartitionMode::AutoWipe && config.swap_mode == SwapMode::Partition) {
         errors.push_back("Automatic partitioning cannot use an existing swap partition.");
@@ -203,7 +204,8 @@ void configure_filesystem_menu(InstallerConfig& config, const ToolRegistry& tool
     const std::vector<FilesystemType> all_types = {
         FilesystemType::Ext4,
         FilesystemType::Xfs,
-        FilesystemType::Btrfs
+        FilesystemType::Btrfs,
+        FilesystemType::F2fs
     };
     for (FilesystemType type : all_types) {
         if (filesystem_mkfs_tool(tools, type).empty()) continue;

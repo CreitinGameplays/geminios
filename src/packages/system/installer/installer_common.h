@@ -40,7 +40,8 @@ enum class BootMode {
 enum class FilesystemType {
     Ext4,
     Xfs,
-    Btrfs
+    Btrfs,
+    F2fs
 };
 
 enum class SwapMode {
@@ -109,6 +110,7 @@ struct ToolRegistry {
     std::string mkfs_ext4;
     std::string mkfs_xfs;
     std::string mkfs_btrfs;
+    std::string mkfs_f2fs;
     std::string mkfs_vfat;
     std::string mkswap;
     std::string blkid;
@@ -177,6 +179,7 @@ int prompt_choice(
 std::string partition_mode_label(PartitionMode mode);
 std::string boot_mode_label(BootMode mode);
 std::string filesystem_label(FilesystemType type);
+std::string filesystem_grub_module(FilesystemType type);
 std::string bootloader_label(BootloaderChoice choice);
 std::string profile_label(InstallProfile profile);
 BootMode detect_live_boot_mode();

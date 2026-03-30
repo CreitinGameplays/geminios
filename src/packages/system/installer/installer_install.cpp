@@ -444,6 +444,8 @@ bool format_partitions(const ToolRegistry& tools, const InstallerConfig& config,
             args = {"-F", "-L", "GeminiRoot", artifacts.root_partition};
         } else if (config.filesystem == FilesystemType::Xfs) {
             args = {"-f", "-L", "GeminiRoot", artifacts.root_partition};
+        } else if (config.filesystem == FilesystemType::F2fs) {
+            args = {"-f", "-l", "GeminiRoot", artifacts.root_partition};
         } else {
             args = {"-f", "-L", "GeminiRoot", artifacts.root_partition};
         }
@@ -1092,8 +1094,10 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
     grub << "set default=0\n";
     grub << "insmod part_msdos\n";
     grub << "insmod part_gpt\n";
-    grub << "insmod ext2\n";
-    grub << "insmod fat\n";
+    grub << "insmod " << filesystem_grub_module(config.filesystem) << "\n";
+    if (boot_mode == BootMode::Uefi) {
+        grub << "insmod fat\n";
+    }
     if (!artifacts.root_uuid.empty()) {
         grub << "search --no-floppy --fs-uuid --set=root " << artifacts.root_uuid << "\n";
     } else {
