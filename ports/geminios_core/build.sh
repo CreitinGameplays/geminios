@@ -204,6 +204,21 @@ SELINUXTYPE=default
 SETLOCALDEFS=0
 EOF
 
+mkdir -p "$ROOTFS/etc/selinux/default/contexts/files"
+cat > "$ROOTFS/etc/selinux/default/contexts/files/file_contexts.local" <<'EOF'
+# GeminiOS path overrides for the local tty/login stack.
+# GeminiOS uses a merged-/usr layout, so keep both the real /usr/... paths
+# and the compatibility /bin,/sbin paths covered.
+/usr/bin/ginit(\-netcfg)?		--	system_u:object_r:init_exec_t
+/bin/ginit(\-netcfg)?		--	system_u:object_r:init_exec_t
+/usr/sbin/init		--	system_u:object_r:init_exec_t
+/sbin/init		--	system_u:object_r:init_exec_t
+/usr/sbin/.*getty		--	system_u:object_r:getty_exec_t
+/sbin/.*getty		--	system_u:object_r:getty_exec_t
+/usr/bin/login		--	system_u:object_r:login_exec_t
+/bin/login		--	system_u:object_r:login_exec_t
+EOF
+
 mkdir -p "$ROOTFS/etc/default"
 cat > "$ROOTFS/etc/default/locale" <<EOF
 LANG=C.UTF-8
