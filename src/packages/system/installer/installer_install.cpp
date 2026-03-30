@@ -1100,10 +1100,10 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
         grub << "set root=" << (boot_mode == BootMode::Uefi ? "(hd0,gpt2)" : "(hd0,msdos1)") << "\n";
     }
     grub << "menuentry \"GeminiOS\" {\n";
-    grub << "  linux /boot/kernel " << base_kernel_args << " quiet\n";
+    grub << "  linux /boot/kernel " << base_kernel_args << " quiet geminios.verbose_boot=0\n";
     grub << "}\n";
     grub << "menuentry \"GeminiOS (Verbose Boot)\" {\n";
-    grub << "  linux /boot/kernel " << base_kernel_args << " loglevel=7 ignore_loglevel\n";
+    grub << "  linux /boot/kernel " << base_kernel_args << " loglevel=7 ignore_loglevel geminios.verbose_boot=1\n";
     grub << "}\n";
 
     if (!write_text_file(kTargetRoot + "/boot/grub/grub.cfg", grub.str())) {

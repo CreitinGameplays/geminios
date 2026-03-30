@@ -4033,11 +4033,40 @@ def stage_selinux_rootfs_labels(root_dir=None):
         print_warning("  Skipping staged SELinux relabel because setfiles or file_contexts is missing.")
         return
 
+    merged_file_contexts_path = file_contexts_path
+    merged_file_contexts_cleanup = None
+    local_file_contexts_path = f"{file_contexts_path}.local"
+    if os.path.exists(local_file_contexts_path):
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                prefix="geminios-file-contexts-",
+                delete=False,
+            ) as merged:
+                with open(file_contexts_path, "r", encoding="utf-8", errors="replace") as base_fp:
+                    merged.write(base_fp.read())
+                merged.write("\n")
+                with open(local_file_contexts_path, "r", encoding="utf-8", errors="replace") as local_fp:
+                    merged.write(local_fp.read())
+                merged_file_contexts_path = merged.name
+                merged_file_contexts_cleanup = merged.name
+        except OSError as exc:
+            print_warning(
+                "  Failed to merge file_contexts.local for staged relabel; "
+                f"falling back to the base file_contexts. Detail: {exc}"
+            )
+
     if os.geteuid() != 0:
         print_warning(
             "  Skipping staged SELinux relabel because the builder is not running as root. "
             "The live image will remain permissive and the installer will relabel installed systems."
         )
+        if merged_file_contexts_cleanup:
+            try:
+                os.unlink(merged_file_contexts_cleanup)
+            except OSError:
+                pass
         return
 
     env = os.environ.copy()
@@ -4045,9 +4074,14 @@ def stage_selinux_rootfs_labels(root_dir=None):
     result = run_staged_binary_command(
         rootfs_dir,
         setfiles_rel,
-        ["-F", "-r", rootfs_dir, file_contexts_path, rootfs_dir],
+        ["-F", "-r", rootfs_dir, merged_file_contexts_path, rootfs_dir],
         env=env,
     )
+    if merged_file_contexts_cleanup:
+        try:
+            os.unlink(merged_file_contexts_cleanup)
+        except OSError:
+            pass
     if result.returncode != 0:
         detail_lines = (result.stderr or result.stdout or f"exit code {result.returncode}").strip().splitlines()
         detail = detail_lines[-1] if detail_lines else f"exit code {result.returncode}"
@@ -5069,12 +5103,12 @@ def create_iso():
 set default=0
 
 menuentry "GeminiOS Live" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 quiet loglevel=3 audit=0 selinux=0
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 quiet loglevel=3 audit=0 selinux=0 geminios.verbose_boot=0
     initrd /boot/initramfs.cpio.lz4
 }
 
 menuentry "GeminiOS Live (Verbose Boot)" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 loglevel=7 ignore_loglevel audit=0 selinux=0
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 loglevel=7 ignore_loglevel audit=0 selinux=0 geminios.verbose_boot=1
     initrd /boot/initramfs.cpio.lz4
 }
 """
