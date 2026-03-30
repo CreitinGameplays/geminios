@@ -940,7 +940,24 @@ run_repair_and_worker_tests() {
         ln -s libgpkgshadow.so.1.2 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1"
         ln -s libgpkgshadow.so.9 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgshadow.so"
         ln -s libgpkgbroken.so.1 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgbroken.so"
-        printf '/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1\n' \
+        cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so.1.1"
+        cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so.1.2"
+        ln -s libgpkgpostprune.so.1.2 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so.1"
+        ln -s libgpkgpostprune.so.1.1 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so"
+        cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so.1.1"
+        cp -f "$source_elf" "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so.1.2"
+        ln -s libgpkgpng16.so.1.2 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so.1"
+        ln -s libgpkgpng16.so.1.1 "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so"
+        ln -s libgpkgpng16.so "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng.so"
+        printf '%s\n' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgshadow.so.1.1' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so.1' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so.1.2' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpng.so' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpng16.so' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpng16.so.1' \
+            '/usr/lib/x86_64-linux-gnu/libgpkgpng16.so.1.2' \
             > "$temp_root/var/lib/gpkg/info/libgpkgshadowtest.list"
 
         expect_success "gpkg-worker-shadowed-runtime-prune" \
@@ -974,7 +991,42 @@ run_repair_and_worker_tests() {
             rm -rf "$temp_root"
             return 1
         fi
-        ok "gpkg-worker repaired broken linker symlinks and pruned stale runtime leftovers in an isolated fake upgrade root"
+        if [[ -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so.1.1" ]]; then
+            fail "gpkg-worker did not prune the stale runtime provider before re-repairing linker symlinks"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ ! -L "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so" ]]; then
+            fail "gpkg-worker did not re-repair a linker symlink that only became broken after stale provider cleanup"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so" ]]; then
+            fail "gpkg-worker left the post-prune linker symlink dangling in the fake upgrade root"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ "$(readlink "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpostprune.so")" != "libgpkgpostprune.so.1" ]]; then
+            fail "gpkg-worker did not retarget the post-prune linker symlink to the live SONAME alias"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so.1.1" ]]; then
+            fail "gpkg-worker left the stale runtime provider behind for the chained linker-alias regression"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ ! -L "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so" || ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng16.so" ]]; then
+            fail "gpkg-worker did not repair the intermediate chained linker symlink after stale provider cleanup"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        if [[ ! -L "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng.so" || ! -e "$temp_root/usr/lib/x86_64-linux-gnu/libgpkgpng.so" ]]; then
+            fail "gpkg-worker did not converge a chained linker-symlink alias after repairing its dependency"
+            rm -rf "$temp_root"
+            return 1
+        fi
+        ok "gpkg-worker repaired broken linker symlinks, re-ran post-prune fixups, and pruned stale runtime leftovers in an isolated fake upgrade root"
         rm -rf "$temp_root"
     fi
 
