@@ -670,12 +670,22 @@ void cleanup_install_state(InstallState& state) {
     state.mounted_paths.clear();
 }
 
-bool copy_tree(const ToolRegistry& tools, const std::string& source, const std::string& destination_root) {
+bool copy_tree(const ToolRegistry& tools, const std::string& source, const std::string& destination_path) {
     if (!file_exists(source)) {
         log_message("WARN", "Skipping missing source path " + source);
         return true;
     }
-    CommandResult result = run_command(tools.cp, {"-a", source, destination_root});
+
+    const std::string::size_type slash = destination_path.find_last_of('/');
+    if (slash != std::string::npos) {
+        const std::string parent = destination_path.substr(0, slash);
+        if (!parent.empty() && !mkdir_p(parent)) {
+            log_message("ERROR", "Failed to create parent directory for " + destination_path);
+            return false;
+        }
+    }
+
+    CommandResult result = run_command(tools.cp, {"-a", source, destination_path});
     return result.success;
 }
 

@@ -76,6 +76,11 @@ bool looks_like_live_root(const std::string& candidate) {
            file_exists(candidate + "/etc/geminios-live");
 }
 
+bool path_exists_no_follow(const std::string& path) {
+    struct stat st;
+    return lstat(path.c_str(), &st) == 0;
+}
+
 struct LiveBaseMount {
     std::string temp_dir;
     std::string media_mount;
@@ -525,6 +530,7 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
     const std::vector<std::string> essential_paths = {
         "/bin",
         "/sbin",
+        "/lib",
         "/lib64",
         "/usr",
         "/etc",
@@ -536,7 +542,7 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
 
     for (const auto& path : essential_paths) {
         const std::string source_path = base_source_root + path;
-        if (!copy_tree(tools, source_path, kTargetRoot + "/")) {
+        if (!copy_tree(tools, source_path, kTargetRoot + path)) {
             error = "Failed to copy " + source_path + ". See " + kLogPath;
             return false;
         }
@@ -570,11 +576,17 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
         }
     }
 
-    if (!file_exists(kTargetRoot + "/lib")) {
-        ensure_symlink("lib64", kTargetRoot + "/lib");
+    if (!path_exists_no_follow(kTargetRoot + "/lib")) {
+        ensure_symlink("usr/lib", kTargetRoot + "/lib");
     }
-    if (!file_exists(kTargetRoot + "/usr/lib")) {
-        ensure_symlink("lib64", kTargetRoot + "/usr/lib");
+    if (!path_exists_no_follow(kTargetRoot + "/lib64")) {
+        ensure_symlink("lib/x86_64-linux-gnu", kTargetRoot + "/lib64");
+    }
+    if (!path_exists_no_follow(kTargetRoot + "/bin")) {
+        ensure_symlink("usr/bin", kTargetRoot + "/bin");
+    }
+    if (!path_exists_no_follow(kTargetRoot + "/sbin")) {
+        ensure_symlink("usr/sbin", kTargetRoot + "/sbin");
     }
 
     return true;

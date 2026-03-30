@@ -184,7 +184,7 @@ bool ensure_symlink(const std::string& target, const std::string& link_path);
 bool mount_device(const std::string& source, const std::string& target, const std::string& fstype, unsigned long flags = 0, const std::string& data = "");
 bool unmount_path(const std::string& target);
 void cleanup_install_state(InstallState& state);
-bool copy_tree(const ToolRegistry& tools, const std::string& source, const std::string& destination_root);
+bool copy_tree(const ToolRegistry& tools, const std::string& source, const std::string& destination_path);
 std::string capture_blkid_value(const ToolRegistry& tools, const std::string& device, const std::string& key);
 bool create_swapfile(const ToolRegistry& tools, const InstallerConfig& config);
 ToolRegistry detect_tools();
