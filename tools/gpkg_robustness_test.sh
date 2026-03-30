@@ -624,6 +624,16 @@ run_cli_guardrail_tests() {
     expect_success "gpkg-help-short" "$GPKG_BIN" -h || return 1
     expect_success "gpkg-version" "$GPKG_BIN" --version || return 1
     assert_last_log_contains '^gpkg ' "gpkg --version prints version" || return 1
+    local gpkg_build_id=""
+    if [[ -r "$ROOT/etc/os-release" ]]; then
+        gpkg_build_id="$(sed -n 's/^BUILD_ID="\(.*\)"$/\1/p' "$ROOT/etc/os-release" | sed -n '1p')"
+    elif [[ -r "$ROOT/usr/lib/os-release" ]]; then
+        gpkg_build_id="$(sed -n 's/^BUILD_ID="\(.*\)"$/\1/p' "$ROOT/usr/lib/os-release" | sed -n '1p')"
+    fi
+    if [[ -n "$gpkg_build_id" ]]; then
+        assert_last_log_contains "$(escape_ere "$gpkg_build_id")" \
+            "gpkg --version includes the full GeminiOS build id" || return 1
+    fi
 
     expect_failure "gpkg-invalid-flag" "$GPKG_BIN" --definitely-not-a-real-flag || return 1
     assert_last_log_contains 'Unknown option' "Unknown top-level flag is rejected" || return 1
@@ -854,6 +864,8 @@ run_transaction_tests() {
 
     expect_success "gpkg-remove-primary-purge" \
         "$GPKG_BIN" -y remove --purge "$PRIMARY_PKG" || return 1
+    assert_last_log_contains 'Processing triggers\.\.\.' \
+        "gpkg remove --purge processes post-transaction triggers for fixture removals" || return 1
     expect_success "gpkg-show-primary-after-purge" "$GPKG_BIN" show "$PRIMARY_PKG" || return 1
     assert_last_log_contains '^  Installed:[[:space:]]+no' \
         "gpkg show reports the primary fixture as removed after purge" || return 1
@@ -866,6 +878,8 @@ run_transaction_tests() {
     if [[ -n "$SECONDARY_PKG" ]]; then
         expect_success "gpkg-remove-secondary-autoremove-purge" \
             "$GPKG_BIN" -y remove --purge --autoremove "$SECONDARY_PKG" || return 1
+        assert_last_log_contains 'Processing triggers\.\.\.' \
+            "gpkg remove --autoremove --purge processes post-transaction triggers" || return 1
         expect_success "gpkg-show-secondary-after-remove" "$GPKG_BIN" show "$SECONDARY_PKG" || return 1
         assert_last_log_contains '^  Installed:[[:space:]]+no' \
             "gpkg show reports the secondary fixture as removed after remove --autoremove --purge" || return 1

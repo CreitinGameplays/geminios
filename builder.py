@@ -574,6 +574,7 @@ def get_geminios_release_info():
     build_slug = build_id.replace(".", "-")
     codename_slug = slugify_release_token(identity["OS_CODENAME"])
     display_version = f'{identity["OS_VERSION"]} {snapshot_date}'
+    system_version = identity["OS_VERSION"]
 
     return {
         "name": identity["OS_NAME"],
@@ -584,8 +585,9 @@ def get_geminios_release_info():
         "track": identity["OS_RELEASE_TRACK"],
         "version_label": identity["OS_VERSION"],
         "version_id": identity["OS_VERSION_ID"],
+        "system_version": system_version,
         "display_version": display_version,
-        "pretty_name": f'{identity["OS_NAME"]} {display_version}',
+        "pretty_name": f'{identity["OS_NAME"]} {system_version}',
         "snapshot_date": snapshot_date,
         "snapshot_compact": snapshot_compact,
         "build_id": build_id,
@@ -3932,7 +3934,7 @@ def finalize_rootfs():
         f.write(f'NAME="{release["name"]}"\n')
         f.write(f'ID={release["id"]}\n')
         f.write(f'ID_LIKE="{release["id_like"]}"\n')
-        f.write(f'VERSION="{release["display_version"]}"\n')
+        f.write(f'VERSION="{release["system_version"]}"\n')
         f.write(f'PRETTY_NAME="{release["pretty_name"]}"\n')
         f.write(f'VERSION_ID="{release["version_id"]}"\n')
         f.write(f'VERSION_CODENAME="{release["codename"]}"\n')
