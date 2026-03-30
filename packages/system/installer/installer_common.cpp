@@ -102,7 +102,7 @@ std::string timestamp_string() {
 void log_message(const std::string& level, const std::string& message) {
     const std::string line = "[" + timestamp_string() + "] [" + level + "] " + message;
     append_log_line(line);
-    if (g_verbose || level == "WARN" || level == "ERROR") {
+    if (g_verbose) {
         std::cerr << line << std::endl;
     }
 }

@@ -1028,6 +1028,8 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
         return false;
     }
     std::ostringstream grub;
+    const std::string base_kernel_args =
+        "root=" + kernel_root + " rootfstype=" + filesystem_label(config.filesystem) + " rootwait rw security=selinux selinux=1";
     grub << "set timeout=5\n";
     grub << "set default=0\n";
     grub << "insmod part_msdos\n";
@@ -1040,7 +1042,10 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
         grub << "set root=" << (boot_mode == BootMode::Uefi ? "(hd0,gpt2)" : "(hd0,msdos1)") << "\n";
     }
     grub << "menuentry \"GeminiOS\" {\n";
-    grub << "  linux /boot/kernel root=" << kernel_root << " rootfstype=" << filesystem_label(config.filesystem) << " rootwait rw quiet security=selinux selinux=1\n";
+    grub << "  linux /boot/kernel " << base_kernel_args << " quiet\n";
+    grub << "}\n";
+    grub << "menuentry \"GeminiOS (Verbose Boot)\" {\n";
+    grub << "  linux /boot/kernel " << base_kernel_args << " loglevel=7 ignore_loglevel\n";
     grub << "}\n";
 
     if (!write_text_file(kTargetRoot + "/boot/grub/grub.cfg", grub.str())) {

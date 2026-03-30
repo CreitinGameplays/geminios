@@ -5071,6 +5071,11 @@ menuentry "GeminiOS Live" {
     linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 quiet loglevel=3 audit=0 security=selinux selinux=1 enforcing=0
     initrd /boot/initramfs.cpio.lz4
 }
+
+menuentry "GeminiOS Live (Verbose Boot)" {
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 loglevel=7 ignore_loglevel security=selinux selinux=1 enforcing=0
+    initrd /boot/initramfs.cpio.lz4
+}
 """
     with open(os.path.join(ISO_WORK_DIR, "boot", "grub", "grub.cfg"), "w") as f:
         f.write(grub_conf)
