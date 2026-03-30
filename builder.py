@@ -5068,12 +5068,12 @@ def create_iso():
 set default=0
 
 menuentry "GeminiOS Live" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 quiet loglevel=3 audit=0 security=selinux selinux=1 enforcing=0
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 quiet loglevel=3 audit=0 selinux=0
     initrd /boot/initramfs.cpio.lz4
 }
 
 menuentry "GeminiOS Live (Verbose Boot)" {
-    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 loglevel=7 ignore_loglevel security=selinux selinux=1 enforcing=0
+    linux /boot/kernel console=tty0 console=ttyS0,115200n8 net.ifnames=0 loglevel=7 ignore_loglevel audit=0 selinux=0
     initrd /boot/initramfs.cpio.lz4
 }
 """
