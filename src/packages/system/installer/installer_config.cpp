@@ -364,9 +364,11 @@ void print_configuration_summary(const InstallerConfig& config) {
 
 bool configure_installer(InstallerConfig& config, const ToolRegistry& tools) {
     while (true) {
-        print_header("Configuration");
-        print_configuration_summary(config);
-        std::cout << "\n";
+        auto render_configuration_screen = [&config]() {
+            print_header("Configuration");
+            print_configuration_summary(config);
+            std::cout << "\n";
+        };
         const int choice = prompt_choice(
             "Select an option:",
             {
@@ -382,7 +384,12 @@ bool configure_installer(InstallerConfig& config, const ToolRegistry& tools) {
                 "Reset to defaults",
                 "Quit installer"
             },
-            8
+            8,
+            {
+                {"q", 10},
+                {"quit", 10}
+            },
+            render_configuration_screen
         );
 
         if (choice == 0) configure_partitioning(config);

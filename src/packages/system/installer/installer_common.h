@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace installer {
@@ -165,6 +167,13 @@ bool prompt_yes_no(const std::string& question, bool default_value);
 std::string prompt_text(const std::string& question, const std::string& default_value = "", bool allow_empty = false);
 bool parse_int(const std::string& value, int& out_value);
 int prompt_choice(const std::string& title, const std::vector<std::string>& options, int default_index = 0);
+int prompt_choice(
+    const std::string& title,
+    const std::vector<std::string>& options,
+    int default_index,
+    const std::vector<std::pair<std::string, int>>& aliases,
+    const std::function<void()>& redraw
+);
 std::string partition_mode_label(PartitionMode mode);
 std::string boot_mode_label(BootMode mode);
 std::string filesystem_label(FilesystemType type);

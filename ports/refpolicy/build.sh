@@ -24,9 +24,11 @@ LOADER="$POLICY_SYSROOT/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
 LIB_PATH="$POLICY_SYSROOT/lib/x86_64-linux-gnu:$POLICY_SYSROOT/usr/lib/x86_64-linux-gnu:$POLICY_SYSROOT/lib64:$POLICY_SYSROOT/usr/lib64"
 TOOL_WRAP_DIR="$(mktemp -d)"
 STAGE_DIR="$(mktemp -d)"
+FILE_CONTEXTS_LOCAL_BACKUP="$(mktemp)"
 
 cleanup() {
     rm -rf "$TOOL_WRAP_DIR" "$STAGE_DIR"
+    rm -f "$FILE_CONTEXTS_LOCAL_BACKUP"
 }
 trap cleanup EXIT
 
@@ -90,8 +92,19 @@ make \
     "${COMMON_MAKE_ARGS[@]}" \
     install
 
+LOCAL_CONTEXTS_PATH="$ROOTFS/etc/selinux/default/contexts/files/file_contexts.local"
+if [ -f "$LOCAL_CONTEXTS_PATH" ]; then
+    cp -a "$LOCAL_CONTEXTS_PATH" "$FILE_CONTEXTS_LOCAL_BACKUP"
+else
+    : > "$FILE_CONTEXTS_LOCAL_BACKUP"
+fi
+
 rm -f \
     "$ROOTFS/etc/selinux/default/policy"/policy.* \
     "$ROOTFS/etc/selinux/default/contexts/files"/file_contexts* 2>/dev/null || true
 
 cp -a "$STAGE_DIR/." "$ROOTFS/"
+
+if [ -s "$FILE_CONTEXTS_LOCAL_BACKUP" ]; then
+    cp -a "$FILE_CONTEXTS_LOCAL_BACKUP" "$LOCAL_CONTEXTS_PATH"
+fi

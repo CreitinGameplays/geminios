@@ -458,8 +458,23 @@ bool parse_int(const std::string& value, int& out_value) {
     return true;
 }
 
-int prompt_choice(const std::string& title, const std::vector<std::string>& options, int default_index) {
+int prompt_choice(
+    const std::string& title,
+    const std::vector<std::string>& options,
+    int default_index,
+    const std::vector<std::pair<std::string, int>>& aliases,
+    const std::function<void()>& redraw
+) {
+    std::string pending_notice;
     while (true) {
+        if (redraw) {
+            redraw();
+        }
+        if (!pending_notice.empty()) {
+            print_notice("!", C_YELLOW, pending_notice);
+            std::cout << "\n";
+            pending_notice.clear();
+        }
         std::cout << title << "\n";
         for (size_t i = 0; i < options.size(); ++i) {
             std::cout << "  " << (i + 1) << ". " << options[i];
@@ -473,13 +488,30 @@ int prompt_choice(const std::string& title, const std::vector<std::string>& opti
         input = trim(input);
         if (input.empty()) return default_index;
 
+        const std::string lowered = to_lower(input);
+        for (const auto& alias : aliases) {
+            if (lowered == to_lower(alias.first) &&
+                alias.second >= 0 &&
+                alias.second < static_cast<int>(options.size())) {
+                return alias.second;
+            }
+        }
+
         int parsed = 0;
         if (!parse_int(input, parsed) || parsed < 1 || parsed > static_cast<int>(options.size())) {
-            print_notice("!", C_YELLOW, "Enter a valid menu number.");
+            if (redraw) {
+                pending_notice = "Enter a valid menu number.";
+            } else {
+                print_notice("!", C_YELLOW, "Enter a valid menu number.");
+            }
             continue;
         }
         return parsed - 1;
     }
+}
+
+int prompt_choice(const std::string& title, const std::vector<std::string>& options, int default_index) {
+    return prompt_choice(title, options, default_index, {}, {});
 }
 
 std::string partition_mode_label(PartitionMode mode) {
