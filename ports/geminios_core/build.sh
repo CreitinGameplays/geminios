@@ -100,6 +100,17 @@ cat > "$ROOTFS/root/.bashrc" <<EOF
 export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
 EOF
 
+mkdir -p "$ROOTFS/etc/skel"
+cat > "$ROOTFS/etc/skel/.bashrc" <<EOF
+export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\\$ '
+EOF
+
+cat > "$ROOTFS/etc/skel/.profile" <<'EOF'
+if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
+EOF
+
 mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.conf.d"
 mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg/autostart" "$ROOTFS/etc/xdg/fastfetch"
 mkdir -p "$ROOTFS/usr/libexec/geminios/session-env.d"

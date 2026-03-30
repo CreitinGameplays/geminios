@@ -13,7 +13,7 @@ Implement a low-level package worker binary (`gpkg-worker`) that handles the act
 - [x] **Critical**: During unpacking, record *every* file and directory created into a `.list` file (e.g., `/var/lib/gpkg/info/<pkg>.list`).
     - [x] Ensure directories are recorded.
     - [x] Ensure files are recorded.
-- [ ] Implement conflict detection (optional for v1, but good to have: check if file exists and is owned by another package).
+- [x] Implement conflict detection (optional for v1, but good to have: check if file exists and is owned by another package).
 
 ## Removal Logic (`--remove`)
 - [x] Implement `.list` file parsing.

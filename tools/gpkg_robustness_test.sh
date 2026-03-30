@@ -412,6 +412,23 @@ pkg_installed_version() {
     printf '%s\n' "$line"
 }
 
+pkg_live_version() {
+    local output line
+    output="$(pkg_show_output "$1" || true)"
+    line="$(sed -n \
+        -e 's/^  Installed:[[:space:]]*yes (\(.*\))$/\1/p' \
+        -e 's/^  Installed:[[:space:]]*base system (\(.*\))$/\1/p' \
+        <<<"$output" | head -n1)"
+    printf '%s\n' "$line"
+}
+
+pkg_repo_version() {
+    local output line
+    output="$(pkg_show_output "$1" || true)"
+    line="$(sed -n 's/^  Version:[[:space:]]*//p' <<<"$output" | head -n1)"
+    printf '%s\n' "$line"
+}
+
 mark_touched_package() {
     local pkg="$1"
     [[ -n "$pkg" ]] || return 0
@@ -829,7 +846,16 @@ run_upgrade_planner_guardrail_tests() {
     assert_last_log_contains 'Do you want to continue\?|All packages are up to date\.' \
         "gpkg upgrade builds a usable plan before confirmation" || return 1
 
-    if pkg_available gpkg && [[ "$(pkg_installed_state gpkg)" == "no" ]]; then
+    local gpkg_state=""
+    local gpkg_live_ver=""
+    local gpkg_repo_ver=""
+    if pkg_available gpkg; then
+        gpkg_state="$(pkg_installed_state gpkg)"
+        gpkg_live_ver="$(pkg_live_version gpkg)"
+        gpkg_repo_ver="$(pkg_repo_version gpkg)"
+    fi
+
+    if pkg_available gpkg && [[ "$gpkg_state" == "no" ]]; then
         expect_success "gpkg-install-self-dry-run" \
             bash -lc 'printf "n\n" | "$1" install --recommended-no --suggested-no gpkg' _ "$GPKG_BIN" || return 1
         assert_last_log_contains 'Do you want to continue\?|The following packages will be installed:|The following packages will be upgraded:|The following packages will be reinstalled:' \
@@ -841,8 +867,18 @@ run_upgrade_planner_guardrail_tests() {
             "gpkg upgrade no longer ignores a repo-native self-update candidate" || return 1
         assert_last_log_contains '^  gpkg \(' \
             "gpkg upgrade surfaces the repo-native self-update candidate in the transaction plan" || return 1
+    elif pkg_available gpkg &&
+         [[ "$gpkg_state" == "base-system" ]] &&
+         [[ -n "$gpkg_live_ver" ]] &&
+         [[ "$gpkg_live_ver" == "$gpkg_repo_ver" ]]; then
+        expect_success "gpkg-install-self-base-system-noop" \
+            bash -lc 'printf "n\n" | "$1" install --recommended-no --suggested-no gpkg' _ "$GPKG_BIN" || return 1
+        assert_last_log_contains '^Nothing to do\.$' \
+            "gpkg install gpkg skips the transaction when the base-system copy already matches the repo version" || return 1
+        assert_last_log_not_contains 'The following packages will be installed:|The following packages will be upgraded:|The following packages will be reinstalled:|Do you want to continue\?' \
+            "gpkg install gpkg does not build a redundant self-install transaction for an exact base-system match" || return 1
     else
-        skip "Skipping gpkg self-upgrade regression because gpkg is unavailable in the repo view or already exact-installed"
+        skip "Skipping gpkg self-upgrade regression because gpkg is unavailable in the repo view, already exact-installed, or the base-system version differs from the repo"
     fi
 
     expect_failure "gpkg-protected-remove-self" "$GPKG_BIN" -y remove gpkg || return 1
