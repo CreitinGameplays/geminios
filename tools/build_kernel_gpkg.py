@@ -13,6 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_SDK_DIR = Path("/home/creitin/Documents/geminios-sdk")
 DEFAULT_CONFIG_PATH = ROOT_DIR / "build_system" / "kernel_package_channels.json"
 DEFAULT_OUTPUT_ROOT = ROOT_DIR / "output" / "kernel-packages"
+DEFAULT_EXPORT_ROOT = ROOT_DIR / "export"
 
 
 def eprint(message):
@@ -192,6 +193,16 @@ def scan_repo(sdk_dir, repo_arch_dir):
     run([sys.executable, str(scanner), str(repo_arch_dir)])
 
 
+def publish_packages_to_export(export_root, architecture, repo_subdir, built_outputs, sdk_dir):
+    repo_arch_dir = export_root / architecture
+    target_dir = repo_arch_dir / repo_subdir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for package_path in built_outputs:
+        shutil.copy2(package_path, target_dir / package_path.name)
+    scan_repo(sdk_dir, repo_arch_dir)
+    return repo_arch_dir
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Build GeminiOS kernel .gpkg packages and optional repo metadata."
@@ -209,8 +220,16 @@ def main():
     parser.add_argument("--sdk-dir", default=str(DEFAULT_SDK_DIR), help="Path to the GeminiOS SDK checkout")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="Kernel packaging config JSON")
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="Workspace for generated source/package files")
-    parser.add_argument("--repo-root", help="Optional repository root; when set the script copies packages into <repo-root>/<arch>/ and refreshes Packages.json.zst")
-    parser.add_argument("--repo-subdir", help="Optional subdirectory inside <repo-root>/<arch>/, default comes from config")
+    parser.add_argument(
+        "--export-root",
+        default=str(DEFAULT_EXPORT_ROOT),
+        help="Export root to publish built packages and refresh Packages.json.zst, default: ./export",
+    )
+    parser.add_argument(
+        "--repo-root",
+        help="Deprecated alias for --export-root; when set it overrides the export destination",
+    )
+    parser.add_argument("--repo-subdir", help="Optional subdirectory inside <export-root>/<arch>/, default comes from config")
     parser.add_argument("--skip-meta", action="store_true", help="Only build the versioned image package")
     args = parser.parse_args()
 
@@ -227,6 +246,7 @@ def main():
     versioned_package_name = f"geminios-kernel-image-{package_suffix}"
     sdk_dir = Path(args.sdk_dir).resolve()
     output_root = Path(args.output_root).resolve()
+    export_root = Path(args.repo_root or args.export_root).resolve()
     work_root = output_root / "sources"
     packages_root = output_root / "packages"
     work_root.mkdir(parents=True, exist_ok=True)
@@ -259,14 +279,15 @@ def main():
         print(f"Built {meta_output}")
         built_outputs.append(meta_output)
 
-    if args.repo_root:
-        repo_arch_dir = Path(args.repo_root).resolve() / args.architecture
-        target_dir = repo_arch_dir / repo_subdir
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for package_path in built_outputs:
-            shutil.copy2(package_path, target_dir / package_path.name)
-        scan_repo(sdk_dir, repo_arch_dir)
-        print(f"Updated repository index under {repo_arch_dir}")
+    repo_arch_dir = publish_packages_to_export(
+        export_root,
+        args.architecture,
+        repo_subdir,
+        built_outputs,
+        sdk_dir,
+    )
+    print(f"Published packages under {repo_arch_dir / repo_subdir}")
+    print(f"Updated index: {repo_arch_dir / 'Packages.json.zst'}")
 
     print("Kernel package build complete.")
 

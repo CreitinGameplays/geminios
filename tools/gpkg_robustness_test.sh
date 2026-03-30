@@ -828,6 +828,28 @@ run_upgrade_planner_guardrail_tests() {
         "gpkg upgrade reaches the confirmation prompt without planner conflicts" || return 1
     assert_last_log_contains 'Do you want to continue\?|All packages are up to date\.' \
         "gpkg upgrade builds a usable plan before confirmation" || return 1
+
+    if pkg_available gpkg && [[ "$(pkg_installed_state gpkg)" == "no" ]]; then
+        expect_success "gpkg-install-self-dry-run" \
+            bash -lc 'printf "n\n" | "$1" install --recommended-no --suggested-no gpkg' _ "$GPKG_BIN" || return 1
+        assert_last_log_contains 'Do you want to continue\?|The following packages will be installed:|The following packages will be upgraded:|The following packages will be reinstalled:' \
+            "gpkg install gpkg builds a real transaction when a repo-native self-update is available" || return 1
+
+        expect_success "gpkg-upgrade-self-dry-run" \
+            bash -lc 'printf "n\n" | "$1" upgrade --recommended-no --suggested-no' _ "$GPKG_BIN" || return 1
+        assert_last_log_not_contains '^All packages are up to date\.$' \
+            "gpkg upgrade no longer ignores a repo-native self-update candidate" || return 1
+        assert_last_log_contains '^  gpkg \(' \
+            "gpkg upgrade surfaces the repo-native self-update candidate in the transaction plan" || return 1
+    else
+        skip "Skipping gpkg self-upgrade regression because gpkg is unavailable in the repo view or already exact-installed"
+    fi
+
+    expect_failure "gpkg-protected-remove-self" "$GPKG_BIN" -y remove gpkg || return 1
+    assert_last_log_not_contains 'The following packages will be REMOVED:|Do you want to continue\?' \
+        "gpkg does not build a self-removal transaction" || return 1
+    assert_last_log_contains "Refusing to remove 'gpkg' because it is the GeminiOS package manager" \
+        "gpkg remove explicitly protects the package manager itself" || return 1
     say
 }
 
