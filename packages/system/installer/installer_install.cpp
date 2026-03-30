@@ -661,17 +661,59 @@ bool write_selinux_config(const std::string& mode, std::string& error) {
     return true;
 }
 
-std::string target_selinux_file_contexts() {
+std::string build_target_selinux_spec_file(std::string& cleanup_path) {
+    cleanup_path.clear();
+
     const std::vector<std::string> candidates = {
         kTargetRoot + "/etc/selinux/default/contexts/files/file_contexts",
         kTargetRoot + "/etc/selinux/targeted/contexts/files/file_contexts",
     };
 
+    std::string base_contexts;
     for (const auto& candidate : candidates) {
-        if (file_exists(candidate)) return candidate;
+        if (file_exists(candidate)) {
+            base_contexts = candidate;
+            break;
+        }
+    }
+    if (base_contexts.empty()) {
+        return "";
     }
 
-    return "";
+    const std::string local_contexts = base_contexts + ".local";
+    if (!file_exists(local_contexts)) {
+        return base_contexts;
+    }
+
+    char temp_template[] = "/tmp/geminios-installer-file-contexts-XXXXXX";
+    int fd = mkstemp(temp_template);
+    if (fd < 0) {
+        log_message("WARN", "Failed to create temporary SELinux spec merge file; falling back to the base file_contexts.");
+        return base_contexts;
+    }
+    close(fd);
+
+    std::ifstream base_input(base_contexts);
+    std::ifstream local_input(local_contexts);
+    std::ofstream merged_output(temp_template, std::ios::trunc);
+    if (!base_input || !local_input || !merged_output) {
+        ensure_file_removed(temp_template);
+        log_message("WARN", "Failed to merge file_contexts.local; falling back to the base file_contexts.");
+        return base_contexts;
+    }
+
+    merged_output << base_input.rdbuf();
+    merged_output << "\n";
+    merged_output << local_input.rdbuf();
+    merged_output.close();
+    if (!merged_output) {
+        ensure_file_removed(temp_template);
+        log_message("WARN", "Failed to write merged SELinux file contexts; falling back to the base file_contexts.");
+        return base_contexts;
+    }
+
+    cleanup_path = temp_template;
+    return cleanup_path;
 }
 
 bool relabel_selinux_target(const ToolRegistry& tools, std::string& error) {
@@ -679,7 +721,8 @@ bool relabel_selinux_target(const ToolRegistry& tools, std::string& error) {
 
     if (!write_selinux_config("permissive", error)) return false;
 
-    const std::string file_contexts = target_selinux_file_contexts();
+    std::string merged_file_contexts_cleanup;
+    const std::string file_contexts = build_target_selinux_spec_file(merged_file_contexts_cleanup);
     if (tools.setfiles.empty() || file_contexts.empty()) {
         log_message("WARN", "SELinux relabel skipped because setfiles or file_contexts is unavailable. Leaving target permissive.");
         if (!write_text_file(kTargetRoot + "/.autorelabel", "")) {
@@ -693,6 +736,9 @@ bool relabel_selinux_target(const ToolRegistry& tools, std::string& error) {
         tools.setfiles,
         {"-F", "-r", kTargetRoot, file_contexts, kTargetRoot}
     );
+    if (!merged_file_contexts_cleanup.empty()) {
+        ensure_file_removed(merged_file_contexts_cleanup);
+    }
     if (!relabel.success) {
         log_message("WARN", "SELinux relabel failed. Leaving target permissive and scheduling a first-boot relabel.");
         if (!write_text_file(kTargetRoot + "/.autorelabel", "")) {
