@@ -1,4 +1,4 @@
-![GeminiOS Screenshot](screenshot/img0.png)
+![GeminiOS Screenshot](screenshot/img2.png)
 
 # GeminiOS Documentation
 
