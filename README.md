@@ -384,6 +384,8 @@ make x86_64_defconfig
 ./scripts/config --enable CONFIG_VFAT_FS
 ./scripts/config --enable CONFIG_EXFAT_FS
 ./scripts/config --enable CONFIG_NTFS3_FS
+./scripts/config --enable CONFIG_F2FS_FS
+./scripts/config --enable UDF_FS
 ./scripts/config --enable CONFIG_EXT4_FS_POSIX_ACL
 ./scripts/config --enable CONFIG_BTRFS_FS_POSIX_ACL
 ./scripts/config --enable CONFIG_TMPFS_POSIX_ACL
