@@ -106,6 +106,10 @@
         "sbin/mkfs.ext2",
         "sbin/mke2fs"
     ],
+    "dosfstools": [
+        "sbin/mkfs.vfat",
+        "sbin/fsck.vfat"
+    ],
     "inih": [
         "usr/include/ini.h",
         "usr/lib/x86_64-linux-gnu/libinih.so*"
@@ -708,6 +712,11 @@
         "bin/pgrep",
         "bin/pkill",
         "usr/lib/x86_64-linux-gnu/libproc2.so"
+    ],
+    "gpkg": [
+        "bin/apps/system/gpkg",
+        "bin/apps/system/gpkg-worker",
+        "bin/gpkg"
     ],
     "geminios_complex": [
         "bin/apps/system/gpkg",
