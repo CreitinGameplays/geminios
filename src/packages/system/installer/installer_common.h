@@ -167,6 +167,7 @@ CommandResult run_command(const std::string& path, const std::vector<std::string
 CommandResult run_command_capture(const std::string& path, const std::vector<std::string>& args, std::string& output);
 bool prompt_yes_no(const std::string& question, bool default_value);
 std::string prompt_text(const std::string& question, const std::string& default_value = "", bool allow_empty = false);
+std::string prompt_secret(const std::string& question, const std::string& default_value = "", bool allow_empty = false);
 bool parse_int(const std::string& value, int& out_value);
 int prompt_choice(const std::string& title, const std::vector<std::string>& options, int default_index = 0);
 int prompt_choice(

@@ -277,10 +277,10 @@ void configure_identity_menu(InstallerConfig& config) {
 
 std::string prompt_password_with_confirmation(const std::string& label, const std::string& current_password = "") {
     while (true) {
-        std::string password = prompt_text(label, current_password.empty() ? "" : "<unchanged>", current_password.empty());
+        std::string password = prompt_secret(label, current_password.empty() ? "" : "<unchanged>", current_password.empty());
         if (password == "<unchanged>") return current_password;
         if (password.empty() && !current_password.empty()) return current_password;
-        std::string confirm = prompt_text("Confirm " + label, "", false);
+        std::string confirm = prompt_secret("Confirm " + label, "", false);
         if (password == confirm) return password;
         print_notice("!", C_YELLOW, "Passwords did not match.");
     }

@@ -13,6 +13,7 @@
 #include <sstream>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <termios.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -428,14 +429,55 @@ bool prompt_yes_no(const std::string& question, bool default_value) {
     }
 }
 
+std::string read_prompt_line(bool echo_input) {
+    std::string input;
+    if (echo_input || !isatty(STDIN_FILENO)) {
+        std::getline(std::cin, input);
+        return input;
+    }
+
+    struct termios current {};
+    if (tcgetattr(STDIN_FILENO, &current) != 0) {
+        std::getline(std::cin, input);
+        std::cout << std::endl;
+        return input;
+    }
+
+    struct termios original = current;
+    current.c_lflag &= ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSANOW, &current);
+    std::getline(std::cin, input);
+    tcsetattr(STDIN_FILENO, TCSANOW, &original);
+    std::cout << std::endl;
+    return input;
+}
+
 std::string prompt_text(const std::string& question, const std::string& default_value, bool allow_empty) {
     while (true) {
         std::cout << question;
         if (!default_value.empty()) std::cout << " [" << default_value << "]";
         std::cout << ": ";
 
-        std::string input;
-        std::getline(std::cin, input);
+        std::string input = read_prompt_line(true);
+        input = trim(input);
+        if (input.empty()) {
+            if (!default_value.empty()) return default_value;
+            if (allow_empty) return "";
+        } else {
+            return input;
+        }
+
+        print_notice("!", C_YELLOW, "A value is required.");
+    }
+}
+
+std::string prompt_secret(const std::string& question, const std::string& default_value, bool allow_empty) {
+    while (true) {
+        std::cout << question;
+        if (!default_value.empty()) std::cout << " [" << default_value << "]";
+        std::cout << ": ";
+
+        std::string input = read_prompt_line(false);
         input = trim(input);
         if (input.empty()) {
             if (!default_value.empty()) return default_value;
