@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import os
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
+from gpkg_version import DEFAULT_EXPORT_ROOT, default_gpkg_package_version
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 GPKG_DIR = ROOT_DIR / "gpkg"
-SYS_INFO_PATH = ROOT_DIR / "src" / "sys_info.h"
 DEFAULT_SDK_DIR = Path("/home/creitin/Documents/geminios-sdk")
-DEFAULT_EXPORT_ROOT = ROOT_DIR / "export"
 
 
 def eprint(message):
@@ -28,13 +24,6 @@ def run(cmd, *, cwd=None):
         raise RuntimeError(f"command failed: {' '.join(cmd)}")
 
 
-def capture(cmd, *, cwd=None):
-    result = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f"command failed: {' '.join(cmd)}")
-    return result.stdout.strip()
-
-
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -45,44 +34,6 @@ def write_json(path, data):
 def copy_file(src, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
-
-
-def read_sys_info_macros(path):
-    macros = {}
-    if not path.exists():
-        return macros
-
-    define_re = re.compile(r'^#define\s+([A-Z0-9_]+)\s+"([^"]*)"')
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            match = define_re.match(line.strip())
-            if match:
-                macros[match.group(1)] = match.group(2)
-    return macros
-
-
-def sanitize_version_component(value):
-    cleaned = value.strip().lower()
-    cleaned = re.sub(r"[^a-z0-9.+~-]+", ".", cleaned)
-    cleaned = re.sub(r"\.{2,}", ".", cleaned).strip(".")
-    return cleaned or "rolling"
-
-
-def detect_git_revision(repo_dir):
-    revision = capture(["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"])
-    dirty = bool(capture(["git", "-C", str(repo_dir), "status", "--short"]))
-    return revision, dirty
-
-
-def default_package_version():
-    macros = read_sys_info_macros(SYS_INFO_PATH)
-    version_id = sanitize_version_component(macros.get("OS_VERSION_ID", "rolling"))
-    revision, dirty = detect_git_revision(GPKG_DIR)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    suffix = f"{version_id}.git{timestamp}.{revision}"
-    if dirty:
-        suffix += ".dirty"
-    return f"0+{suffix}"
 
 
 def build_control(args):
@@ -102,7 +53,7 @@ def stage_install_tree(root_dir, args):
     make_cmd = ["make", "-C", str(GPKG_DIR)]
     if args.clean_first:
         run(make_cmd + ["clean"])
-    run(make_cmd + ["install", f"DESTDIR={root_dir}"])
+    run(make_cmd + ["install", f"DESTDIR={root_dir}", f"GPKG_VERSION={args.version}"])
 
     doc_dir = root_dir / "usr" / "share" / "doc" / args.package_name
     copy_file(GPKG_DIR / "README.md", doc_dir / "README.md")
@@ -159,10 +110,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    args.version = args.version or default_package_version()
-
     sdk_dir = Path(args.sdk_dir).resolve()
     export_root = Path(args.export_root).resolve()
+    args.version = args.version or default_gpkg_package_version(root_dir=ROOT_DIR, export_root=export_root)
     repo_arch_dir = export_root / args.architecture
     target_dir = repo_arch_dir / args.subdir
     target_dir.mkdir(parents=True, exist_ok=True)

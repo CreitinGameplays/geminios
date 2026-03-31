@@ -19,6 +19,8 @@ import urllib.error
 from urllib.parse import urljoin
 from datetime import datetime, timezone
 
+from tools.gpkg_version import default_gpkg_package_version
+
 # Ensure consistent command output parsing across different locales
 os.environ["LC_ALL"] = "C"
 
@@ -335,6 +337,7 @@ PACKAGES = [
     "refpolicy",
     "util-linux",
     "e2fsprogs",
+    "dosfstools",
     "inih",
     "liburcu",
     "lzo",
@@ -467,6 +470,7 @@ PACKAGE_DEPENDENCIES = {
     "inih": [],
     "liburcu": [],
     "lzo": [],
+    "dosfstools": [],
     "xfsprogs": ["util-linux", "e2fsprogs", "inih", "liburcu"],
     "btrfs-progs": ["util-linux", "e2fsprogs", "zlib", "zstd", "lzo"],
     "f2fs-tools": ["util-linux"],
@@ -1347,6 +1351,8 @@ def get_declared_port_version(pkg_name):
     if version is None and pkg_name.startswith("geminios_"):
         release = get_geminios_release_info()
         version = release["build_id"]
+    if version is None and pkg_name == "gpkg":
+        version = default_gpkg_package_version(root_dir=ROOT_DIR, export_root=os.path.join(ROOT_DIR, "export"))
 
     _PORT_DECLARED_VERSION_CACHE[pkg_name] = version
     return version
