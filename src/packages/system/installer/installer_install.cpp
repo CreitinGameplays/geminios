@@ -298,6 +298,36 @@ bool sanitize_target_after_live_root_fallback(std::string& error) {
     return true;
 }
 
+bool remove_target_installer_payload(std::string& error) {
+    ensure_file_removed(kTargetRoot + "/bin/apps/system/installer");
+
+    const std::string base_system_manifest = kTargetRoot + "/usr/share/gpkg/base-system.json";
+    std::vector<std::string> lines;
+    if (!read_lines(base_system_manifest, lines)) {
+        if (file_exists(base_system_manifest)) {
+            error = "Failed to read the target base-system package registry.";
+            return false;
+        }
+        return true;
+    }
+
+    std::vector<std::string> filtered;
+    filtered.reserve(lines.size());
+    for (const auto& line : lines) {
+        if (line.find("\"/bin/apps/system/installer\"") != std::string::npos) {
+            continue;
+        }
+        filtered.push_back(line);
+    }
+
+    if (!write_lines(base_system_manifest, filtered, 0644)) {
+        error = "Failed to update the target base-system package registry.";
+        return false;
+    }
+
+    return true;
+}
+
 std::string normalize_machine_id(std::string value) {
     std::string normalized;
     normalized.reserve(value.size());
@@ -571,6 +601,9 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
     }
 
     ensure_file_removed(kTargetRoot + "/etc/geminios-live");
+    if (!remove_target_installer_payload(error)) {
+        return false;
+    }
 
     if (using_live_root_fallback) {
         if (!sanitize_target_after_live_root_fallback(error)) {
