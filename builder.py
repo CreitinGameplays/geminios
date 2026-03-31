@@ -4070,10 +4070,6 @@ def stage_selinux_rootfs_labels(root_dir=None):
             )
 
     if os.geteuid() != 0:
-        print_warning(
-            "  Skipping staged SELinux relabel because the builder is not running as root. "
-            "The live image will remain permissive and the installer will relabel installed systems."
-        )
         if merged_file_contexts_cleanup:
             try:
                 os.unlink(merged_file_contexts_cleanup)
