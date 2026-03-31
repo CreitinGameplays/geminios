@@ -106,6 +106,20 @@
         "sbin/mkfs.ext2",
         "sbin/mke2fs"
     ],
+    "inih": [
+        "usr/include/ini.h",
+        "usr/lib/x86_64-linux-gnu/libinih.so*"
+    ],
+    "liburcu": [
+        "usr/include/urcu.h",
+        "usr/include/urcu",
+        "usr/lib/x86_64-linux-gnu/liburcu*.so*",
+        "usr/lib/x86_64-linux-gnu/pkgconfig/liburcu*.pc"
+    ],
+    "lzo": [
+        "usr/include/lzo",
+        "usr/lib/x86_64-linux-gnu/liblzo2.so*"
+    ],
     "xfsprogs": [
         "sbin/mkfs.xfs",
         "sbin/fsck.xfs",
@@ -113,8 +127,8 @@
     ],
     "btrfs-progs": [
         "bin/btrfs",
-        "sbin/mkfs.btrfs",
-        "sbin/fsck.btrfs"
+        "bin/mkfs.btrfs",
+        "bin/fsck.btrfs"
     ],
     "f2fs-tools": [
         "sbin/mkfs.f2fs",

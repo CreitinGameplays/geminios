@@ -1,14 +1,21 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 F2FS_TOOLS_VER="1.16.0"
 download_and_extract \
-    "https://mirrors.edge.kernel.org/pub/linux/kernel/people/jaegeuk/f2fs-tools/f2fs-tools-$F2FS_TOOLS_VER.tar.gz" \
+    "https://sources.voidlinux.org/f2fs-tools-$F2FS_TOOLS_VER/f2fs-tools-$F2FS_TOOLS_VER.tar.gz" \
     "f2fs-tools-$F2FS_TOOLS_VER.tar.gz" \
     "f2fs-tools-$F2FS_TOOLS_VER"
 
 cd "$DEP_DIR/f2fs-tools-$F2FS_TOOLS_VER"
-make distclean || true
+
+if [ -f Makefile ]; then
+    make distclean || true
+fi
+
+if [ ! -x ./configure ]; then
+    sh ./autogen.sh
+fi
 
 ./configure \
     --prefix=/usr \

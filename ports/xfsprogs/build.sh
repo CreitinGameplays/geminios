@@ -15,6 +15,11 @@ make distclean || true
     --bindir=/bin \
     --sbindir=/sbin \
     --libdir=/usr/lib/x86_64-linux-gnu \
+    --disable-static \
+    --enable-libicu=no \
+    --with-systemd-unit-dir=no \
+    --with-udev-rule-dir=no \
+    --with-crond-dir=no \
     --host=x86_64-linux-gnu
 
 make -j"$JOBS"
