@@ -99,6 +99,18 @@ is_nonruntime_broken_linker_symlink() {
     return 0
 }
 
+is_benign_compatibility_broken_symlink() {
+    local path="${1-}"
+    case "$path" in
+        "$(root_path /usr/lib)"/x86_64-linux-gnu/qt-default/qtchooser/*.conf|\
+        "$(root_path /usr/lib64)"/qt-default/qtchooser/*.conf|\
+        "$(root_path /usr/lib64/x86_64-linux-gnu)"/qt-default/qtchooser/*.conf)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 display_path() {
     local p="${1:-}"
     if [[ "$ROOT" == "/" ]]; then
@@ -161,7 +173,13 @@ elf_dependency_audit_mode_for_path() {
         */gtk-3.0/*/immodules/*.so|\
         */gtk-3.0/*/printbackends/*.so|\
         */gdk-pixbuf-2.0/*/loaders/*.so|\
-        */gio/modules/*.so)
+        */gio/modules/*.so|\
+        */qt5/plugins/*.so|\
+        */qt5/plugins/*/*.so|\
+        */qt5/plugins/*/*/*.so|\
+        */qt6/plugins/*.so|\
+        */qt6/plugins/*/*.so|\
+        */qt6/plugins/*/*/*.so)
             printf '%s\n' "module"
             ;;
         *)
@@ -288,12 +306,19 @@ live_ldd_resolves_needed() {
     local needed="${2-}"
     [[ -n "$file" && -n "$needed" ]] || return 1
 
-    local out line
+    local out line trimmed
     out="$(live_ldd_output "$file")" || return 1
-    line="$(grep -F "$needed" <<<"$out" | head -n 1 || true)"
-    [[ -n "$line" ]] || return 1
-    grep -Eq '=>[[:space:]]*not found|not found' <<<"$line" && return 1
-    return 0
+    while IFS= read -r line; do
+        trimmed="$(trim_whitespace "$line")"
+        case "$trimmed" in
+            "$needed "*)
+                if ! grep -Eq '=>[[:space:]]*not found|not found' <<<"$trimmed"; then
+                    return 0
+                fi
+                ;;
+        esac
+    done <<<"$out"
+    return 1
 }
 
 load_loader_config_dirs
@@ -318,13 +343,17 @@ check_broken_symlinks() {
 
     local out="$REPORT_DIR/broken-symlinks.txt"
     local linker_out="$REPORT_DIR/broken-linker-symlinks.txt"
+    local compat_out="$REPORT_DIR/broken-compatibility-symlinks.txt"
     : > "$out"
     : > "$linker_out"
+    : > "$compat_out"
 
     if ((${#roots[@]})); then
         while IFS= read -r -d '' p; do
             if is_nonruntime_broken_linker_symlink "$p"; then
                 printf '%s\n' "$(display_path "$p")" >> "$linker_out"
+            elif is_benign_compatibility_broken_symlink "$p"; then
+                printf '%s\n' "$(display_path "$p")" >> "$compat_out"
             else
                 printf '%s\n' "$(display_path "$p")" >> "$out"
             fi
@@ -335,6 +364,8 @@ check_broken_symlinks() {
         fail "Found broken symlinks. See $out"
     elif [[ -s "$linker_out" ]]; then
         warn "Found broken unversioned library linker symlinks that do not affect runtime loading. See $linker_out; run 'gpkg repair' or 'gpkg-worker --refresh-runtime-linker-state' to clean them."
+    elif [[ -s "$compat_out" ]]; then
+        warn "Found broken optional compatibility symlinks that do not affect normal runtime loading. See $compat_out."
     else
         ok "No broken symlinks found in core runtime paths"
     fi
@@ -813,6 +844,7 @@ audit_one_elf() {
     fi
 
     local search_dirs=()
+    search_dirs+=("$origin")
     if [[ -n "$runpath" ]]; then
         local expanded
         expanded="$(expand_origin_list "$runpath" "$origin")"
@@ -881,9 +913,15 @@ check_elf_closure() {
 
     local count=0
     local module_count=0
+    declare -A seen_elf=()
     if ((${#roots[@]})); then
         while IFS= read -r -d '' f; do
             if is_elf "$f"; then
+                local canonical
+                canonical="$(canon "$f")"
+                [[ -n "$canonical" ]] || canonical="$f"
+                [[ -n "${seen_elf[$canonical]:-}" ]] && continue
+                seen_elf["$canonical"]=1
                 count=$((count + 1))
                 local mode
                 mode="$(elf_dependency_audit_mode_for_path "$f")"
