@@ -137,18 +137,16 @@ GeminiOS currently boots and runs a regular X11 desktop session. The base image 
 - Mesa built with both `x11` and `wayland` platforms
 - Xwayland-capable `xorg-server`
 - `libinput` for compositor/input stacks
-- `json-glib`, `dconf`, and `xdg-user-dirs` as core GNOME-facing session prerequisites
+- `json-glib`, `dconf`, and `xdg-user-dirs`
 - session bootstrap helpers in `geminios_core`:
   - `/bin/startwayland`
-  - `/bin/startweston`
-  - `/bin/startgnome-wayland`
   - `/bin/wayland-session-report`
   - `/usr/libexec/geminios/session-launch`
   - `/usr/libexec/geminios/session-runtime`
 
 That solves the class of runtime failures caused by packages expecting GTK/Wayland client symbols to exist.
 It also means GeminiOS now has a non-`systemd --user` session bootstrap path for imported Wayland desktops: the wrapper starts a session bus when needed, exports the XDG session variables, and opportunistically launches common user daemons such as PipeWire, portals, polkit agents, `at-spi`, and `gnome-keyring` if those packages are installed later via `.gpkg`.
-The base login/session layer now also seeds the standard XDG home directories, infers the runtime D-Bus socket when one already exists, and supports shell drop-ins under `/usr/libexec/geminios/session-env.d`, `/etc/geminios/session-env.d`, and `$HOME/.config/geminios/session-env.d` so future Wayland/GNOME packages can extend the session environment without patching `geminios_core` again.
+The base login/session layer now also seeds the standard XDG home directories, infers the runtime D-Bus socket when one already exists, and supports shell drop-ins under `/usr/libexec/geminios/session-env.d`, `/etc/geminios/session-env.d`, and `$HOME/.config/geminios/session-env.d` so future Wayland packages can extend the session environment without patching `geminios_core` again.
 
 What it does **not** mean yet:
 
@@ -163,7 +161,6 @@ Once a compositor package is installed, the intended manual smoke-test flow from
 wayland-session-report
 startweston
 startwayland <compositor-command>
-startgnome-wayland
 ```
 
 `wayland-session-report` is the quick sanity check before launching a compositor: it reports the current XDG session environment, runtime sockets, DRM/input device visibility, and whether `Xwayland`, portals, PipeWire binaries are already installed.
