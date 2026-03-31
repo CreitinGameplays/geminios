@@ -3955,16 +3955,29 @@ def finalize_rootfs():
         f.write(f'ID={release["id"]}\n')
         f.write(f'ID_LIKE="{release["id_like"]}"\n')
         f.write(f'VERSION="{release["system_version"]}"\n')
-        f.write(f'PRETTY_NAME="{release["pretty_name"]}"\n')
+        f.write(f'PRETTY_NAME="{release["name"]}"\n')
         f.write(f'VERSION_ID="{release["version_id"]}"\n')
         f.write(f'VERSION_CODENAME="{release["codename"]}"\n')
         f.write(f'BUILD_ID="{release["build_id"]}"\n')
         f.write(f'IMAGE_ID="{release["image_id"]}"\n')
         f.write(f'IMAGE_VERSION="{release["snapshot_date"]}"\n')
         f.write(f'ANSI_COLOR="{release["ansi_color"]}"\n')
+        f.write('LOGO="distributor-logo-geminios"\n')
         f.write('HOME_URL="https://github.com/CreitinGameplays/geminios"\n')
         f.write('SUPPORT_URL="https://github.com/CreitinGameplays/geminios/issues"\n')
         f.write('BUG_REPORT_URL="https://github.com/CreitinGameplays/geminios/issues"\n')
+
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "lsb-release"), "w") as f:
+        f.write(f'DISTRIB_ID={release["name"]}\n')
+        f.write(f'DISTRIB_RELEASE={release["version_id"]}\n')
+        f.write(f'DISTRIB_CODENAME={release["codename"]}\n')
+        f.write(f'DISTRIB_DESCRIPTION="{release["name"]}"\n')
+
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "debian_version"), "w") as f:
+        f.write("GeminiOS\n")
+
+    with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "issue.net"), "w") as f:
+        f.write("GeminiOS\n")
 
     # 7. D-Bus Machine ID
     print_info("[*] Generating D-Bus machine-id...")

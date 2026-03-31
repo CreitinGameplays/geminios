@@ -634,6 +634,8 @@
         "etc/lightdm/lightdm.conf.d/50-geminios.conf",
         "etc/modules-load.d/fuse.conf",
         "etc/xdg/fastfetch/config.jsonc",
+        "usr/share/icons/hicolor/scalable/apps/distributor-logo-geminios.svg",
+        "usr/share/pixmaps/distributor-logo-geminios.svg",
         "usr/lib/ginit/services/dbus.gservice",
         "usr/lib/ginit/services/elogind.gservice",
         "usr/lib/ginit/services/fuse-device.gservice",

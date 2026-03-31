@@ -132,6 +132,7 @@ mkdir -p "$ROOTFS/etc/pam.d" "$ROOTFS/etc/security" "$ROOTFS/etc/elogind/logind.
 mkdir -p "$ROOTFS/etc/geminios/session-env.d" "$ROOTFS/etc/xdg" "$ROOTFS/etc/xdg/autostart" "$ROOTFS/etc/xdg/fastfetch"
 mkdir -p "$ROOTFS/usr/libexec/geminios/session-env.d"
 mkdir -p "$ROOTFS/usr/share/fastfetch/logos"
+mkdir -p "$ROOTFS/usr/share/icons/hicolor/scalable/apps" "$ROOTFS/usr/share/pixmaps"
 mkdir -p "$ROOTFS/etc/lightdm/lightdm.conf.d"
 mkdir -p "$ROOTFS/var/lib/lightdm/data" "$ROOTFS/var/cache/lightdm" "$ROOTFS/run/lightdm" "$ROOTFS/var/lib/sddm"
 if [ "$(id -u)" -eq 0 ]; then
@@ -152,6 +153,12 @@ FASTFETCH_ASCII_TARGET="$ROOTFS/usr/share/fastfetch/logos/geminios-ascii.txt"
 FASTFETCH_RENDERED_TARGET="$ROOTFS/usr/share/fastfetch/logos/geminios-rainbow.ans"
 cp "$FASTFETCH_ASCII_SOURCE" "$FASTFETCH_ASCII_TARGET"
 python3 "$ROOT_DIR/tools/generate_fastfetch_logo.py" "$FASTFETCH_ASCII_SOURCE" "$FASTFETCH_RENDERED_TARGET"
+
+BRANDING_ASSET_DIR="$ROOT_DIR/build_system/assets/branding"
+DISTRIBUTOR_LOGO_SOURCE="$BRANDING_ASSET_DIR/distributor-logo-geminios.svg"
+DISTRIBUTOR_LOGO_TARGET="$ROOTFS/usr/share/icons/hicolor/scalable/apps/distributor-logo-geminios.svg"
+cp "$DISTRIBUTOR_LOGO_SOURCE" "$DISTRIBUTOR_LOGO_TARGET"
+ln -sfn ../icons/hicolor/scalable/apps/distributor-logo-geminios.svg "$ROOTFS/usr/share/pixmaps/distributor-logo-geminios.svg"
 
 cat > "$ROOTFS/etc/xdg/fastfetch/config.jsonc" <<'EOF'
 {
