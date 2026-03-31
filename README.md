@@ -6,7 +6,7 @@ GeminiOS is a minimal, open-source, educational, Debian-derived Linux operating 
 
 The project now follows a clear model:
 
-- Debian-compatible userland and package ecosystem
+- Debian-derived userland and package ecosystem
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
 - `gpkg` as a testing-first package manager with GeminiOS/S2 packages layered on top
 
