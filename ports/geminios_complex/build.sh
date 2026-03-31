@@ -39,7 +39,7 @@ echo "Compiling greq..."
 build_tool "$ROOTFS/bin/apps/system/greq" "$PKGS/greq/greq.cpp"
 
 echo "Compiling User Tools..."
-for tool in passwd adduser useradd userdel usermod su sudo; do
+for tool in passwd adduser useradd userdel usermod su; do
     build_tool "$ROOTFS/bin/apps/system/$tool" "$PKGS/$tool/$tool.cpp"
 done
 

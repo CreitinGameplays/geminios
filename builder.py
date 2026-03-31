@@ -445,6 +445,7 @@ PACKAGES = [
     "diffutils",
     "patch",
     "which",
+    "sudo",
     "procps-ng",
     "nano",
     "grep",
@@ -467,6 +468,7 @@ PACKAGE_DEPENDENCIES = {
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
     "util-linux": ["ncurses"],
+    "sudo": ["linux-pam", "libcap", "openssl", "zlib", "selinux_userspace"],
     "inih": [],
     "liburcu": [],
     "lzo": [],
@@ -3780,7 +3782,7 @@ def finalize_rootfs():
     print_info("[*] Setting SUID permissions...")
     suid_fixups = [
         (os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", "su"), None),
-        (os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", "sudo"), None),
+        (os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "sudo"), None),
         (os.path.join(FINAL_ROOTFS_DIR, DBUS_HELPER_REL_PATH), DBUS_HELPER_REQUIRED_MODE),
     ]
     for path, exact_mode in suid_fixups:

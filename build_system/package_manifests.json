@@ -704,6 +704,17 @@
         "usr/bin/which",
         "bin/which"
     ],
+    "sudo": [
+        "usr/bin/sudo",
+        "usr/bin/sudoedit",
+        "usr/bin/sudoreplay",
+        "usr/bin/cvtsudoers",
+        "usr/sbin/visudo",
+        "usr/libexec/sudo/*",
+        "etc/pam.d/sudo",
+        "etc/pam.d/sudo-i",
+        "etc/sudoers"
+    ],
     "procps-ng": [
         "bin/ps",
         "bin/top",
@@ -721,7 +732,6 @@
     "geminios_complex": [
         "bin/apps/system/gpkg",
         "bin/apps/system/installer",
-        "bin/apps/system/sudo",
         "bin/apps/system/adduser",
         "bin/apps/system/useradd",
         "bin/apps/system/userdel",
