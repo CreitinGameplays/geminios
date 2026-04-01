@@ -110,6 +110,7 @@ def parse_args():
 
 
 def main():
+    shutil.rmtree("export/x86_64/gpkg/")
     args = parse_args()
     sdk_dir = Path(args.sdk_dir).resolve()
     export_root = Path(args.export_root).resolve()
