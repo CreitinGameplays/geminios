@@ -17,8 +17,7 @@ python3 tools/build_kernel_gpkg.py \
   --bzimage external_dependencies/linux-7.0-rc5/arch/x86/boot/bzImage \
   --modules-dir /tmp/geminios-kernel-stage/lib/modules/7.0-rc5 \
   --config-file external_dependencies/linux-7.0-rc5/.config \
-  --channel mainline \
-  --repo-root /tmp/geminios-kernel-repo
+  --channel mainline
 
 # builder
 mkdir -p '/media/creitin/External SSD/geminios-cache/debian-bootstrap'
