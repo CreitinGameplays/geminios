@@ -11,7 +11,7 @@ download_and_extract "$SRC_URL" "$ARCHIVE" "$DIR"
 
 cd "$DEP_DIR/$DIR"
 make distclean >/dev/null 2>&1 || true
-make defconfig
+make allnoconfig
 
 set_kconfig() {
     local key="$1"
@@ -33,8 +33,30 @@ disable_kconfig() {
 }
 
 set_kconfig CONFIG_STATIC y
+set_kconfig CONFIG_BUSYBOX y
 set_kconfig CONFIG_ASH y
 set_kconfig CONFIG_SH_IS_ASH y
+set_kconfig CONFIG_FEATURE_SH_STANDALONE y
+set_kconfig CONFIG_FEATURE_PREFER_APPLETS y
+set_kconfig CONFIG_CAT y
+set_kconfig CONFIG_CHMOD y
+set_kconfig CONFIG_CHOWN y
+set_kconfig CONFIG_CP y
+set_kconfig CONFIG_ECHO y
+set_kconfig CONFIG_ENV y
+set_kconfig CONFIG_FALSE y
+set_kconfig CONFIG_LN y
+set_kconfig CONFIG_LS y
+set_kconfig CONFIG_MKDIR y
+set_kconfig CONFIG_MOUNT y
+set_kconfig CONFIG_MV y
+set_kconfig CONFIG_RM y
+set_kconfig CONFIG_SLEEP y
+set_kconfig CONFIG_TEST y
+set_kconfig CONFIG_TOUCH y
+set_kconfig CONFIG_TRUE y
+set_kconfig CONFIG_UMOUNT y
+set_kconfig CONFIG_UNAME y
 disable_kconfig CONFIG_SH_IS_NONE
 disable_kconfig CONFIG_BASH_IS_NONE
 
