@@ -8,6 +8,7 @@ PKGS="$ROOT_DIR/src/packages/system"
 GPKG_DIR="$ROOT_DIR/gpkg"
 TARGET_MULTIARCH="x86_64-linux-gnu"
 TARGET_CXX_VERSION="$(find "$ROOTFS/usr/include/c++" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | grep -E '^[0-9]+$' | sort -V | tail -n1)"
+MAKE_JOBS="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
 COMMON_CXXFLAGS=(--sysroot="$ROOTFS" -O2 -I "$GINIT_SRC" -I "$SRC")
 COMMON_LDFLAGS=(--sysroot="$ROOTFS" -L"$GINIT_LIB" -L"$ROOTFS/usr/lib/$TARGET_MULTIARCH" -L"$ROOTFS/lib/$TARGET_MULTIARCH")
 COMMON_LIBS=(-lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt)
@@ -30,7 +31,7 @@ build_tool() {
 
 echo "Compiling gpkg module..."
 make -C "$GPKG_DIR" clean
-make -C "$GPKG_DIR" install DESTDIR="$ROOTFS" ROOTFS="$ROOTFS" CXXFLAGS="${COMMON_CXXFLAGS[*]}" LDFLAGS="${COMMON_LDFLAGS[*]}"
+make -j"$MAKE_JOBS" -C "$GPKG_DIR" install DESTDIR="$ROOTFS" ROOTFS="$ROOTFS" CXXFLAGS="${COMMON_CXXFLAGS[*]}" LDFLAGS="${COMMON_LDFLAGS[*]}"
 
 echo "Compiling ping..."
 build_tool "$ROOTFS/bin/apps/system/ping" "$PKGS/ping/ping.cpp"
