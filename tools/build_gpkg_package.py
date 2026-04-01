@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import os
 
 from gpkg_version import DEFAULT_EXPORT_ROOT, default_gpkg_package_version
 
@@ -48,9 +49,10 @@ def build_control(args):
         "priority": "important",
     }
 
+get_cpus = int(os.system("echo $(nproc)"))
 
 def stage_install_tree(root_dir, args):
-    make_cmd = ["make", "-C", str(GPKG_DIR)]
+    make_cmd = ["make", "-C", f"-j${get_cpus}",str(GPKG_DIR)]
     if args.clean_first:
         run(make_cmd + ["clean"])
     run(make_cmd + ["install", f"DESTDIR={root_dir}", f"GPKG_VERSION={args.version}"])
