@@ -203,7 +203,7 @@ What each step verifies:
 - `gpkg update`: Syncs the raw Debian testing Packages index plus all configured `.gpkg` repository indices, reuses cached copies when they are unchanged, and defers the heavy merged/imported catalog rebuild until a later `search`, `show`, `install`, `upgrade`, or `doctor` run actually needs it.
 - `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
 - `gpkg search <query>`: Searches the merged local cache and, when needed, lazily rebuilds the derived Debian metadata used for installability diagnostics before falling back to on-demand raw Debian lookups.
-- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, converts testing packages to `.gpkg`, and now reports exact-package "available but not installable" cases before dependency resolution falls back to generic errors.
+- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, installs Debian packages through native `dpkg`, keeps GeminiOS-native packages on the `.gpkg` worker path, and now reports exact-package "available but not installable" cases before dependency resolution falls back to generic errors.
 - `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
 - `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
 
@@ -246,7 +246,7 @@ GeminiOS also ships a system-wide `fastfetch` default at `/etc/xdg/fastfetch/con
 - `gpkg remove <pkg> --autoremove` removes newly unneeded dependency packages.
 - `gpkg remove <pkg> --autoremove --purge` removes the package set and purges their retained conffiles too.
 
-`gpkg clean` clears the local package cache under `/var/repo/`: cached `.deb` archives, cached `.gpkg` archives, converted Debian-to-`.gpkg` imports, partial downloads, and merged/package-list indices. That makes it behave closer to `apt` archive cleanup while still resetting gpkg’s merged repository cache in one step.
+`gpkg clean` clears the local package cache under `/var/repo/`: cached `.deb` archives, cached `.gpkg` archives, partial downloads, and merged/package-list indices. That makes it behave closer to `apt` archive cleanup while still resetting gpkg’s merged repository cache in one step.
 
 On SELinux-enabled installs, `gpkg-worker` now relabels the files it just wrote before finishing the transaction, and it drops `/.autorelabel` automatically if an upgrade touches the SELinux policy store itself. GeminiOS also blocks Debian-imported SELinux userspace/policy packages from replacing the distro-managed SELinux stack through normal `gpkg upgrade` runs.
 
