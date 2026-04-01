@@ -9,8 +9,7 @@ python3 tools/build_kernel_gpkg.py \
   --bzimage external_dependencies/linux-6.19.9/arch/x86/boot/bzImage \
   --modules-dir /tmp/geminios-kernel-stage/lib/modules/6.19.9 \
   --config-file external_dependencies/linux-6.19.9/.config \
-  --channel stable \
-  --repo-root /tmp/geminios-kernel-repo
+  --channel stable
 
 # beta
 python3 tools/build_kernel_gpkg.py \
