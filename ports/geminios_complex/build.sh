@@ -39,9 +39,16 @@ echo "Compiling greq..."
 build_tool "$ROOTFS/bin/apps/system/greq" "$PKGS/greq/greq.cpp"
 
 echo "Compiling User Tools..."
-for tool in passwd adduser useradd userdel usermod su; do
-    build_tool "$ROOTFS/bin/apps/system/$tool" "$PKGS/$tool/$tool.cpp"
-done
+build_tool "$ROOTFS/bin/apps/system/su" "$PKGS/su/su.cpp"
+
+# The Debian-backed adduser/passwd ports now provide the canonical account
+# management frontends. Keep the old GeminiOS implementations out of the
+# staged image so PATH resolution always reaches the real tools.
+rm -f "$ROOTFS/bin/apps/system/adduser" \
+      "$ROOTFS/bin/apps/system/passwd" \
+      "$ROOTFS/bin/apps/system/useradd" \
+      "$ROOTFS/bin/apps/system/userdel" \
+      "$ROOTFS/bin/apps/system/usermod"
 
 echo "Compiling Installer..."
 build_tool "$ROOTFS/bin/apps/system/installer" "$PKGS/installer/"*.cpp

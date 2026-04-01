@@ -726,6 +726,42 @@
         "bin/pkill",
         "usr/lib/x86_64-linux-gnu/libproc2.so"
     ],
+    "base-passwd": [
+        "usr/sbin/update-passwd",
+        "usr/share/base-passwd/passwd.master",
+        "usr/share/base-passwd/group.master",
+        "usr/lib/x86_64-linux-gnu/libdebconfclient.so.0*"
+    ],
+    "passwd": [
+        "usr/bin/passwd",
+        "usr/bin/chfn",
+        "usr/bin/chsh",
+        "usr/bin/gpasswd",
+        "usr/sbin/useradd",
+        "usr/sbin/userdel",
+        "usr/sbin/usermod",
+        "usr/sbin/groupadd",
+        "usr/sbin/groupdel",
+        "etc/default/useradd",
+        "etc/login.defs",
+        "etc/pam.d/passwd",
+        "etc/pam.d/chfn",
+        "etc/pam.d/chsh",
+        "etc/pam.d/chpasswd",
+        "etc/pam.d/newusers",
+        "usr/lib/x86_64-linux-gnu/libbsd.so.0*",
+        "usr/lib/x86_64-linux-gnu/libmd.so.0*"
+    ],
+    "adduser": [
+        "usr/sbin/adduser",
+        "usr/sbin/addgroup",
+        "usr/sbin/deluser",
+        "usr/sbin/delgroup",
+        "usr/share/perl5/Debian/Adduser*.pm",
+        "etc/adduser.conf",
+        "etc/deluser.conf",
+        "var/cache/adduser"
+    ],
     "gpkg": [
         "bin/apps/system/gpkg",
         "bin/apps/system/gpkg-worker",
@@ -734,11 +770,6 @@
     "geminios_complex": [
         "bin/apps/system/gpkg",
         "bin/apps/system/installer",
-        "bin/apps/system/adduser",
-        "bin/apps/system/useradd",
-        "bin/apps/system/userdel",
-        "bin/apps/system/usermod",
-        "bin/apps/system/passwd",
         "bin/apps/system/su"
     ],
     "pciutils": [

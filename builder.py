@@ -446,6 +446,8 @@ PACKAGES = [
     "patch",
     "which",
     "sudo",
+    "passwd",
+    "adduser",
     "procps-ng",
     "nano",
     "grep",
@@ -459,6 +461,7 @@ PACKAGES = [
     "git",
     # GeminiOS Specifics
     "geminios_core", # init, signals, user_mgmt
+    "base-passwd",
     "geminios_pkgs", # ls, pwd, cat, etc.
     "geminios_complex" # gpkg, ping, installer, etc.
 ]
@@ -469,6 +472,9 @@ PACKAGE_DEPENDENCIES = {
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
     "util-linux": ["ncurses"],
     "sudo": ["linux-pam", "libcap", "openssl", "zlib", "selinux_userspace"],
+    "passwd": ["linux-pam", "selinux_userspace"],
+    "adduser": ["perl", "passwd"],
+    "base-passwd": ["selinux_userspace"],
     "inih": [],
     "liburcu": [],
     "lzo": [],
@@ -1349,6 +1355,15 @@ def get_declared_port_version(pkg_name):
                 unique_versions.append(value)
             if len(unique_versions) == 1:
                 version = unique_versions[0]
+
+    if version is None:
+        generated_version_path = os.path.join(OUTPUT_DIR, "port_versions", f"{pkg_name}.txt")
+        if os.path.exists(generated_version_path):
+            try:
+                with open(generated_version_path, "r", encoding="utf-8") as f:
+                    version = f.readline().strip() or None
+            except OSError:
+                version = None
 
     if version is None and pkg_name.startswith("geminios_"):
         release = get_geminios_release_info()
@@ -3782,6 +3797,7 @@ def finalize_rootfs():
     print_info("[*] Setting SUID permissions...")
     suid_fixups = [
         (os.path.join(FINAL_ROOTFS_DIR, "bin", "apps", "system", "su"), None),
+        (os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "passwd"), None),
         (os.path.join(FINAL_ROOTFS_DIR, "usr", "bin", "sudo"), None),
         (os.path.join(FINAL_ROOTFS_DIR, DBUS_HELPER_REL_PATH), DBUS_HELPER_REQUIRED_MODE),
     ]
