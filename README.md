@@ -200,9 +200,9 @@ sudo gpkg add-repo https://repo.creitingameplays.com
 
 What each step verifies:
 - `gpkg list-repos`: Shows the built-in Debian testing backend plus any configured S2 repos.
-- `gpkg update`: Downloads and merges Debian testing metadata with all configured `.gpkg` repository indices, then refreshes the cached Debian preview used by `search` and `install`.
+- `gpkg update`: Syncs the raw Debian testing Packages index plus all configured `.gpkg` repository indices, reuses cached copies when they are unchanged, and defers the heavy merged/imported catalog rebuild until a later `search`, `show`, `install`, `upgrade`, or `doctor` run actually needs it.
 - `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
-- `gpkg search <query>`: Searches the merged local cache plus the cached Debian preview, puts exact and prefix package-name matches ahead of description-only hits, and uses a pager on interactive terminals to avoid flooding the screen while keeping installability diagnostics for `show` and `install`.
+- `gpkg search <query>`: Searches the merged local cache and, when needed, lazily rebuilds the derived Debian metadata used for installability diagnostics before falling back to on-demand raw Debian lookups.
 - `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, converts testing packages to `.gpkg`, and now reports exact-package "available but not installable" cases before dependency resolution falls back to generic errors.
 - `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
 - `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
@@ -220,7 +220,7 @@ Important:
 - Debian `task-*` desktop metapackages are supported as dependency anchors through import-policy overrides; GeminiOS keeps `apt` blocked, but packages such as `task-mate-desktop`, `task-lxqt-desktop`, and `tasksel` can still resolve when their policy-approved dependencies are available.
 - The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
 - Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
-- `gpkg update` merges Debian testing metadata and multiple `.gpkg` repositories into one local cache instead of overwriting previous sources.
+- `gpkg update` keeps Debian testing as the backend, synchronizes raw indices first, and rebuilds the merged runtime catalog lazily only when another command needs it.
 - `gpkg` reads `system_provides` and `upgradeable_system` from `/etc/gpkg/import-policy.json` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
 
 Per-transaction optional dependency control is also available for testing-backed installs, upgrades, and repairs:
