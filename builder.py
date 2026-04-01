@@ -437,6 +437,8 @@ PACKAGES = [
     "xterm",
     "xprop",
     # User Utilities
+    "dash",
+    "busybox",
     "bash",
     "coreutils",
     "tar",
@@ -3822,7 +3824,8 @@ def finalize_rootfs():
         ("usr/bin/Xorg", "usr/bin/X"),
         ("usr/bin/xinit", "usr/bin/startx"),
         ("usr/bin/bash", "bin/bash"),     # Create bin/bash -> ../usr/bin/bash
-        ("bin/bash", "bin/sh"),           # Create bin/sh -> bash (in same dir)
+        ("usr/bin/dash", "bin/dash"),     # Create bin/dash -> ../usr/bin/dash
+        ("bin/dash", "bin/sh"),           # Create bin/sh -> dash (in same dir)
         ("python3", "usr/bin/python"),
         ("python3", "usr/bin/python3") # Ensure both exist
     ]

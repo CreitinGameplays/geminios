@@ -146,6 +146,8 @@
     "base-files",
     "base-passwd",
     "bash",
+    "busybox*",
+    "dash",
     "debianutils",
     "dpkg",
     "grub*",

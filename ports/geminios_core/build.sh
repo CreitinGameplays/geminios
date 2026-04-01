@@ -26,7 +26,10 @@ if [ ! -L "$ROOTFS/sbin" ]; then
     ln -sfn ../usr/sbin/getty "$ROOTFS/sbin/getty"
 fi
 
-ln -sf bash "$ROOTFS/bin/sh"
+ln -sfn dash "$ROOTFS/bin/sh"
+if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
+    ln -sfn dash "$ROOTFS/usr/bin/sh"
+fi
 ln -sf /bin/apps/system/gpkg "$ROOTFS/bin/gpkg"
 
 # Create default system files (passwd, group, shadow)
@@ -94,6 +97,7 @@ EOF
 
 cat > "$ROOTFS/etc/shells" <<EOF
 /bin/sh
+/bin/dash
 /bin/bash
 EOF
 

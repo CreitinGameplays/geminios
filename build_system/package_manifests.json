@@ -595,6 +595,12 @@
     "ninja": [
         "usr/bin/ninja"
     ],
+    "dash": [
+        "usr/bin/dash"
+    ],
+    "busybox": [
+        "usr/bin/busybox"
+    ],
     "bash": [
         "usr/bin/bash"
     ],
