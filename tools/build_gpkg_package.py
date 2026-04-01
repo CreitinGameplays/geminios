@@ -49,10 +49,9 @@ def build_control(args):
         "priority": "important",
     }
 
-get_cpus = os.cpu_count()
-
+get_cpus = str(os.cpu_count())
 def stage_install_tree(root_dir, args):
-    make_cmd = ["make", "-C",str(GPKG_DIR), f"-j${get_cpus}"]
+    make_cmd = ["make", "-C", str(GPKG_DIR), f"-j{get_cpus}"]
     if args.clean_first:
         run(make_cmd + ["clean"])
     run(make_cmd + ["install", f"DESTDIR={root_dir}", f"GPKG_VERSION={args.version}"])
