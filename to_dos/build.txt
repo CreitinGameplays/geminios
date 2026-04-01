@@ -1,5 +1,8 @@
 Dev Commands:
 
+// debug
+gpkg install --reinstall libblas3 liblapack3 samba-common ppp initscripts --verbose -nrec -nsug
+
 # stable
 python3 tools/build_kernel_gpkg.py \
   --kernel-release 6.19.9 \

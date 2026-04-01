@@ -10,7 +10,6 @@
     "mount",
     "passwd",
     "sed",
-    "sysvinit-utils",
     "udev",
     "x-terminal-emulator",
     "dbus-session-bus",
@@ -166,7 +165,7 @@
     "selinux-utils",
     "semodule-utils",
     "systemd*",
-    "sysvinit*",
+    "sysvinit-core",
     "udev",
     "util-linux"
   ],
