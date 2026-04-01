@@ -174,6 +174,7 @@
   "package_aliases": {
     "gpg": "gpg-from-sq",
     "gpgv": "gpgv-from-sq",
+    "lzo": "liblzo2-2",
     "libreoffice-core-nogui": "libreoffice-core"
   },
   "dependency_choices": {
