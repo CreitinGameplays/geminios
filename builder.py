@@ -978,6 +978,77 @@ def save_bootstrap_stage_progress(progress_path, payload):
         f.write("\n")
     os.replace(temp_path, progress_path)
 
+def build_bootstrap_plan(package_names, package_index):
+    """Describe a bootstrap stage using package names plus their exact archive filenames."""
+    entries = []
+    for package_name in package_names:
+        entry = package_index.get(package_name)
+        if not entry:
+            raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Debian metadata")
+        filename = entry.get("Filename")
+        if not filename:
+            raise RuntimeError(f"Bootstrap package '{package_name}' is missing a Filename entry")
+        entries.append({"name": package_name, "filename": filename})
+    return {"packages": entries}
+
+def normalize_bootstrap_plan(payload):
+    """Normalize old/new bootstrap plan payload formats to a comparable structure."""
+    packages = []
+    for entry in payload.get("packages", []):
+        if isinstance(entry, str):
+            packages.append({"name": entry, "filename": None})
+            continue
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        packages.append({"name": name, "filename": entry.get("filename")})
+    return {"packages": packages}
+
+def bootstrap_plan_package_map(payload):
+    """Return a package->filename map from a normalized bootstrap plan payload."""
+    normalized = normalize_bootstrap_plan(payload)
+    return {
+        entry["name"]: entry.get("filename")
+        for entry in normalized.get("packages", [])
+        if entry.get("name")
+    }
+
+def bootstrap_plan_package_names(payload):
+    """Return ordered package names from a normalized bootstrap plan payload."""
+    normalized = normalize_bootstrap_plan(payload)
+    return [entry["name"] for entry in normalized.get("packages", []) if entry.get("name")]
+
+def format_bootstrap_plan_stamp(plan_payload):
+    """Serialize a bootstrap plan in a stable way for stage-complete stamps."""
+    normalized = normalize_bootstrap_plan(plan_payload)
+    return "\n".join(
+        f"{entry['name']}\t{entry.get('filename') or ''}"
+        for entry in normalized.get("packages", [])
+        if entry.get("name")
+    ) + "\n"
+
+def classify_bootstrap_plan_transition(existing_plan, desired_plan):
+    """Classify whether a bootstrap stage plan can be reused incrementally."""
+    existing_map = bootstrap_plan_package_map(existing_plan)
+    desired_map = bootstrap_plan_package_map(desired_plan)
+
+    if not existing_map:
+        return "reset"
+    if set(existing_map) - set(desired_map):
+        return "reset"
+
+    for package_name, existing_filename in existing_map.items():
+        desired_filename = desired_map.get(package_name)
+        if existing_filename is not None and desired_filename != existing_filename:
+            return "reset"
+
+    if set(existing_map) == set(desired_map):
+        return "reuse"
+
+    return "append-only"
+
 def get_bootstrap_stage_metadata_paths(stage_dir):
     """Store bootstrap bookkeeping outside the staged filesystem tree."""
     stage_name = os.path.basename(stage_dir.rstrip(os.sep))
@@ -995,14 +1066,26 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
     plan_path, progress_path = get_bootstrap_stage_metadata_paths(stage_dir)
     legacy_plan_path = os.path.join(stage_dir, ".bootstrap-plan.json")
     legacy_progress_path = os.path.join(stage_dir, ".bootstrap-progress.json")
-    desired_plan = {"packages": package_names}
+    desired_plan = build_bootstrap_plan(package_names, package_index)
     expected_set = set(package_names)
+    reused_completed = set()
 
     if os.path.exists(stage_dir):
         existing_plan = load_bootstrap_stage_progress(plan_path)
         if not existing_plan and os.path.exists(legacy_plan_path):
             existing_plan = load_bootstrap_stage_progress(legacy_plan_path)
-        if existing_plan.get("packages") != package_names:
+        transition = classify_bootstrap_plan_transition(existing_plan, desired_plan)
+        if transition in {"reuse", "append-only"}:
+            reused_completed = set(bootstrap_plan_package_names(existing_plan)) & expected_set
+            if transition == "reuse":
+                print_info(
+                    f"[*] Reusing previously staged {stage_name} contents for {len(reused_completed)} packages."
+                )
+            else:
+                print_info(
+                    f"[*] Bootstrap plan grew for {stage_name}; reusing {len(reused_completed)} staged packages and extracting only new additions."
+                )
+        elif transition == "reset":
             print_warning(f"WARNING: Bootstrap plan changed for {stage_name}; resetting staged directory.")
             shutil.rmtree(stage_dir)
     os.makedirs(stage_dir, exist_ok=True)
@@ -1010,7 +1093,10 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
     existing_progress = load_bootstrap_stage_progress(progress_path)
     if not existing_progress and os.path.exists(legacy_progress_path):
         existing_progress = load_bootstrap_stage_progress(legacy_progress_path)
-    completed = set(existing_progress.get("completed", [])) & expected_set
+    if existing_progress.get("completed"):
+        completed = set(existing_progress.get("completed", [])) & expected_set
+    else:
+        completed = set(reused_completed)
     save_bootstrap_stage_progress(plan_path, desired_plan)
     save_bootstrap_stage_progress(
         progress_path,
@@ -1084,9 +1170,11 @@ def ensure_debian_bootstrap():
     toolchain_seed = resolve_bootstrap_requested_packages(package_index, toolchain_requests)
     runtime_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed)
     build_sysroot_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed + toolchain_seed)
+    runtime_plan = build_bootstrap_plan(runtime_packages, package_index)
+    sysroot_plan = build_bootstrap_plan(build_sysroot_packages, package_index)
 
-    desired_runtime_stamp = "\n".join(runtime_packages) + "\n"
-    desired_sysroot_stamp = "\n".join(build_sysroot_packages) + "\n"
+    desired_runtime_stamp = format_bootstrap_plan_stamp(runtime_plan)
+    desired_sysroot_stamp = format_bootstrap_plan_stamp(sysroot_plan)
 
     runtime_stage_ready = (
         os.path.isdir(BOOTSTRAP_ROOTFS_DIR)
@@ -1108,20 +1196,31 @@ def ensure_debian_bootstrap():
 
     print_section("\n=== Bootstrapping Debian Base Stages ===")
 
-    print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
-    bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
-    prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-    prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-    with open(runtime_stamp, "w") as f:
-        f.write(desired_runtime_stamp)
+    if runtime_stage_ready:
+        print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
+        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+    else:
+        print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
+        bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
+        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        with open(runtime_stamp, "w") as f:
+            f.write(desired_runtime_stamp)
 
-    print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
-    bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
-    prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-    prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-    restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-    with open(sysroot_stamp, "w") as f:
-        f.write(desired_sysroot_stamp)
+    if sysroot_stage_ready:
+        print_success(f"  ✓ build_sysroot already matches {len(build_sysroot_packages)} Debian packages.")
+        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+    else:
+        print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
+        bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
+        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+        with open(sysroot_stamp, "w") as f:
+            f.write(desired_sysroot_stamp)
 
 def prepare_stage_dirs():
     """Ensure the staged build directories exist and are bootstrapped."""
