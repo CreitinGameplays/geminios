@@ -14,6 +14,7 @@ import fnmatch
 import shlex
 import socket
 import stat
+import tarfile
 import urllib.request
 import urllib.error
 from urllib.parse import urljoin
@@ -280,10 +281,13 @@ DBUS_HELPER_REQUIRED_MODE = 0o4754
 DBUS_HELPER_REQUIRED_UID = 0
 DBUS_HELPER_REQUIRED_GID = 18
 GPKG_BASE_SYSTEM_REGISTRY_REL_PATH = os.path.join("usr", "share", "gpkg", "base-system.json")
+GPKG_BASE_DEBIAN_REGISTRY_REL_PATH = os.path.join("usr", "share", "gpkg", "base-debian-packages.json")
 UDEV_RUNTIME_DIRS = [
     os.path.join("usr", "lib", "udev"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "udev"),
 ]
+
+_DEB_ARCHIVE_FILE_LIST_CACHE = {}
 
 # Load Manifests
 try:
@@ -461,6 +465,7 @@ PACKAGES = [
     "binutils",
     "gcc",
     "git",
+    "libapt-pkg",
     # GeminiOS Specifics
     "geminios_core", # init, signals, user_mgmt
     "base-passwd",
@@ -472,6 +477,7 @@ PACKAGE_DEPENDENCIES = {
     "ca-certificates": [],
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
+    "libapt-pkg": ["openssl", "zstd", "xz", "eudev", "elogind"],
     "util-linux": ["ncurses"],
     "sudo": ["linux-pam", "libcap", "openssl", "zlib", "selinux_userspace"],
     "passwd": ["linux-pam", "selinux_userspace"],
@@ -531,7 +537,16 @@ PACKAGE_DEPENDENCIES = {
         "ninja",
     ],
     "geminios_core": ["kernel_headers", "glibc", "dbus", "eudev", "linux-pam", "elogind"],
-    "geminios_complex": ["kernel_headers", "glibc", "zlib", "openssl", "zstd", "xz", "geminios_core"],
+    "geminios_complex": [
+        "kernel_headers",
+        "glibc",
+        "zlib",
+        "openssl",
+        "zstd",
+        "xz",
+        "libapt-pkg",
+        "geminios_core",
+    ],
 }
 
 def resolve_requested_packages(requested_packages):
@@ -1531,6 +1546,130 @@ def write_gpkg_base_system_registry(root_dir=None):
         f.write("\n")
     return entries
 
+def get_bootstrap_package_sets(package_index):
+    """Return the exact Debian package sets that seed the runtime and sysroot stages."""
+    runtime_requests = read_manifest_lines(BOOTSTRAP_RUNTIME_MANIFEST)
+    toolchain_requests = read_manifest_lines(BOOTSTRAP_TOOLCHAIN_MANIFEST)
+
+    runtime_seed = resolve_bootstrap_requested_packages(package_index, runtime_requests)
+    toolchain_seed = resolve_bootstrap_requested_packages(package_index, toolchain_requests)
+    runtime_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed)
+    build_sysroot_packages = resolve_bootstrap_dependency_closure(
+        package_index,
+        runtime_seed + toolchain_seed,
+    )
+    all_packages = sorted(set(runtime_packages) | set(build_sysroot_packages))
+    return {
+        "runtime_packages": runtime_packages,
+        "build_sysroot_packages": build_sysroot_packages,
+        "all_packages": all_packages,
+    }
+
+def list_deb_archive_paths(deb_path):
+    """Return normalized payload paths from a Debian archive."""
+    cached = _DEB_ARCHIVE_FILE_LIST_CACHE.get(deb_path)
+    if cached is not None:
+        return list(cached)
+
+    process = subprocess.Popen(
+        ["dpkg-deb", "--fsys-tarfile", deb_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    normalized_paths = []
+    seen = set()
+    try:
+        assert process.stdout is not None
+        with tarfile.open(fileobj=process.stdout, mode="r|*") as archive:
+            for member in archive:
+                member_name = member.name.strip()
+                if not member_name:
+                    continue
+                if member_name.startswith("./"):
+                    member_name = member_name[2:]
+                member_name = member_name.strip("/")
+                if not member_name:
+                    continue
+                normalized = "/" + member_name
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                normalized_paths.append(normalized)
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+
+    stderr = ""
+    if process.stderr is not None:
+        stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+        process.stderr.close()
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(
+            f"Failed to inspect Debian archive {deb_path}: {stderr or f'exit {return_code}'}"
+        )
+
+    _DEB_ARCHIVE_FILE_LIST_CACHE[deb_path] = tuple(normalized_paths)
+    return list(normalized_paths)
+
+def build_base_debian_registry_entries(root_dir=None):
+    """Return exact Debian package records for the shipped base/bootstrap image."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    _, package_index = load_debian_package_index()
+    bootstrap_sets = get_bootstrap_package_sets(package_index)
+    entries = []
+
+    for package_name in bootstrap_sets["all_packages"]:
+        record = package_index.get(package_name)
+        if not record:
+            continue
+
+        filename = record.get("Filename", "").strip()
+        version = record.get("Version", "").strip()
+        if not filename or not version:
+            continue
+
+        deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
+        if not os.path.exists(deb_path):
+            continue
+
+        files = []
+        for payload_path in list_deb_archive_paths(deb_path):
+            rel_path = payload_path.lstrip("/")
+            if not rel_path:
+                continue
+            full_path = os.path.join(root_dir, rel_path)
+            if not os.path.lexists(full_path):
+                continue
+            files.append(payload_path)
+
+        if not files:
+            continue
+
+        entries.append({
+            "package": package_name,
+            "version": version,
+            "architecture": record.get("Architecture", "amd64").strip() or "amd64",
+            "source_kind": "debian-bootstrap",
+            "installed_from": "Debian bootstrap base image",
+            "files": sorted(set(files)),
+        })
+
+    return sorted(entries, key=lambda entry: entry["package"])
+
+def write_gpkg_base_debian_registry(root_dir=None):
+    """Write the exact Debian package registry for the shipped base image."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    registry_path = os.path.join(root_dir, GPKG_BASE_DEBIAN_REGISTRY_REL_PATH)
+    os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+
+    entries = build_base_debian_registry_entries(root_dir=root_dir)
+    with open(registry_path, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return entries
+
 def normalize_dbus_runtime_layout(root_dir=None):
     """Ensure the final image contains only the canonical D-Bus helper path."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
@@ -1694,6 +1833,30 @@ def get_gpkg_base_system_registry_issues(root_dir=None):
         for entry in entries
     ):
         return [f"{GPKG_BASE_SYSTEM_REGISTRY_REL_PATH.replace(os.sep, '/')} does not record nano"]
+
+    return []
+
+def get_gpkg_base_debian_registry_issues(root_dir=None):
+    """Return exact base Debian registry issues for gpkg bootstrap/transactions."""
+    root_dir = root_dir or ROOTFS_DIR
+    registry_path = os.path.join(root_dir, GPKG_BASE_DEBIAN_REGISTRY_REL_PATH)
+    if not os.path.exists(registry_path):
+        return [f"{GPKG_BASE_DEBIAN_REGISTRY_REL_PATH.replace(os.sep, '/')} is missing"]
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"could not read {GPKG_BASE_DEBIAN_REGISTRY_REL_PATH.replace(os.sep, '/')}: {exc}"]
+
+    if not isinstance(entries, list) or not entries:
+        return [f"{GPKG_BASE_DEBIAN_REGISTRY_REL_PATH.replace(os.sep, '/')} is empty"]
+
+    if not any(
+        isinstance(entry, dict) and entry.get("package") == "libc6" and entry.get("version")
+        for entry in entries
+    ):
+        return [f"{GPKG_BASE_DEBIAN_REGISTRY_REL_PATH.replace(os.sep, '/')} does not record libc6"]
 
     return []
 
@@ -3870,6 +4033,13 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] gpkg base-system registry")
 
+    gpkg_base_debian_registry_issues = get_gpkg_base_debian_registry_issues(root_dir=FINAL_ROOTFS_DIR)
+    if gpkg_base_debian_registry_issues:
+        print_error(f"  [FAILED] {gpkg_base_debian_registry_issues[0]}")
+        print_error("           The staged gpkg base Debian registry is missing or incomplete.")
+        return False
+    print_success("  [OK] gpkg base Debian registry")
+
     python_runtime_issues = get_python_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if python_runtime_issues:
         print_error(f"  [FAILED] {python_runtime_issues[0]}")
@@ -3893,6 +4063,10 @@ def finalize_rootfs():
     strip_ignored_lightdm_options(root_dir=FINAL_ROOTFS_DIR)
     base_registry_entries = write_gpkg_base_system_registry(root_dir=FINAL_ROOTFS_DIR)
     print_success(f"  ✓ Wrote gpkg base-system registry: {len(base_registry_entries)} package records")
+    base_debian_registry_entries = write_gpkg_base_debian_registry(root_dir=FINAL_ROOTFS_DIR)
+    print_success(
+        f"  ✓ Wrote gpkg base Debian registry: {len(base_debian_registry_entries)} package records"
+    )
     
     # 1. Permissions (su/sudo + dbus helper)
     print_info("[*] Setting SUID permissions...")

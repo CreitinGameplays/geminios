@@ -24,6 +24,8 @@
     "ncurses-base",
     "libc6",
     "libcrypt1",
+    "libapt-pkg",
+    "libapt-pkg7.0",
     "libgcc-s1",
     "libproc2-0",
     "libstdc++6",
@@ -141,6 +143,11 @@
       "libc6",
       "libc-bin",
       "libc6-dev"
+    ],
+    "libapt-pkg": [
+      "libapt-pkg",
+      "libapt-pkg7.0",
+      "libapt-pkg-dev"
     ],
     "gpkg": [
       "gpkg"

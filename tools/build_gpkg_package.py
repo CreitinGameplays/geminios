@@ -13,6 +13,7 @@ from gpkg_version import DEFAULT_EXPORT_ROOT, default_gpkg_package_version
 ROOT_DIR = Path(__file__).resolve().parent.parent
 GPKG_DIR = ROOT_DIR / "gpkg"
 DEFAULT_SDK_DIR = Path("/home/creitin/Documents/geminios-sdk")
+DEFAULT_ROOTFS_DIR = ROOT_DIR / "rootfs"
 
 
 def eprint(message):
@@ -52,7 +53,13 @@ def build_control(args):
 get_cpus = str(os.cpu_count())
 print(f"Building gpkg with {get_cpus} CPUs...")
 def stage_install_tree(root_dir, args):
-    make_cmd = ["make", "-C", str(GPKG_DIR), f"-j{get_cpus}"]
+    make_cmd = [
+        "make",
+        "-C",
+        str(GPKG_DIR),
+        f"-j{get_cpus}",
+        f"ROOTFS={args.rootfs}",
+    ]
     if args.clean_first:
         run(make_cmd + ["clean"])
     run(make_cmd + ["install", f"DESTDIR={root_dir}", f"GPKG_VERSION={args.version}"])
@@ -82,6 +89,11 @@ def parse_args():
     )
     parser.add_argument("--sdk-dir", default=str(DEFAULT_SDK_DIR), help="Path to the GeminiOS SDK checkout")
     parser.add_argument("--export-root", default=str(DEFAULT_EXPORT_ROOT), help="Repository export root, default: ./export")
+    parser.add_argument(
+        "--rootfs",
+        default=str(DEFAULT_ROOTFS_DIR),
+        help="GeminiOS rootfs/sysroot to link against, default: ./rootfs",
+    )
     parser.add_argument("--package-name", default="gpkg", help="Package name, default: gpkg")
     parser.add_argument("--version", help="Override package version")
     parser.add_argument("--architecture", default="x86_64", help="Package architecture, default: x86_64")
@@ -111,13 +123,17 @@ def parse_args():
 
 
 def main():
-    shutil.rmtree("export/x86_64/gpkg/")
     args = parse_args()
     sdk_dir = Path(args.sdk_dir).resolve()
     export_root = Path(args.export_root).resolve()
+    rootfs_dir = Path(args.rootfs).resolve()
+    if not rootfs_dir.exists():
+        raise FileNotFoundError(f"rootfs not found at {rootfs_dir}")
+    args.rootfs = str(rootfs_dir)
     args.version = args.version or default_gpkg_package_version(root_dir=ROOT_DIR, export_root=export_root)
     repo_arch_dir = export_root / args.architecture
     target_dir = repo_arch_dir / args.subdir
+    shutil.rmtree(target_dir, ignore_errors=True)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     package_filename = f"{args.package_name}_{args.version}_{args.architecture}.gpkg"

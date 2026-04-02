@@ -34,7 +34,7 @@
     "libapt-pkg": [
         "usr/include/apt-pkg",
         "usr/lib/x86_64-linux-gnu/libapt-pkg.so",
-        "usr/lib/x86_64-linux-gnu/libapt-pkg.so.7.0",
+        "usr/lib/x86_64-linux-gnu/libapt-pkg.so.*",
         "usr/lib/x86_64-linux-gnu/pkgconfig/apt-pkg.pc"
     ],
     "python": [
