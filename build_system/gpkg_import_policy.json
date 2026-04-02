@@ -172,6 +172,8 @@
     "util-linux"
   ],
   "package_aliases": {
+    "expat": "libexpat1",
+    "libxres": "libxres1",
     "gpg": "gpg-from-sq",
     "gpgv": "gpgv-from-sq",
     "lzo": "liblzo2-2",

@@ -100,6 +100,8 @@
     ],
     "expat": [
         "usr/lib/x86_64-linux-gnu/libexpat.so",
+        "usr/lib/x86_64-linux-gnu/libexpat.so.1",
+        "usr/lib/x86_64-linux-gnu/libexpat.so.1.11.3",
         "usr/lib/x86_64-linux-gnu/pkgconfig/expat.pc"
     ],
     "e2fsprogs": [
@@ -121,8 +123,8 @@
         "usr/lib/x86_64-linux-gnu/pkgconfig/liburcu*.pc"
     ],
     "lzo": [
-        "usr/include/lzo",
-        "usr/lib/x86_64-linux-gnu/liblzo2.so*"
+        "usr/lib/x86_64-linux-gnu/liblzo2.so.2",
+        "usr/lib/x86_64-linux-gnu/liblzo2.so.2.0.0"
     ],
     "xfsprogs": [
         "sbin/mkfs.xfs",
@@ -620,9 +622,7 @@
     "gawk": [
         "usr/bin/gawk"
     ],
-    "kbd": [
-        "usr/share/keymaps"
-    ],
+    "kbd": [],
     "geminios_core": [
         "bin/ginit",
         "bin/ginit-netcfg",
