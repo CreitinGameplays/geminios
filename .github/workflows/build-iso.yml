@@ -23,11 +23,11 @@ jobs:
     timeout-minutes: 360
     env:
       DEBIAN_FRONTEND: noninteractive
-      GEMINIOS_BOOTSTRAP_CACHE_DIR: ${{ runner.temp }}/geminios-cache/debian-bootstrap
-      GEMINIOS_ISO_WORK_DIR: ${{ runner.temp }}/geminios-artifacts/isodir
-      GEMINIOS_ISO_OUTPUT_DIR: ${{ runner.temp }}/geminios-artifacts/iso
-      GEMINIOS_LOG_DIR: ${{ runner.temp }}/geminios-artifacts/logs
-      GEMINIOS_OUTPUT_DIR: ${{ runner.temp }}/geminios-artifacts/output
+      GEMINIOS_BOOTSTRAP_CACHE_DIR: /tmp/geminios-cache/debian-bootstrap
+      GEMINIOS_ISO_WORK_DIR: /tmp/geminios-artifacts/isodir
+      GEMINIOS_ISO_OUTPUT_DIR: /tmp/geminios-artifacts/iso
+      GEMINIOS_LOG_DIR: /tmp/geminios-artifacts/logs
+      GEMINIOS_OUTPUT_DIR: /tmp/geminios-artifacts/output
 
     steps:
       - name: Check out repository
