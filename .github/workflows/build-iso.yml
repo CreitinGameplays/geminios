@@ -45,6 +45,7 @@ jobs:
             python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
             gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
             libxml2-dev libxslt1-dev texinfo intltool valac libapt-pkg-dev \
+            gawk \
             pkg-config ca-certificates xz-utils file
 
       - name: Create pyenv compatibility layout
