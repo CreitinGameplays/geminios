@@ -71,7 +71,6 @@
   "upgradeable_system": [
     "dbus",
     "dbus-x11",
-    "elogind",
     "libelogind0",
     "ca-certificates",
     "libelf1",
@@ -99,11 +98,8 @@
     "zlib1g",
     "x11-common",
     "ncurses-base",
-    "wayland",
     "libwayland-egl1",
-    "libdrm",
     "libdrm2",
-    "libglvnd",
     "libglvnd0",
     "libegl1",
     "libgl1",
@@ -111,26 +107,106 @@
     "libopengl0",
     "libgles1",
     "libgles2",
-    "libxkbcommon",
-    "mesa",
+    "libxkbcommon0",
     "libgbm1",
-    "libglapi-mesa",
     "mesa-libgallium",
     "libegl-mesa0",
     "libgl1-mesa-dri",
     "libglx-mesa0",
-    "json-glib",
     "libjson-glib-1.0-0",
-    "dconf",
     "dconf-cli",
     "libdconf1",
     "xdg-user-dirs",
-    "libinput",
     "libinput10",
-    "xorg-server",
     "libc-bin",
     "libc6",
     "xwayland"
+  ],
+  "base_package_identities": {
+    "dbus": [
+      "dbus",
+      "dbus-x11"
+    ],
+    "dconf": [
+      "dconf-cli",
+      "libdconf1"
+    ],
+    "elogind": [
+      "libelogind0"
+    ],
+    "expat": [
+      "libexpat1"
+    ],
+    "glibc": [
+      "libc6",
+      "libc-bin",
+      "libc6-dev"
+    ],
+    "gpkg": [
+      "gpkg"
+    ],
+    "json-glib": [
+      "libjson-glib-1.0-0"
+    ],
+    "libdrm": [
+      "libdrm2"
+    ],
+    "libglvnd": [
+      "libglvnd0",
+      "libegl1",
+      "libgl1",
+      "libglx0",
+      "libopengl0",
+      "libgles1",
+      "libgles2"
+    ],
+    "libinput": [
+      "libinput10"
+    ],
+    "libxkbcommon": [
+      "libxkbcommon0"
+    ],
+    "lzo": [
+      "liblzo2-2"
+    ],
+    "mesa": [
+      "libgbm1",
+      "mesa-libgallium",
+      "libegl-mesa0",
+      "libgl1-mesa-dri",
+      "libglx-mesa0"
+    ],
+    "ncurses": [
+      "ncurses-base"
+    ],
+    "ninja": [
+      "ninja-build"
+    ],
+    "perl": [
+      "perl-base"
+    ],
+    "python": [
+      "python3",
+      "python3-minimal"
+    ],
+    "wayland": [
+      "libwayland-client0",
+      "libwayland-cursor0",
+      "libwayland-egl1",
+      "libwayland-server0"
+    ],
+    "xorg-server": [
+      "xwayland"
+    ],
+    "xz": [
+      "xz-utils"
+    ],
+    "zlib": [
+      "zlib1g"
+    ]
+  },
+  "base_package_exact_versions": [
+    "gpkg"
   ],
   "allow_essential_packages": [
     "libc6",
