@@ -1,0 +1,97 @@
+name: Build GeminiOS ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "screenshot/**"
+      - "LICENSE"
+
+concurrency:
+  group: build-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GEMINIOS_BOOTSTRAP_CACHE_DIR: ${{ runner.temp }}/geminios-cache/debian-bootstrap
+      GEMINIOS_ISO_WORK_DIR: ${{ runner.temp }}/geminios-artifacts/isodir
+      GEMINIOS_ISO_OUTPUT_DIR: ${{ runner.temp }}/geminios-artifacts/iso
+      GEMINIOS_LOG_DIR: ${{ runner.temp }}/geminios-artifacts/logs
+      GEMINIOS_OUTPUT_DIR: ${{ runner.temp }}/geminios-artifacts/output
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bison flex libncurses-dev libssl-dev libelf-dev \
+            zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
+            python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
+            gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
+            libxml2-dev libxslt1-dev texinfo intltool valac libapt-pkg-dev \
+            pkg-config ca-certificates xz-utils
+
+      - name: Create pyenv compatibility layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.pyenv/versions/3.11.9/bin"
+          ln -sf "$(command -v python3)" "$HOME/.pyenv/versions/3.11.9/bin/python3"
+          if command -v python3.11 >/dev/null 2>&1; then
+            ln -sf "$(command -v python3.11)" "$HOME/.pyenv/versions/3.11.9/bin/python3.11"
+          else
+            ln -sf "$(command -v python3)" "$HOME/.pyenv/versions/3.11.9/bin/python3.11"
+          fi
+
+      - name: Cache Debian bootstrap archives
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GEMINIOS_BOOTSTRAP_CACHE_DIR }}
+          key: debian-bootstrap-${{ runner.os }}-${{ hashFiles('build_system/bootstrap_runtime_packages.txt', 'build_system/bootstrap_toolchain_packages.txt', 'build_system/env_config.sh') }}
+          restore-keys: |
+            debian-bootstrap-${{ runner.os }}-
+
+      - name: Build kernel and ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/ci_build_iso.sh
+
+      - name: Upload ISO artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geminios-iso-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.GEMINIOS_ISO_OUTPUT_DIR }}/*.iso
+            ${{ github.workspace }}/GeminiOS.iso
+
+      - name: Upload build logs and metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geminios-build-logs-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.GEMINIOS_LOG_DIR }}/**
+            ${{ env.GEMINIOS_OUTPUT_DIR }}/**
+            ${{ github.workspace }}/external_dependencies/*/.config

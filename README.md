@@ -102,6 +102,16 @@ This ensures that every package build automagically targets GeminiOS without req
     python3 builder.py --clean
     ```
 
+### GitHub Actions ISO Builds
+
+The repo now includes an automatic ISO workflow at [.github/workflows/build-iso.yml](.github/workflows/build-iso.yml).
+
+- It can be started manually with `workflow_dispatch`.
+- It also runs automatically on pushes to `main`.
+- The workflow installs the host build dependencies, creates the expected `~/.pyenv/versions/3.11.9` compatibility path, downloads and builds the configured kernel, runs `python3 builder.py`, and uploads the resulting ISO plus build logs as workflow artifacts.
+
+The CI helper logic lives in [`tools/ci_build_iso.sh`](tools/ci_build_iso.sh).
+
 ### VM Console Debugging
 
 Recommended QEMU launch:
@@ -382,7 +392,7 @@ make x86_64_defconfig
 ./scripts/config --enable CONFIG_EXFAT_FS
 ./scripts/config --enable CONFIG_NTFS3_FS
 ./scripts/config --enable CONFIG_F2FS_FS
-./scripts/config --enable UDF_FS
+./scripts/config --enable CONFIG_UDF_FS
 ./scripts/config --enable CONFIG_EXT4_FS_POSIX_ACL
 ./scripts/config --enable CONFIG_BTRFS_FS_POSIX_ACL
 ./scripts/config --enable CONFIG_TMPFS_POSIX_ACL
