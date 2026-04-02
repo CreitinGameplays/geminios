@@ -222,7 +222,7 @@ def read_env_config_export(var_name, default_value):
     return default_value
 
 
-KERNEL_VERSION = read_env_config_export("KERNEL_VERSION", "linux-7.0-rc5")
+KERNEL_VERSION = read_env_config_export("KERNEL_VERSION", "linux-7.0-rc6")
 EXTERNAL_DEPENDENCIES_DIR = os.path.join(ROOT_DIR, "external_dependencies")
 KERNEL_BZIMAGE_PATH = os.path.join(
     EXTERNAL_DEPENDENCIES_DIR, KERNEL_VERSION, "arch", "x86", "boot", "bzImage"

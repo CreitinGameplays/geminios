@@ -32,17 +32,18 @@ source "$ROOT_DIR/build_system/env_config.sh"
 
 kernel_name="$KERNEL_VERSION"
 kernel_src_dir="$DEP_DIR/$kernel_name"
-kernel_archive="$DEP_DIR/$kernel_name.tar.xz"
+kernel_url="${KERNEL_SOURCE_URL:-}"
 kernel_version="${kernel_name#linux-}"
-kernel_major="${kernel_version%%.*}"
-
-if [[ "$kernel_version" == *-rc* ]]; then
-  kernel_series="v${kernel_major}.x/testing"
-else
-  kernel_series="v${kernel_major}.x"
+if [[ -z "$kernel_url" ]]; then
+  kernel_major="${kernel_version%%.*}"
+  if [[ "$kernel_version" == *-rc* ]]; then
+    kernel_series="v${kernel_major}.x/testing"
+  else
+    kernel_series="v${kernel_major}.x"
+  fi
+  kernel_url="https://cdn.kernel.org/pub/linux/kernel/${kernel_series}/${kernel_name}.tar.xz"
 fi
-
-kernel_url="https://cdn.kernel.org/pub/linux/kernel/${kernel_series}/${kernel_name}.tar.xz"
+kernel_archive="$DEP_DIR/$(basename "$kernel_url")"
 
 download_kernel() {
   if [[ -d "$kernel_src_dir" ]]; then

@@ -11,7 +11,8 @@ export LOG_DIR="$ROOT_DIR/logs"
 export OUTPUT_DIR="$ROOT_DIR/output"
 export PACKAGES_DIR="$ROOT_DIR/ports"
 
-export KERNEL_VERSION="linux-7.0-rc5"
+export KERNEL_VERSION="linux-7.0-rc6"
+export KERNEL_SOURCE_URL="https://git.kernel.org/torvalds/t/linux-7.0-rc6.tar.gz"
 export KERNEL_BZIMAGE="$DEP_DIR/$KERNEL_VERSION/arch/x86/boot/bzImage"
 export JOBS=${JOBS:-$(nproc)}
 
