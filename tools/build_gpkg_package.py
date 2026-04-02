@@ -50,6 +50,7 @@ def build_control(args):
     }
 
 get_cpus = str(os.cpu_count())
+print(f"Building gpkg with {get_cpus} CPUs...")
 def stage_install_tree(root_dir, args):
     make_cmd = ["make", "-C", str(GPKG_DIR), f"-j{get_cpus}"]
     if args.clean_first:

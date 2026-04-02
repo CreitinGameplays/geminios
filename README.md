@@ -20,7 +20,7 @@ Started with Google Gemini 3 Pro, let's see how far we can go with that.
 
 ## Setup and Build
 
-To build GeminiOS, you need a Linux host (Ubuntu/Debian highly recommended) with the following dependencies:
+To build GeminiOS, you need a Linux host (a Debian-based OS is mandatory) with the following dependencies:
 
 *Only tested and built on a Debian 13 Trixie x86_64 system*
 
@@ -29,7 +29,7 @@ sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev
                  zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
                  python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
                  gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
-                 libxml2-dev libxslt1-dev texinfo intltool valac
+                 libxml2-dev libxslt1-dev texinfo intltool valac libapt-pkg-dev
 ```
 
 Make sure to make the build scripts executable:
