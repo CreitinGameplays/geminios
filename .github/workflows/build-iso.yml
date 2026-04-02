@@ -19,7 +19,10 @@ permissions:
 
 jobs:
   build-iso:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GEMINIOS_ISO_CI == 'true'
     runs-on: ubuntu-24.04
+    container:
+      image: debian:13
     timeout-minutes: 360
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -33,21 +36,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Install host build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             build-essential bison flex libncurses-dev libssl-dev libelf-dev \
             zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
             python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
             gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
             libxml2-dev libxslt1-dev texinfo intltool valac libapt-pkg-dev \
-            pkg-config ca-certificates xz-utils
+            pkg-config ca-certificates xz-utils file
 
       - name: Create pyenv compatibility layout
         shell: bash
