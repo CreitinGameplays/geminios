@@ -2,7 +2,7 @@
 
 # GeminiOS Documentation
 
-GeminiOS is a minimal, open-source, educational, Debian-derived Linux operating system that does not use `apt` or `systemd` (initially made by Google Gemini 3, continued by Codex). It also does not rely on build systems like Buildroot.
+GeminiOS is a minimal, open-source, educational, Debian-derived Linux operating system that does not use `apt` CLI or `systemd` (initially made by Google Gemini 3, continued by Codex). It also does not rely on build systems like Buildroot.
 
 The project now follows a clear model:
 
@@ -29,7 +29,7 @@ sudo apt install build-essential bison flex libncurses-dev libssl-dev libelf-dev
                  zlib1g-dev libzstd-dev xorriso qemu-system-x86 git bc wget patch \
                  python3 python3-mako python3-markupsafe mtools grub-pc-bin lz4 \
                  gperf libxcb-keysyms1-dev meson ninja-build squashfs-tools cpio \
-                 libxml2-dev libxslt1-dev texinfo intltool valac libapt-pkg-dev
+                 libxml2-dev libxslt1-dev texinfo intltool gawk valac libapt-pkg-dev
 ```
 
 Make sure to make the build scripts executable:
