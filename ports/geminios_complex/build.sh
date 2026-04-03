@@ -31,7 +31,7 @@ build_tool() {
 
 echo "Compiling gpkg module..."
 make -C "$GPKG_DIR" clean
-make -j"$MAKE_JOBS" -C "$GPKG_DIR" install DESTDIR="$ROOTFS" ROOTFS="$ROOTFS" CXXFLAGS="${COMMON_CXXFLAGS[*]}" LDFLAGS="${COMMON_LDFLAGS[*]}"
+make -j"$MAKE_JOBS" -C "$GPKG_DIR" install DESTDIR="$ROOTFS" ROOTFS="$ROOTFS"
 
 echo "Compiling ping..."
 build_tool "$ROOTFS/bin/apps/system/ping" "$PKGS/ping/ping.cpp"
