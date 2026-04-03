@@ -13,7 +13,8 @@ from gpkg_version import DEFAULT_EXPORT_ROOT, default_gpkg_package_version
 ROOT_DIR = Path(__file__).resolve().parent.parent
 GPKG_DIR = ROOT_DIR / "gpkg"
 DEFAULT_SDK_DIR = Path("/home/creitin/Documents/geminios-sdk")
-DEFAULT_ROOTFS_DIR = ROOT_DIR / "rootfs"
+DEFAULT_RUNTIME_ROOTFS_DIR = ROOT_DIR / "rootfs"
+DEFAULT_BUILD_SYSROOT_DIR = ROOT_DIR / "build_sysroot"
 
 
 def eprint(message):
@@ -36,6 +37,34 @@ def write_json(path, data):
 def copy_file(src, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
+
+
+def sysroot_has_build_headers(sysroot_dir: Path) -> bool:
+    """Return whether the sysroot looks usable for a native gpkg build."""
+    features_h = sysroot_dir / "usr" / "include" / "features.h"
+    cxx_root = sysroot_dir / "usr" / "include" / "c++"
+    cxx_multiarch_root = sysroot_dir / "usr" / "include" / "x86_64-linux-gnu" / "c++"
+    return (
+        features_h.exists()
+        and cxx_root.is_dir()
+        and any(child.is_dir() and child.name.isdigit() for child in cxx_root.iterdir())
+        and cxx_multiarch_root.is_dir()
+    )
+
+
+def resolve_default_rootfs() -> Path:
+    """Prefer the build sysroot for packaging, then fall back to the runtime rootfs."""
+    candidates = [
+        DEFAULT_BUILD_SYSROOT_DIR,
+        DEFAULT_RUNTIME_ROOTFS_DIR,
+    ]
+    for candidate in candidates:
+        if candidate.exists() and sysroot_has_build_headers(candidate):
+            return candidate
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return DEFAULT_BUILD_SYSROOT_DIR
 
 
 def build_control(args):
@@ -91,8 +120,7 @@ def parse_args():
     parser.add_argument("--export-root", default=str(DEFAULT_EXPORT_ROOT), help="Repository export root, default: ./export")
     parser.add_argument(
         "--rootfs",
-        default=str(DEFAULT_ROOTFS_DIR),
-        help="GeminiOS rootfs/sysroot to link against, default: ./rootfs",
+        help="GeminiOS rootfs/sysroot to link against, default: auto (prefers ./build_sysroot, then ./rootfs)",
     )
     parser.add_argument("--package-name", default="gpkg", help="Package name, default: gpkg")
     parser.add_argument("--version", help="Override package version")
@@ -126,9 +154,14 @@ def main():
     args = parse_args()
     sdk_dir = Path(args.sdk_dir).resolve()
     export_root = Path(args.export_root).resolve()
-    rootfs_dir = Path(args.rootfs).resolve()
+    rootfs_dir = Path(args.rootfs).resolve() if args.rootfs else resolve_default_rootfs().resolve()
     if not rootfs_dir.exists():
         raise FileNotFoundError(f"rootfs not found at {rootfs_dir}")
+    if not sysroot_has_build_headers(rootfs_dir):
+        raise RuntimeError(
+            f"{rootfs_dir} does not contain the development headers needed to build gpkg; "
+            "use --rootfs ./build_sysroot or rebuild the staged sysroot first"
+        )
     args.rootfs = str(rootfs_dir)
     args.version = args.version or default_gpkg_package_version(root_dir=ROOT_DIR, export_root=export_root)
     repo_arch_dir = export_root / args.architecture
