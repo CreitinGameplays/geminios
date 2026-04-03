@@ -1670,6 +1670,219 @@ def write_gpkg_base_debian_registry(root_dir=None):
         f.write("\n")
     return entries
 
+def shared_object_exact_version_family(filename, full_path=None):
+    """Return the SONAME family name for a fully versioned shared object."""
+    if full_path and os.path.exists(full_path) and not os.path.islink(full_path):
+        soname = get_elf_soname(full_path)
+        if soname and soname != os.path.basename(full_path):
+            return soname
+
+    match = re.match(r"^(?P<family>.+\.so\.\d+)\..+$", filename)
+    if not match:
+        return None
+    return match.group("family")
+
+def _parse_glibc_version_tuple(version):
+    if not version:
+        return None
+    normalized = version.strip().rstrip(".")
+    if normalized.startswith("GLIBC_"):
+        normalized = normalized[len("GLIBC_"):]
+    parts = []
+    for piece in normalized.split("."):
+        if not piece.isdigit():
+            return None
+        parts.append(int(piece))
+    return tuple(parts) if parts else None
+
+def get_staged_libc_release_version(root_dir=None):
+    """Return the staged libc release version as a comparable tuple."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    libc_candidates = [
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "libc.so.6"),
+        os.path.join(root_dir, "lib", "x86_64-linux-gnu", "libc.so.6"),
+    ]
+    for candidate in libc_candidates:
+        if not os.path.exists(candidate):
+            continue
+        release = extract_glibc_release_version(candidate)
+        parsed = _parse_glibc_version_tuple(release)
+        if parsed:
+            return parsed
+    return None
+
+def get_elf_required_glibc_version(binary_path):
+    """Return the highest GLIBC_* version required by undefined symbols in an ELF."""
+    result = subprocess.run(
+        ["objdump", "-T", binary_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    highest = None
+    for line in result.stdout.splitlines():
+        if "*UND*" not in line:
+            continue
+        for version in re.findall(r"\((GLIBC_[0-9.]+)\)", line):
+            parsed = _parse_glibc_version_tuple(version)
+            if parsed and (highest is None or parsed > highest):
+                highest = parsed
+    return highest
+
+def elf_requires_unavailable_staged_glibc(binary_path, root_dir=None):
+    """Return True when an ELF needs a newer GLIBC version than the staged libc provides."""
+    if not binary_path or not os.path.exists(binary_path) or os.path.islink(binary_path):
+        return False
+
+    staged_glibc = get_staged_libc_release_version(root_dir=root_dir)
+    required_glibc = get_elf_required_glibc_version(binary_path)
+    if not staged_glibc or not required_glibc:
+        return False
+    return required_glibc > staged_glibc
+
+def load_base_debian_runtime_provider_map(root_dir=None):
+    """Map SONAME families to the exact Debian-bootstrap runtime provider path."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    registry_path = os.path.join(root_dir, GPKG_BASE_DEBIAN_REGISTRY_REL_PATH)
+    if not os.path.exists(registry_path):
+        return {}
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    provider_map = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for path in entry.get("files", []):
+            if not isinstance(path, str):
+                continue
+            if not path.startswith("/usr/lib/x86_64-linux-gnu/"):
+                continue
+            full_path = os.path.join(root_dir, path.lstrip("/"))
+            if not os.path.exists(full_path) or os.path.islink(full_path):
+                continue
+            basename = os.path.basename(path)
+            family = shared_object_exact_version_family(basename, full_path=full_path)
+            if not family:
+                continue
+            if elf_requires_unavailable_staged_glibc(full_path, root_dir=root_dir):
+                continue
+            provider_map[family] = full_path
+    return provider_map
+
+def reconcile_base_debian_runtime_providers(root_dir=None, report=False):
+    """Prefer shipped Debian runtime providers over stale source-built siblings."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
+    if not os.path.isdir(canonical_dir):
+        return []
+
+    provider_map = load_base_debian_runtime_provider_map(root_dir=root_dir)
+    if not provider_map:
+        return []
+
+    changed_entries = []
+    canonical_entries = sorted(os.listdir(canonical_dir))
+
+    for family, preferred_full_path in sorted(provider_map.items()):
+        preferred_basename = os.path.basename(preferred_full_path)
+        family_link_path = os.path.join(canonical_dir, family)
+
+        if os.path.islink(family_link_path):
+            current_target = os.readlink(family_link_path)
+            if current_target != preferred_basename:
+                os.unlink(family_link_path)
+                os.symlink(preferred_basename, family_link_path)
+                changed_entries.append(("retargeted", family_link_path, preferred_full_path))
+        elif not os.path.exists(family_link_path):
+            os.symlink(preferred_basename, family_link_path)
+            changed_entries.append(("created", family_link_path, preferred_full_path))
+
+        unversioned_name = family.split(".so.", 1)[0] + ".so"
+        unversioned_path = os.path.join(canonical_dir, unversioned_name)
+        if os.path.islink(unversioned_path):
+            current_target = os.path.basename(os.readlink(unversioned_path))
+            current_target_path = os.path.join(canonical_dir, current_target)
+            if (
+                shared_object_exact_version_family(current_target, full_path=current_target_path) == family
+                and current_target != preferred_basename
+            ):
+                os.unlink(unversioned_path)
+                os.symlink(preferred_basename, unversioned_path)
+                changed_entries.append(("retargeted-dev", unversioned_path, preferred_full_path))
+
+        for entry in canonical_entries:
+            if entry == preferred_basename:
+                continue
+            stale_path = os.path.join(canonical_dir, entry)
+            if os.path.islink(stale_path):
+                continue
+            if shared_object_exact_version_family(entry, full_path=stale_path) != family:
+                continue
+            remove_path(stale_path)
+            changed_entries.append(("removed-stale", stale_path, preferred_full_path))
+
+    if report and changed_entries:
+        print_info("[*] Reconciling staged runtime providers with Debian bootstrap ownership...")
+        for action, path, preferred in changed_entries[:20]:
+            if action == "removed-stale":
+                print_info(f"  Removed stale runtime provider {path}; Debian base image owns {preferred}")
+            else:
+                print_info(f"  Updated {path} -> {os.path.basename(preferred)}")
+        if len(changed_entries) > 20:
+            print_info(f"  Applied {len(changed_entries) - 20} additional runtime provider reconciliations.")
+
+    return changed_entries
+
+def reconcile_ncurses_runtime_fallbacks(root_dir=None, report=False):
+    """Restore compatible ncurses SONAME aliases when Debian runtime providers are unusable."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
+    if not os.path.isdir(canonical_dir):
+        return []
+
+    fallback_aliases = {
+        "libform.so.6": "libformw.so.6",
+        "libmenu.so.6": "libmenuw.so.6",
+        "libncurses.so.6": "libncursesw.so.6",
+        "libpanel.so.6": "libpanelw.so.6",
+        "libtinfo.so.6": "libtinfow.so.6",
+    }
+
+    changed_entries = []
+    for family, fallback_name in sorted(fallback_aliases.items()):
+        fallback_path = os.path.join(canonical_dir, fallback_name)
+        if not os.path.exists(fallback_path):
+            continue
+
+        fallback_real = resolve_rootfs_path(root_dir, "/" + os.path.relpath(fallback_path, root_dir).replace(os.sep, "/"))
+        if elf_requires_unavailable_staged_glibc(fallback_real, root_dir=root_dir):
+            continue
+
+        family_path = os.path.join(canonical_dir, family)
+        if os.path.lexists(family_path):
+            family_real = resolve_rootfs_path(root_dir, "/" + os.path.relpath(family_path, root_dir).replace(os.sep, "/"))
+            if os.path.exists(family_real) and not elf_requires_unavailable_staged_glibc(family_real, root_dir=root_dir):
+                continue
+            remove_path(family_path)
+
+        os.symlink(fallback_name, family_path)
+        changed_entries.append(("fallback-runtime", family_path, fallback_path))
+
+    if report and changed_entries:
+        print_info("[*] Restoring compatible ncurses runtime aliases for the staged libc...")
+        for _, path, fallback in changed_entries:
+            print_info(f"  Updated {path} -> {os.path.basename(fallback)}")
+
+    return changed_entries
+
 def normalize_dbus_runtime_layout(root_dir=None):
     """Ensure the final image contains only the canonical D-Bus helper path."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
@@ -1859,6 +2072,45 @@ def get_gpkg_base_debian_registry_issues(root_dir=None):
         return [f"{GPKG_BASE_DEBIAN_REGISTRY_REL_PATH.replace(os.sep, '/')} does not record libc6"]
 
     return []
+
+def get_base_debian_runtime_provider_issues(root_dir=None):
+    """Return mixed-runtime issues where Debian SONAME links target stale sibling versions."""
+    root_dir = root_dir or ROOTFS_DIR
+    canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
+    if not os.path.isdir(canonical_dir):
+        return []
+
+    provider_map = load_base_debian_runtime_provider_map(root_dir=root_dir)
+    if not provider_map:
+        return []
+
+    issues = []
+    for family, preferred_full_path in sorted(provider_map.items()):
+        preferred_basename = os.path.basename(preferred_full_path)
+        family_link_path = os.path.join(canonical_dir, family)
+        if os.path.islink(family_link_path):
+            logical_path = "/" + os.path.relpath(family_link_path, root_dir).replace(os.sep, "/")
+            resolved = os.path.basename(resolve_rootfs_path(root_dir, logical_path))
+            if resolved != preferred_basename:
+                issues.append(
+                    f"usr/lib/x86_64-linux-gnu/{family} still resolves to {resolved} instead of Debian provider {preferred_basename}"
+                )
+                continue
+
+        for entry in sorted(os.listdir(canonical_dir)):
+            if entry == preferred_basename:
+                continue
+            stale_path = os.path.join(canonical_dir, entry)
+            if os.path.islink(stale_path):
+                continue
+            if shared_object_exact_version_family(entry, full_path=stale_path) != family:
+                continue
+            issues.append(
+                f"usr/lib/x86_64-linux-gnu/{entry} is a stale sibling of Debian provider {preferred_basename}"
+            )
+            break
+
+    return issues
 
 def get_dbus_runtime_abi_issues(root_dir=None):
     """Return DBus runtime/library ABI mismatches inside the staged rootfs."""
@@ -2246,7 +2498,7 @@ def extract_glibc_release_version(binary_path):
     for line in result.stdout.splitlines():
         match = re.search(r"release version ([0-9][0-9.]+)", line)
         if match:
-            return match.group(1)
+            return match.group(1).rstrip(".")
     return None
 
 def get_glibc_runtime_issues(root_dir=None):
@@ -4040,6 +4292,13 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] gpkg base Debian registry")
 
+    base_debian_runtime_provider_issues = get_base_debian_runtime_provider_issues(root_dir=FINAL_ROOTFS_DIR)
+    if base_debian_runtime_provider_issues:
+        print_error(f"  [FAILED] {base_debian_runtime_provider_issues[0]}")
+        print_error("           The final image still prefers stale source-built runtime providers over Debian base packages.")
+        return False
+    print_success("  [OK] Debian runtime provider ownership")
+
     python_runtime_issues = get_python_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if python_runtime_issues:
         print_error(f"  [FAILED] {python_runtime_issues[0]}")
@@ -4067,6 +4326,16 @@ def finalize_rootfs():
     print_success(
         f"  ✓ Wrote gpkg base Debian registry: {len(base_debian_registry_entries)} package records"
     )
+    reconciled_runtime_entries = reconcile_base_debian_runtime_providers(root_dir=FINAL_ROOTFS_DIR, report=True)
+    reconciled_runtime_entries.extend(
+        reconcile_ncurses_runtime_fallbacks(root_dir=FINAL_ROOTFS_DIR, report=True)
+    )
+    if reconciled_runtime_entries:
+        normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
+        base_registry_entries = write_gpkg_base_system_registry(root_dir=FINAL_ROOTFS_DIR)
+        print_success(
+            f"  ✓ Rewrote gpkg base-system registry after runtime reconciliation: {len(base_registry_entries)} package records"
+        )
     
     # 1. Permissions (su/sudo + dbus helper)
     print_info("[*] Setting SUID permissions...")
