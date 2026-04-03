@@ -27,22 +27,20 @@ if [ -f "$ROOTFS/usr/bin/clear" ]; then
     move_rootfs_entry_if_distinct "$ROOTFS/usr/bin/clear" "$ROOTFS/bin/clear"
 fi
 
-# Create compat symlinks
+# Preserve Debian bootstrap's ncurses/tinfo provider links when they already
+# exist. The runtime packages own the SONAME symlinks, so only backfill
+# link-time aliases that are still missing after install.
 for lib in ncurses form panel menu tinfo; do
-    # Link libX.so -> libXw.so
-    if [ -f "$ROOTFS$LIBDIR/lib${lib}w.so" ]; then
+    # Link libX.so -> libXw.so only when no canonical linker name exists yet.
+    if [ ! -e "$ROOTFS$LIBDIR/lib${lib}.so" ] && [ -f "$ROOTFS$LIBDIR/lib${lib}w.so" ]; then
         ln -sf "lib${lib}w.so" "$ROOTFS$LIBDIR/lib${lib}.so"
     fi
-    # Link libX.so.6 -> libXw.so.6
-    if [ -f "$ROOTFS$LIBDIR/lib${lib}w.so.6" ]; then
-        ln -sf "lib${lib}w.so.6" "$ROOTFS$LIBDIR/lib${lib}.so.6"
-    fi
-    # Link libX.a -> libXw.a
-    if [ -f "$ROOTFS$LIBDIR/lib${lib}w.a" ]; then
+    # Link libX.a -> libXw.a only when the canonical archive is still absent.
+    if [ ! -e "$ROOTFS$LIBDIR/lib${lib}.a" ] && [ -f "$ROOTFS$LIBDIR/lib${lib}w.a" ]; then
         ln -sf "lib${lib}w.a" "$ROOTFS$LIBDIR/lib${lib}.a"
     fi
-    # Link pkgconfig
-    if [ -f "$ROOTFS$PCDIR/${lib}w.pc" ]; then
+    # Link pkgconfig metadata only when the non-wide alias is missing.
+    if [ ! -e "$ROOTFS$PCDIR/${lib}.pc" ] && [ -f "$ROOTFS$PCDIR/${lib}w.pc" ]; then
         ln -sf "${lib}w.pc" "$ROOTFS$PCDIR/${lib}.pc"
     fi
 done
