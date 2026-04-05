@@ -11,7 +11,7 @@ import os
 from gpkg_version import DEFAULT_EXPORT_ROOT, default_gpkg_package_version
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-GPKG_DIR = ROOT_DIR / "gpkg"
+GPKG_DIR = ROOT_DIR / "gpkg-v2"
 DEFAULT_SDK_DIR = Path("/home/creitin/Documents/geminios-sdk")
 DEFAULT_RUNTIME_ROOTFS_DIR = ROOT_DIR / "rootfs"
 DEFAULT_BUILD_SYSROOT_DIR = ROOT_DIR / "build_sysroot"

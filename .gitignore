@@ -91,4 +91,5 @@ req.txt
 task/
 log.txt
 .codex
-gpkg-v2/
+gpkg-v2/bin/
+gpkg-v2/obj/

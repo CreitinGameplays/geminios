@@ -5461,12 +5461,42 @@ def create_minimal_initramfs():
 
         rootfs = FINAL_ROOTFS_DIR
 
+        def estimate_live_root_copy_regular_bytes(rootfs_dir):
+            total_bytes = 0
+            for dirpath, _, filenames in os.walk(rootfs_dir, followlinks=False):
+                for name in filenames:
+                    path = os.path.join(dirpath, name)
+                    try:
+                        st = os.lstat(path)
+                    except OSError:
+                        continue
+                    if stat.S_ISREG(st.st_mode):
+                        total_bytes += st.st_size
+            return total_bytes
+
+        live_root_copy_data_bytes = estimate_live_root_copy_regular_bytes(rootfs)
+        live_pkgstate_tmpfs_bytes = 1024 * 1024 * 1024
+        live_pkgstate_recommended_headroom_bytes = 384 * 1024 * 1024
+        live_root_copy_tmpfs_bytes = (
+            live_root_copy_data_bytes +
+            max(384 * 1024 * 1024, live_root_copy_data_bytes // 6)
+        )
+        live_root_copy_auto_min_bytes = (
+            live_root_copy_data_bytes +
+            live_pkgstate_recommended_headroom_bytes
+        )
+        live_root_copy_data_mib = max(1, (live_root_copy_data_bytes + 1048575) // 1048576)
+        live_pkgstate_tmpfs_mib = max(1, (live_pkgstate_tmpfs_bytes + 1048575) // 1048576)
+        live_root_copy_tmpfs_mib = max(1, (live_root_copy_tmpfs_bytes + 1048575) // 1048576)
+        live_root_copy_auto_min_mib = max(1, (live_root_copy_auto_min_bytes + 1048575) // 1048576)
+
         # Essential binaries
         essential_tools = [
             ("bash", ["bin/bash", "usr/bin/bash"]),
             ("sh", ["bin/sh", "usr/bin/sh"]),
             ("mount", ["usr/bin/mount", "bin/mount", "bin/apps/system/mount"]),
             ("ls", ["usr/bin/ls", "bin/ls", "bin/apps/system/ls"]),
+            ("cp", ["usr/bin/cp", "bin/cp", "bin/apps/system/cp"]),
             ("mkdir", ["usr/bin/mkdir", "bin/mkdir", "bin/apps/system/mkdir"]),
             ("cat", ["usr/bin/cat", "bin/cat", "bin/apps/system/cat"]),
             ("sleep", ["usr/bin/sleep", "bin/sleep", "bin/apps/system/sleep"]),
@@ -5516,6 +5546,7 @@ def create_minimal_initramfs():
             "sh": ["-c", "exit 0"],
             "mount": ["--help"],
             "ls": ["--version"],
+            "cp": ["--help"],
             "mkdir": ["--help"],
             "cat": ["--help"],
             "sleep": ["0"],
@@ -5540,8 +5571,146 @@ def create_minimal_initramfs():
                 return False
 
         # Create init script
-        init_script = """#!/bin/bash
+        init_script = f"""#!/bin/bash
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+ROOT_COPY_DATA_BYTES={live_root_copy_data_bytes}
+LIVE_PKGSTATE_TMPFS_BYTES={live_pkgstate_tmpfs_bytes}
+LIVE_PKGSTATE_TMPFS_MIB={live_pkgstate_tmpfs_mib}
+ROOT_COPY_TMPFS_BYTES={live_root_copy_tmpfs_bytes}
+ROOT_COPY_AUTO_MIN_BYTES={live_root_copy_auto_min_bytes}
+ROOT_COPY_DATA_MIB={live_root_copy_data_mib}
+ROOT_COPY_TMPFS_MIB={live_root_copy_tmpfs_mib}
+ROOT_COPY_AUTO_MIN_MIB={live_root_copy_auto_min_mib}
+
+read_cmdline_live_root_mode() {{
+    LIVE_ROOT_MODE="auto"
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            geminios.live_root=copy) LIVE_ROOT_MODE="copy" ;;
+            geminios.live_root=overlay) LIVE_ROOT_MODE="overlay" ;;
+            geminios.live_root=auto) LIVE_ROOT_MODE="auto" ;;
+        esac
+    done
+}}
+
+detect_virtual_machine() {{
+    for dmi_path in /sys/class/dmi/id/product_name /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/board_vendor; do
+        [ -r "$dmi_path" ] || continue
+        dmi_value="$(cat "$dmi_path" 2>/dev/null)"
+        case "$dmi_value" in
+            *QEMU*|*KVM*|*VirtualBox*|*VMware*|*Bochs*|*Virtual*|*Standard\\ PC*|*HVM\\ domU*|*Hyper-V*)
+                return 0
+                ;;
+        esac
+    done
+
+    while IFS= read -r line; do
+        case "$line" in
+            *hypervisor*) return 0 ;;
+        esac
+    done < /proc/cpuinfo
+
+    return 1
+}}
+
+read_mem_available_bytes() {{
+    local mem_kb=0
+    while IFS=" " read -r key value unit; do
+        case "$key" in
+            MemAvailable:)
+                mem_kb="$value"
+                break
+                ;;
+            MemTotal:)
+                if [ "$mem_kb" -eq 0 ]; then
+                    mem_kb="$value"
+                fi
+                ;;
+        esac
+    done < /proc/meminfo
+
+    echo $((mem_kb * 1024))
+}}
+
+setup_copy_root() {{
+    echo "Setting up writable copied live root..."
+    mkdir -p /new_root
+    if ! mount -t tmpfs -o "mode=0755,size=$ROOT_COPY_TMPFS_BYTES" tmpfs /new_root; then
+        echo "Failed to mount copy-root tmpfs."
+        return 1
+    fi
+
+    echo "Copying live root into RAM (about $ROOT_COPY_DATA_MIB MiB of file data)..."
+    if ! cp -a /mnt/ro/. /new_root/; then
+        echo "Failed to copy the live root into writable tmpfs."
+        umount /new_root || true
+        return 1
+    fi
+
+    return 0
+}}
+
+setup_live_package_state() {{
+    local live_pkgstate_root=/new_root/run/geminios/live-pkgstate
+    local live_repo_root="$live_pkgstate_root/repo"
+    local live_gpkg_root="$live_pkgstate_root/gpkg"
+
+    mkdir -p /new_root/var/repo
+    mkdir -p /new_root/var/lib/gpkg
+    mkdir -p /new_root/run/geminios
+    mkdir -p "$live_pkgstate_root"
+
+    echo "Provisioning live package-manager state on tmpfs (up to $LIVE_PKGSTATE_TMPFS_MIB MiB)..."
+    if ! mount -t tmpfs -o "mode=0755,size=$LIVE_PKGSTATE_TMPFS_BYTES" tmpfs "$live_pkgstate_root"; then
+        echo "Failed to mount live package-manager tmpfs."
+        return 1
+    fi
+
+    mkdir -p "$live_repo_root"
+    mkdir -p "$live_gpkg_root"
+
+    if ! cp -a /new_root/var/repo/. "$live_repo_root/"; then
+        echo "Failed to seed the live repository cache."
+        umount "$live_pkgstate_root" || true
+        return 1
+    fi
+
+    if ! cp -a /new_root/var/lib/gpkg/. "$live_gpkg_root/"; then
+        echo "Failed to seed the live gpkg state."
+        umount "$live_pkgstate_root" || true
+        return 1
+    fi
+
+    if ! mount --bind "$live_repo_root" /new_root/var/repo; then
+        echo "Failed to bind-mount the live repository cache."
+        umount "$live_pkgstate_root" || true
+        return 1
+    fi
+
+    if ! mount --bind "$live_gpkg_root" /new_root/var/lib/gpkg; then
+        echo "Failed to bind-mount the live gpkg state."
+        umount /new_root/var/repo || true
+        umount "$live_pkgstate_root" || true
+        return 1
+    fi
+
+    return 0
+}}
+
+setup_overlay_root() {{
+    echo "Setting up OverlayFS..."
+    mkdir -p /mnt/rw
+    if ! mount -t tmpfs tmpfs /mnt/rw; then
+        echo "Failed to mount tmpfs for OverlayFS upperdir."
+        return 1
+    fi
+
+    mkdir -p /mnt/rw/upper
+    mkdir -p /mnt/rw/work
+    mkdir -p /new_root
+    mount -t overlay overlay -o lowerdir=/mnt/ro,upperdir=/mnt/rw/upper,workdir=/mnt/rw/work /new_root
+}}
 
 mount -t devtmpfs devtmpfs /dev
 mount -t proc proc /proc
@@ -5578,24 +5747,49 @@ if [ -z "$CDROM_DEV" ]; then
     exec /bin/bash
 fi
 
-# Set up OverlayFS
-echo "Setting up OverlayFS..."
 mkdir -p /mnt/ro
-mkdir -p /mnt/rw
 
 # Mount SquashFS
 mount -t squashfs -o loop /mnt/cdrom/root.sfs /mnt/ro
 
-# Mount TmpFS for writes
-mount -t tmpfs tmpfs /mnt/rw
+read_cmdline_live_root_mode
+MEM_AVAILABLE_BYTES="$(read_mem_available_bytes)"
+IS_VIRTUAL_MACHINE=0
+if detect_virtual_machine; then
+    IS_VIRTUAL_MACHINE=1
+fi
 
-# Create overlay directories
-mkdir -p /mnt/rw/upper
-mkdir -p /mnt/rw/work
-mkdir -p /new_root
+SELECTED_ROOT_MODE="$LIVE_ROOT_MODE"
+if [ "$SELECTED_ROOT_MODE" = "auto" ]; then
+    if [ "$IS_VIRTUAL_MACHINE" -eq 1 ] && [ "$MEM_AVAILABLE_BYTES" -ge "$ROOT_COPY_AUTO_MIN_BYTES" ]; then
+        SELECTED_ROOT_MODE="copy"
+    else
+        SELECTED_ROOT_MODE="overlay"
+    fi
+fi
 
-# Mount Overlay
-mount -t overlay overlay -o lowerdir=/mnt/ro,upperdir=/mnt/rw/upper,workdir=/mnt/rw/work /new_root
+if [ "$SELECTED_ROOT_MODE" = "copy" ] && [ "$MEM_AVAILABLE_BYTES" -lt "$ROOT_COPY_AUTO_MIN_BYTES" ]; then
+    echo "Live copy-root was requested, but only $((MEM_AVAILABLE_BYTES / 1048576)) MiB are available."
+    echo "Copy-root works best with at least about $ROOT_COPY_AUTO_MIN_MIB MiB available before boot services start."
+fi
+
+if [ "$SELECTED_ROOT_MODE" = "copy" ]; then
+    if ! setup_copy_root; then
+        echo "Falling back to OverlayFS live root."
+        SELECTED_ROOT_MODE="overlay"
+    fi
+fi
+
+if [ "$SELECTED_ROOT_MODE" = "overlay" ]; then
+    if [ "$IS_VIRTUAL_MACHINE" -eq 1 ]; then
+        echo "Using OverlayFS live root in a VM fallback mode."
+        echo "Boot with more RAM or geminios.live_root=copy for the most reliable core package upgrades."
+    fi
+    if ! setup_overlay_root; then
+        echo "FATAL: Could not prepare a writable live root."
+        exec /bin/bash
+    fi
+fi
 
 # Move virtual filesystems
 mount --move /dev /new_root/dev
@@ -5603,11 +5797,26 @@ mount --move /proc /new_root/proc
 mount --move /sys /new_root/sys
 mount --move /run /new_root/run
 
+LIVE_PKGSTATE_MODE="rootfs"
+if setup_live_package_state; then
+    LIVE_PKGSTATE_MODE="tmpfs"
+else
+    echo "WARNING: Falling back to package-manager state stored on the live root."
+    echo "Package updates may fail if the writable root fills up."
+fi
+
+mkdir -p /new_root/etc
+echo "$SELECTED_ROOT_MODE" > /new_root/etc/geminios-live-root-mode
+echo "$LIVE_PKGSTATE_MODE" > /new_root/etc/geminios-live-pkgstate-mode
+mkdir -p /new_root/run/geminios
+echo "$SELECTED_ROOT_MODE" > /new_root/run/geminios/live-root-mode
+echo "$LIVE_PKGSTATE_MODE" > /new_root/run/geminios/live-pkgstate-mode
+
 # Unmount boot media to allow switch_root to clean up
 umount /mnt/cdrom
 
 # Switch root
-echo "Switching to real root..."
+echo "Switching to real root ($SELECTED_ROOT_MODE mode)..."
 exec switch_root /new_root /sbin/init
 """
         with open(os.path.join(work_dir, "init"), "w") as f:
@@ -5822,9 +6031,10 @@ def main():
             
     if create_iso():
         print_success("\n[!] Build completed successfully!")
-        print_info("\nRun: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm -nic user,model=e1000")
-        print_info("Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm -nic user,model=e1000")
-        print_info("Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm -nic user,model=e1000")
+        print_info("\nRun: qemu-system-x86_64 -cdrom GeminiOS.iso -m 4G -serial stdio -smp 2 -vga std -enable-kvm -nic user,model=e1000")
+        print_info("Run with a disk: qemu-system-x86_64 -cdrom GeminiOS.iso -m 4G -serial stdio -hda disk.qcow2 -smp 2 -vga std -enable-kvm -nic user,model=e1000")
+        print_info("Run with a disk but first boot the ISO: qemu-system-x86_64 -cdrom GeminiOS.iso -m 4G -serial stdio -hda disk.qcow2 -boot d -smp 2 -vga std -enable-kvm -nic user,model=e1000")
+        print(color("Live ISO boots now default to geminios.live_root=auto; in VMs with enough RAM this copies root.sfs into a writable tmpfs root instead of using OverlayFS.", Colors.DIM))
         print(color("Remove the -enable-kvm flag if your host does not support it.", Colors.DIM))
     else:
         print_error("\nFATAL: ISO creation failed")

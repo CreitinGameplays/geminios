@@ -117,12 +117,13 @@ The CI helper logic lives in [`tools/ci_build_iso.sh`](tools/ci_build_iso.sh).
 Recommended QEMU launch:
 
 ```bash
-qemu-system-x86_64 -cdrom GeminiOS.iso -m 2G -serial stdio -smp 2 -vga std -enable-kvm \
+qemu-system-x86_64 -cdrom GeminiOS.iso -m 4G -serial stdio -smp 2 -vga std -enable-kvm \
   -nic user,model=e1000
 ```
 
 - Live/default root password: `geminios`
 - Use the serial console for early boot and login debugging; no SSH service is included in the base image.
+- The live ISO now defaults to `geminios.live_root=auto`: in VMs with enough RAM it copies `root.sfs` into a fully writable tmpfs root so `dpkg` can safely replace core runtime packages like `libc6`. You can force the mode with `geminios.live_root=copy` or `geminios.live_root=overlay`.
 
 ## Development Workflow
 
