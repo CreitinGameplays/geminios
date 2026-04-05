@@ -5,3 +5,6 @@
 [submodule "gpkg"]
 	path = gpkg
 	url = https://github.com/CreitinGameplays/gpkg.git
+[submodule "gpkg-v2"]
+	path = gpkg-v2
+	url = git@github.com:CreitinGameplays/gpkg-v2.git
