@@ -2,7 +2,7 @@
 
 # GeminiOS Documentation
 
-GeminiOS is a minimal, open-source, educational, Debian-derived Linux operating system that does not use `apt` CLI or `systemd` (initially made by Google Gemini 3, continued by Codex). It also does not rely on build systems like Buildroot.
+GeminiOS is a minimal, open-source, educational, Debian-derived Linux operating system that does not use `systemd` (initially made by Google Gemini 3, continued by Codex). It also does not rely on build systems like Buildroot.
 
 The project now follows a clear model:
 
