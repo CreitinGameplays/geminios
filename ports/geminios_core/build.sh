@@ -30,7 +30,10 @@ ln -sfn dash "$ROOTFS/bin/sh"
 if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
     ln -sfn dash "$ROOTFS/usr/bin/sh"
 fi
-ln -sf /bin/apps/system/gpkg "$ROOTFS/bin/gpkg"
+
+# apt-src owns package-management tooling for now, so keep the legacy gpkg
+# entrypoints out of the staged image.
+rm -f "$ROOTFS/bin/gpkg" "$ROOTFS/usr/bin/gpkg"
 
 # Create default system files (passwd, group, shadow)
 mkdir -p "$ROOTFS/etc"

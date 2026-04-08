@@ -466,11 +466,12 @@ PACKAGES = [
     "gcc",
     "git",
     "libapt-pkg",
+    "apt-src",
     # GeminiOS Specifics
     "geminios_core", # init, signals, user_mgmt
     "base-passwd",
     "geminios_pkgs", # ls, pwd, cat, etc.
-    "geminios_complex" # gpkg, ping, installer, etc.
+    "geminios_complex" # ping, installer, su, etc.
 ]
 
 PACKAGE_DEPENDENCIES = {
@@ -478,6 +479,7 @@ PACKAGE_DEPENDENCIES = {
     "curl": ["zlib", "openssl", "ca-certificates"],
     "git": ["zlib", "openssl", "expat", "curl", "ca-certificates"],
     "libapt-pkg": ["openssl", "zstd", "xz", "eudev", "elogind"],
+    "apt-src": [],
     "util-linux": ["ncurses"],
     "sudo": ["linux-pam", "libcap", "openssl", "zlib", "selinux_userspace"],
     "passwd": ["linux-pam", "selinux_userspace"],
@@ -543,8 +545,6 @@ PACKAGE_DEPENDENCIES = {
         "zlib",
         "openssl",
         "zstd",
-        "xz",
-        "libapt-pkg",
         "geminios_core",
     ],
 }
@@ -4134,7 +4134,7 @@ def verify_rootfs_integrity():
         "usr/lib/x86_64-linux-gnu/libdconf.so",
         "usr/lib/x86_64-linux-gnu/libinput.so",
         "usr/share/mime/magic",
-        "bin/apps/system/gpkg-worker",
+        "usr/bin/apt",
         "usr/lib/dbus-1.0/dbus-daemon-launch-helper",
         "usr/share/glib-2.0/schemas/gschemas.compiled",
         "usr/share/fonts/TTF/Inter-Regular.otf",

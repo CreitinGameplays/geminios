@@ -27,6 +27,7 @@
     "gcc": "target",
     "binutils": "target",
     "git": "target",
+    "apt-src": "host-only-tool",
     "geminios_core": "target",
     "geminios_pkgs": "target",
     "geminios_complex": "target"
