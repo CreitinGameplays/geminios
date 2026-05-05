@@ -64,6 +64,22 @@ setup: $(TARGET)
 	@echo 'exec /usr/bin/pkg-config "$$@"' >> $(WRAP_BIN_DIR)/pkg-config
 	@chmod +x $(WRAP_BIN_DIR)/pkg-config
 
+	@# Versioned autotools wrappers. Some distributed tarballs still invoke
+	@# names like automake-1.16 or autoconf-2.71 via `missing` when packaged
+	@# timestamps make regeneration checks fire.
+	@for spec in \
+		'automake-1.16:automake' \
+		'aclocal-1.16:aclocal' \
+		'autoconf-2.71:autoconf' \
+		'autoheader-2.71:autoheader' \
+		'autom4te-2.71:autom4te'; do \
+		name="$${spec%%:*}"; \
+		tool="$${spec##*:}"; \
+		echo '#!/bin/bash' > $(WRAP_BIN_DIR)/$$name; \
+		echo "exec /usr/bin/$$tool \"\$$@\"" >> $(WRAP_BIN_DIR)/$$name; \
+		chmod +x $(WRAP_BIN_DIR)/$$name; \
+	done
+
 clean:
 	rm -f $(TARGET)
 	rm -rf $(SHIM_DIR)
