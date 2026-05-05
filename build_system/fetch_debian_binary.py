@@ -25,13 +25,20 @@ def download(url, dest_path):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     tmp_path = dest_path + ".part"
     request = urllib.request.Request(url, headers={"User-Agent": "GeminiOS fetch_debian_binary"})
-    with urllib.request.urlopen(request) as response, open(tmp_path, "wb") as output:
-        while True:
-            chunk = response.read(1024 * 1024)
-            if not chunk:
-                break
-            output.write(chunk)
-    os.replace(tmp_path, dest_path)
+    try:
+        with urllib.request.urlopen(request) as response, open(tmp_path, "wb") as output:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+        os.replace(tmp_path, dest_path)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def parse_package_index(index_path, package_name, architecture):
@@ -89,8 +96,7 @@ def main():
     cache_dir = os.path.abspath(args.cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     packages_path = os.path.join(cache_dir, os.path.basename(packages_url))
-    if not os.path.exists(packages_path):
-        download(packages_url, packages_path)
+    download(packages_url, packages_path)
 
     record = parse_package_index(packages_path, args.package, args.arch)
     if record is None:
