@@ -112,7 +112,11 @@
     ],
     "e2fsprogs": [
         "sbin/mkfs.ext2",
-        "sbin/mke2fs"
+        "sbin/mke2fs",
+        "usr/lib/x86_64-linux-gnu/libcom_err.so.2",
+        "usr/lib/x86_64-linux-gnu/libe2p.so.2",
+        "usr/lib/x86_64-linux-gnu/libext2fs.so.2",
+        "usr/lib/x86_64-linux-gnu/libss.so.2"
     ],
     "dosfstools": [
         "sbin/mkfs.vfat",

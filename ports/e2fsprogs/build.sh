@@ -28,5 +28,6 @@ cd build
 
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
+make install-libs DESTDIR="$ROOTFS"
 
 # e2fsprogs now installs into the canonical Debian multiarch library tree.
