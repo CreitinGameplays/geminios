@@ -5,6 +5,7 @@ UTIL_LINUX_VER="2.39.3"
 download_and_extract "https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/v2.39/util-linux-$UTIL_LINUX_VER.tar.xz" "util-linux-$UTIL_LINUX_VER.tar.xz" "util-linux-$UTIL_LINUX_VER"
 
 cd "$DEP_DIR/util-linux-$UTIL_LINUX_VER"
+normalize_autotools_generated_timestamps "$PWD"
 make distclean || true
 # In this cross/sysroot build the target libc can expose sched_setattr() at
 # link time while the target headers still lack struct sched_attr. Force

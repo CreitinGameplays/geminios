@@ -1913,7 +1913,11 @@ def get_bootstrap_stage_missing_packages(stage_dir, package_names, package_index
         ]
         candidate_paths = critical_paths or material_paths or payload_paths
 
-        if not any(os.path.exists(os.path.join(stage_dir, payload_path.lstrip("/"))) for payload_path in candidate_paths):
+        # Use lexists() so development-package symlinks count as present even
+        # when their runtime-library targets live in a different Debian
+        # package. The repair pass is checking whether this package's payload
+        # was extracted into the stage, not whether every symlink resolves.
+        if not any(os.path.lexists(os.path.join(stage_dir, payload_path.lstrip("/"))) for payload_path in candidate_paths):
             missing_packages.append(package_name)
 
     return missing_packages

@@ -25,6 +25,12 @@ find "$ROOTFS/usr/lib/x86_64-linux-gnu" "$ROOTFS/lib/x86_64-linux-gnu" "$ROOTFS/
             --disable-static \
             --disable-doxygen-docs \
             --disable-xml-docs \
+            --enable-tests=no \
+            --enable-systemd=no \
+            --enable-x11-autolaunch=no \
+            --with-systemdsystemunitdir=no \
+            --with-systemduserunitdir=no \
+            --without-x \
             --with-console-auth-dir=/run/console/ \
             --with-dbus-user=messagebus \
             --with-system-pid-file=/run/dbus/pid \

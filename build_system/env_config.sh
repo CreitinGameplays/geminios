@@ -38,8 +38,58 @@ download_and_extract() {
         fi
         rm "$DEP_DIR/$archive"
     fi
+
+    normalize_autotools_generated_timestamps "$DEP_DIR/$dirname"
 }
 export -f download_and_extract
+
+normalize_autotools_generated_timestamps() {
+    local src_dir="$1"
+    local sources=()
+    local generated=()
+    local path=""
+    local needs_normalization=0
+
+    [ -d "$src_dir" ] || return 0
+
+    while IFS= read -r path; do
+        sources+=("$path")
+    done < <(
+        find "$src_dir" -type f \
+            \( -name configure.ac -o -name configure.in -o -name acinclude.m4 -o -name '*.m4' -o -name Makefile.am -o -name Makemodule.am \) \
+            | sort
+    )
+
+    if [ ${#sources[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    while IFS= read -r path; do
+        generated+=("$path")
+    done < <(
+        find "$src_dir" -type f \
+            \( -name aclocal.m4 -o -name configure -o -name config.h.in -o -name Makefile.in \) \
+            | sort
+    )
+
+    [ ${#generated[@]} -gt 0 ] || return 0
+
+    for path in "${generated[@]}"; do
+        local source=""
+        for source in "${sources[@]}"; do
+            if [ "$path" -ot "$source" ]; then
+                needs_normalization=1
+                break 2
+            fi
+        done
+    done
+
+    [ "$needs_normalization" -eq 1 ] || return 0
+
+    echo "[*] Normalizing autotools-generated timestamps in $(basename "$src_dir")..."
+    touch "${generated[@]}"
+}
+export -f normalize_autotools_generated_timestamps
 
 rootfs_dirs_alias() {
     local left="$1"
