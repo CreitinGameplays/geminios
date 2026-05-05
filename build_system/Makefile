@@ -68,6 +68,11 @@ setup: $(TARGET)
 	@# names like automake-1.16 or autoconf-2.71 via `missing` when packaged
 	@# timestamps make regeneration checks fire.
 	@for spec in \
+		'automake-1.15:automake' \
+		'aclocal-1.15:aclocal' \
+		'autoconf-2.69:autoconf' \
+		'autoheader-2.69:autoheader' \
+		'autom4te-2.69:autom4te' \
 		'automake-1.16:automake' \
 		'aclocal-1.16:aclocal' \
 		'autoconf-2.71:autoconf' \
@@ -76,7 +81,16 @@ setup: $(TARGET)
 		name="$${spec%%:*}"; \
 		tool="$${spec##*:}"; \
 		echo '#!/bin/bash' > $(WRAP_BIN_DIR)/$$name; \
-		echo "exec /usr/bin/$$tool \"\$$@\"" >> $(WRAP_BIN_DIR)/$$name; \
+		echo 'case "$$1" in' >> $(WRAP_BIN_DIR)/$$name; \
+		echo '  --version|--help|-h|-v|--verbose)' >> $(WRAP_BIN_DIR)/$$name; \
+		echo "    exec /usr/bin/$$tool \"\$$@\"" >> $(WRAP_BIN_DIR)/$$name; \
+		echo '    ;;' >> $(WRAP_BIN_DIR)/$$name; \
+		echo 'esac' >> $(WRAP_BIN_DIR)/$$name; \
+		echo '# Release tarballs should already ship generated autotools output.' >> $(WRAP_BIN_DIR)/$$name; \
+		echo '# When stale timestamps trigger a remake check through `missing`,' >> $(WRAP_BIN_DIR)/$$name; \
+		echo '# succeeding without regeneration is safer than rebuilding with a' >> $(WRAP_BIN_DIR)/$$name; \
+		echo '# host toolchain version that does not match the packaged output.' >> $(WRAP_BIN_DIR)/$$name; \
+		echo 'exit 0' >> $(WRAP_BIN_DIR)/$$name; \
 		chmod +x $(WRAP_BIN_DIR)/$$name; \
 	done
 
