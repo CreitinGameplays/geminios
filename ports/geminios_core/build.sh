@@ -1109,7 +1109,7 @@ mkdir -p "$ROOTFS/usr/share/wayland-sessions"
 # Fix /var/run -> /run
 mkdir -p "$ROOTFS/var"
 rm -rf "$ROOTFS/var/run"
-ln -sf /run "$ROOTFS/var/run"
+ln -sf ../run "$ROOTFS/var/run"
 
 # 5. Xorg Configuration
 mkdir -p "$ROOTFS/etc/X11"

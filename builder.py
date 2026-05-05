@@ -1178,6 +1178,25 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
         completed = set(existing_progress.get("completed", [])) & expected_set
     else:
         completed = set(reused_completed)
+
+    if completed:
+        reused_missing = set(
+            get_bootstrap_stage_missing_packages(
+                stage_dir,
+                sorted(completed),
+                package_index,
+            )
+        )
+        if reused_missing:
+            sample = ", ".join(sorted(reused_missing)[:6])
+            if len(reused_missing) > 6:
+                sample += ", ..."
+            print_warning(
+                f"WARNING: {stage_name} resume state references {len(reused_missing)} package(s) with missing payloads: "
+                f"{sample}. Re-extracting them."
+            )
+            completed -= reused_missing
+
     save_bootstrap_stage_progress(plan_path, desired_plan)
     save_bootstrap_stage_progress(
         progress_path,
@@ -1402,6 +1421,7 @@ def assemble_final_rootfs():
             os.path.join(BUILD_SYSROOT_DIR, entry),
             os.path.join(FINAL_ROOTFS_DIR, entry),
         )
+    repair_cross_stage_rootfs_symlinks(FINAL_ROOTFS_DIR, report=True)
     for stamp_name in (".bootstrap-complete",):
         stamp_path = os.path.join(FINAL_ROOTFS_DIR, stamp_name)
         if os.path.exists(stamp_path):
@@ -1879,6 +1899,15 @@ def is_bootstrap_linkable_payload_path(path):
 
     return False
 
+def is_bootstrap_runtime_shared_object_path(path):
+    """Return whether a Debian payload path is a concrete runtime shared object file."""
+    normalized = "/" + path.lstrip("/")
+    if not normalized.startswith(("/usr/lib/", "/lib/")):
+        return False
+
+    basename = os.path.basename(normalized)
+    return re.search(r"\.so\.\d+(?:[A-Za-z0-9._+-]+)?$", basename) is not None
+
 def get_bootstrap_stage_missing_packages(stage_dir, package_names, package_index):
     """Return staged Debian packages whose extracted payload has gone missing."""
     missing_packages = []
@@ -1911,7 +1940,12 @@ def get_bootstrap_stage_missing_packages(stage_dir, package_names, package_index
             for payload_path in material_paths
             if is_bootstrap_linkable_payload_path(payload_path)
         ]
-        candidate_paths = critical_paths or material_paths or payload_paths
+        runtime_shared_object_paths = [
+            payload_path
+            for payload_path in critical_paths
+            if is_bootstrap_runtime_shared_object_path(payload_path)
+        ]
+        candidate_paths = runtime_shared_object_paths or critical_paths or material_paths or payload_paths
 
         # Use lexists() so development-package symlinks count as present even
         # when their runtime-library targets live in a different Debian
@@ -2715,7 +2749,8 @@ def get_libxml2_runtime_issues(root_dir=None):
         collect_missing_runtime_deps(
             rootfs_dir,
             [
-                os.path.join(rootfs_dir, "usr", "bin", "update-mime-database"),
+                os.path.join(rootfs_dir, "usr", "bin", "xmllint"),
+                os.path.join(rootfs_dir, "usr", "bin", "xmlcatalog"),
                 libxml2_real,
             ],
         )
@@ -4128,6 +4163,62 @@ def overlay_rootfs_entry(source_path, dest_path):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     shutil.copy2(source_path, dest_path)
     return 1
+
+def repair_cross_stage_rootfs_symlinks(root_dir, foreign_roots=None, report=True):
+    """Rewrite symlinks that still point at staging roots so they resolve inside root_dir."""
+    root_dir = os.path.realpath(root_dir)
+    if foreign_roots is None:
+        foreign_roots = [BOOTSTRAP_ROOTFS_DIR, BUILD_SYSROOT_DIR]
+
+    normalized_foreign_roots = []
+    for foreign_root in foreign_roots:
+        if not foreign_root:
+            continue
+        normalized = os.path.realpath(foreign_root)
+        if normalized == root_dir:
+            continue
+        normalized_foreign_roots.append(normalized)
+
+    repaired = 0
+    for dirpath, dirnames, filenames in os.walk(root_dir, topdown=True, followlinks=False):
+        for name in list(dirnames) + filenames:
+            path = os.path.join(dirpath, name)
+            if not os.path.islink(path):
+                continue
+
+            raw_target = os.readlink(path)
+            if os.path.isabs(raw_target):
+                target_abs = os.path.normpath(os.path.join(root_dir, raw_target.lstrip("/")))
+            else:
+                target_abs = os.path.normpath(os.path.join(os.path.dirname(path), raw_target))
+
+            mapped_abs = None
+            for foreign_root in normalized_foreign_roots:
+                try:
+                    if os.path.commonpath([foreign_root, target_abs]) == foreign_root:
+                        rel_target = os.path.relpath(target_abs, foreign_root)
+                        mapped_abs = os.path.normpath(os.path.join(root_dir, rel_target))
+                        break
+                except ValueError:
+                    continue
+
+            if mapped_abs is None:
+                continue
+
+            new_target = os.path.relpath(mapped_abs, os.path.dirname(path))
+            if new_target == raw_target:
+                continue
+
+            os.unlink(path)
+            os.symlink(new_target, path)
+            repaired += 1
+
+    if report:
+        if repaired:
+            print_info(f"[*] Rewrote {repaired} staged symlinks to point inside {root_dir}...")
+        else:
+            print_success("  ✓ No cross-stage symlinks needed rewriting.")
+    return repaired
 
 def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     """Fold legacy lib64 installs back into the canonical Debian multiarch layout."""

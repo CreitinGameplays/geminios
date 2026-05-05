@@ -65,6 +65,16 @@ meson setup build \
     -Deconf=disabled
 
 ninja -C build
+
+# Keep DESTDIR installs inside the staged rootfs. An absolute /var/run -> /run
+# symlink makes Meson follow into the host /run when creating pam_sepermit's
+# lock directory, which fails for unprivileged builds.
+mkdir -p "$ROOTFS/run" "$ROOTFS/var"
+if [ -L "$ROOTFS/var/run" ] && [ "$(readlink "$ROOTFS/var/run")" = "/run" ]; then
+    rm -f "$ROOTFS/var/run"
+    ln -s ../run "$ROOTFS/var/run"
+fi
+
 DESTDIR="$ROOTFS" ninja -C build install
 
 rm -f "$PKG_CONFIG_FILTER"
