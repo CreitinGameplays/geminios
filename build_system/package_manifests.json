@@ -551,7 +551,9 @@
     ],
     "gdk-pixbuf": [
         "usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so",
-        "usr/lib/x86_64-linux-gnu/pkgconfig/gdk-pixbuf-2.0.pc"
+        "usr/lib/x86_64-linux-gnu/pkgconfig/gdk-pixbuf-2.0.pc",
+        "usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
+        "usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-png.so"
     ],
     "at-spi2-core": [
         "usr/lib/x86_64-linux-gnu/libatspi.so",

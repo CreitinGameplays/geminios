@@ -1433,7 +1433,7 @@ def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False)
 
     # We unset problematic variables ALWAYS to ensure a clean start,
     # then the source command will set them if needed for the target.
-    clean_env = "unset LD_LIBRARY_PATH PYTHONHOME PYTHONPATH && "
+    clean_env = "unset LD_LIBRARY_PATH PYTHONHOME PYTHONPATH XDG_DATA_DIRS && "
     debug_env = "export ENABLE_DEBUG=true && " if debug else "export ENABLE_DEBUG=false && "
     full_cmd = f"{clean_env}{debug_env}source {ENV_CONFIG} && {target_env}{cmd_to_run}"
     

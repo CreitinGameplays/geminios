@@ -16,6 +16,25 @@ export KERNEL_SOURCE_URL="https://git.kernel.org/torvalds/t/linux-7.0-rc6.tar.gz
 export KERNEL_BZIMAGE="$DEP_DIR/$KERNEL_VERSION/arch/x86/boot/bzImage"
 export JOBS=${JOBS:-$(nproc)}
 
+configure_gdk_pixbuf_loader_env() {
+    local pixbuf_root="${ROOTFS:-$BUILD_SYSROOT}/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0"
+    local pixbuf_module_dir="$pixbuf_root/loaders"
+    local pixbuf_cache_file="$pixbuf_root/loaders.cache"
+
+    if [ -d "$pixbuf_module_dir" ]; then
+        export GDK_PIXBUF_MODULEDIR="$pixbuf_module_dir"
+    else
+        unset GDK_PIXBUF_MODULEDIR
+    fi
+
+    if [ -f "$pixbuf_cache_file" ]; then
+        export GDK_PIXBUF_MODULE_FILE="$pixbuf_cache_file"
+    else
+        unset GDK_PIXBUF_MODULE_FILE
+    fi
+}
+export -f configure_gdk_pixbuf_loader_env
+
 # Helper to download and extract dependencies
 download_and_extract() {
     local url="$1"
@@ -109,3 +128,5 @@ move_rootfs_entry_if_distinct() {
     mv -f "$src" "$dst"
 }
 export -f move_rootfs_entry_if_distinct
+
+configure_gdk_pixbuf_loader_env
