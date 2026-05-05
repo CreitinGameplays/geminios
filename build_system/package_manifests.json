@@ -55,7 +55,10 @@
         "usr/bin/gperf"
     ],
     "gettext": [
-        "usr/bin/msgfmt"
+        "usr/bin/msgfmt",
+        "usr/lib/x86_64-linux-gnu/libgettextlib-*.so",
+        "usr/lib/x86_64-linux-gnu/libgettextsrc-*.so",
+        "usr/lib/x86_64-linux-gnu/libtextstyle.so.0"
     ],
     "perl": [
         "usr/bin/perl"
@@ -139,7 +142,8 @@
     "xfsprogs": [
         "sbin/mkfs.xfs",
         "sbin/fsck.xfs",
-        "sbin/xfs_repair"
+        "sbin/xfs_repair",
+        "usr/lib/x86_64-linux-gnu/libhandle.so.1"
     ],
     "btrfs-progs": [
         "bin/btrfs",
@@ -148,7 +152,8 @@
     ],
     "f2fs-tools": [
         "sbin/mkfs.f2fs",
-        "sbin/fsck.f2fs"
+        "sbin/fsck.f2fs",
+        "usr/lib/x86_64-linux-gnu/libf2fs.so.10"
     ],
     "util-linux": [
         "usr/lib/x86_64-linux-gnu/libmount.so",
@@ -246,7 +251,9 @@
         "usr/lib/x86_64-linux-gnu/pkgconfig/json-glib-1.0.pc"
     ],
     "gobject-introspection": [
+        "usr/bin/g-ir-compiler",
         "usr/bin/g-ir-scanner",
+        "usr/lib/x86_64-linux-gnu/libgirepository-1.0.so.1",
         "usr/lib/x86_64-linux-gnu/pkgconfig/gobject-introspection-1.0.pc",
         "usr/lib/x86_64-linux-gnu/pkgconfig/gobject-introspection-no-export-1.0.pc"
     ],

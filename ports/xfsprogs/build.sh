@@ -2,7 +2,7 @@
 set -euo pipefail
 
 XFSPROGS_VER="6.13.0"
-XFSPROGS_BUILD_RUNPATH="$DEP_DIR/xfsprogs-$XFSPROGS_VER/libhandle/.libs:/usr/lib/x86_64-linux-gnu"
+XFSPROGS_BUILD_RUNPATH=""
 XFSPROGS_RUNTIME_RUNPATH="/usr/lib/x86_64-linux-gnu"
 
 strip_xfs_build_runpath() {
@@ -32,7 +32,12 @@ download_and_extract \
     "xfsprogs-$XFSPROGS_VER"
 
 cd "$DEP_DIR/xfsprogs-$XFSPROGS_VER"
+XFSPROGS_BUILD_RUNPATH="$PWD/libhandle/.libs:/usr/lib/x86_64-linux-gnu"
 make distclean || true
+
+export DEBUG="-DNDEBUG"
+export BUILD_CC="${BUILD_CC:-/usr/bin/gcc}"
+export BUILD_CFLAGS="-O2"
 
 ./configure \
     --prefix=/usr \

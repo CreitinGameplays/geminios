@@ -13,7 +13,8 @@ if [ -f Makefile ]; then
     make distclean || true
 fi
 
-if [ ! -x ./configure ]; then
+if [ ! -x ./configure ] || [ ! -f ./ltmain.sh ] || [ ! -f ./config.guess ] || [ ! -f ./config.sub ]; then
+    libtoolize --force --copy
     sh ./autogen.sh
 fi
 
