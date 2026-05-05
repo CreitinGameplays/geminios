@@ -15,9 +15,9 @@ export CXX="${CXX:-c++}"
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
-export CFLAGS="-O2 -fPIC -Wno-error"
-export CXXFLAGS="-O2 -fPIC -Wno-error"
-export LDFLAGS=""
+export CFLAGS="${CFLAGS:+$CFLAGS }-Wno-error"
+export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-Wno-error"
+export LDFLAGS="${LDFLAGS:+$LDFLAGS }-Wl,-rpath-link,$ROOTFS/usr/lib/x86_64-linux-gnu -Wl,-rpath-link,$ROOTFS/lib/x86_64-linux-gnu"
 PYTHON_SITE_PACKAGES=(
     "$ROOTFS/usr/lib/x86_64-linux-gnu/python3.11/site-packages"
     "$ROOTFS/usr/lib/python3.11/site-packages"
@@ -67,6 +67,13 @@ EOF
 chmod 755 "$PKG_CONFIG_FILTER"
 export PKG_CONFIG="$PKG_CONFIG_FILTER"
 
+audit_feature="auto"
+if [ ! -f "$ROOTFS/usr/include/libaudit.h" ] || \
+   { [ ! -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libaudit.so" ] && [ ! -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libaudit.a" ]; }; then
+    echo "Disabling audit support for elogind; staged libaudit development files are incomplete."
+    audit_feature="disabled"
+fi
+
 meson setup build \
     --prefix=/usr \
     --libdir=lib/x86_64-linux-gnu \
@@ -78,7 +85,8 @@ meson setup build \
     -Dcgroup-controller=elogind \
     -Ddev-kvm-mode=0660 \
     -Ddbuspolicydir=/etc/dbus-1/system.d \
-    -Ddefault-kill-user-processes=false
+    -Ddefault-kill-user-processes=false \
+    "-Daudit=$audit_feature"
 
 ninja -C build
 DESTDIR="$ROOTFS" ninja -C build install

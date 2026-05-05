@@ -2,7 +2,7 @@
 
 # GeminiOS Global Build Configuration
 export ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export DEP_DIR="$ROOT_DIR/external_dependencies"
+export DEP_DIR="${GEMINIOS_EXTERNAL_DEPENDENCIES_DIR:-$ROOT_DIR/external_dependencies}"
 export BOOTSTRAP_ROOTFS="$ROOT_DIR/bootstrap_rootfs"
 export BUILD_SYSROOT="$ROOT_DIR/build_sysroot"
 export FINAL_ROOTFS="$ROOT_DIR/rootfs"
@@ -11,7 +11,7 @@ export LOG_DIR="$ROOT_DIR/logs"
 export OUTPUT_DIR="$ROOT_DIR/output"
 export PACKAGES_DIR="$ROOT_DIR/ports"
 
-export KERNEL_VERSION="linux-7.0-rc6"
+export KERNEL_VERSION="linux-7.0-rc5"
 export KERNEL_SOURCE_URL="https://git.kernel.org/torvalds/t/linux-7.0-rc6.tar.gz"
 export KERNEL_BZIMAGE="$DEP_DIR/$KERNEL_VERSION/arch/x86/boot/bzImage"
 export JOBS=${JOBS:-$(nproc)}

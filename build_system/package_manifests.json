@@ -101,13 +101,13 @@
     ],
     "libxml2": [
         "usr/lib/x86_64-linux-gnu/libxml2.so",
-        "usr/lib/x86_64-linux-gnu/libxml2.so.2.12.4",
+        "usr/lib/x86_64-linux-gnu/libxml2.so.2.*",
         "usr/lib/x86_64-linux-gnu/pkgconfig/libxml-2.0.pc"
     ],
     "expat": [
         "usr/lib/x86_64-linux-gnu/libexpat.so",
         "usr/lib/x86_64-linux-gnu/libexpat.so.1",
-        "usr/lib/x86_64-linux-gnu/libexpat.so.1.11.3",
+        "usr/lib/x86_64-linux-gnu/libexpat.so.1.*",
         "usr/lib/x86_64-linux-gnu/pkgconfig/expat.pc"
     ],
     "e2fsprogs": [
@@ -130,7 +130,7 @@
     ],
     "lzo": [
         "usr/lib/x86_64-linux-gnu/liblzo2.so.2",
-        "usr/lib/x86_64-linux-gnu/liblzo2.so.2.0.0"
+        "usr/lib/x86_64-linux-gnu/liblzo2.so.2.*"
     ],
     "xfsprogs": [
         "sbin/mkfs.xfs",
@@ -200,7 +200,7 @@
         "usr/bin/dbus-launch",
         "usr/bin/dbus-run-session",
         "usr/lib/dbus-1.0/dbus-daemon-launch-helper",
-        "usr/lib/x86_64-linux-gnu/libdbus-1.so.3.32.4",
+        "usr/lib/x86_64-linux-gnu/libdbus-1.so.3.*",
         "usr/lib/x86_64-linux-gnu/pkgconfig/dbus-1.pc"
     ],
     "libffi": [

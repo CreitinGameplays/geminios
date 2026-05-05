@@ -8,7 +8,7 @@ The project now follows a clear model:
 
 - Debian-derived userland and package ecosystem
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
-- `gpkg` as a testing-first package manager with GeminiOS/S2 packages layered on top
+- Debian-native `apt`/`dpkg` package management staged through `apt-src`
 
 Versioning follows a rolling `stream + snapshot` model:
 
@@ -132,7 +132,7 @@ qemu-system-x86_64 -cdrom GeminiOS.iso -m 4G -serial stdio -smp 2 -vga std -enab
 
 - **Core System (Ginit)**: The initialization system and core utilities reside in the `ginit/` directory. It is built as part of the `geminios_core` port but can be developed independently using its own `Makefile`.
 
-- **Package Manager (GPKG)**: The package manager now lives in the top-level `gpkg/` directory, with its own `src/`, `README`, and `Makefile`. It is integrated into the OS through the `geminios_complex` port, but can also be built independently.
+- **Package Management**: The base image currently stages Debian `apt` tooling through [`ports/apt-src/build.sh`](ports/apt-src/build.sh). The top-level `gpkg/` tree is still in the repo for separate work, but it is not currently staged into the built rootfs.
 
 - **Userspace Packages**: Most other system utilities are in `src/packages/` (system utilities).
 
@@ -156,12 +156,12 @@ GeminiOS currently boots and runs a regular X11 desktop session. The base image 
   - `/usr/libexec/geminios/session-runtime`
 
 That solves the class of runtime failures caused by packages expecting GTK/Wayland client symbols to exist.
-It also means GeminiOS now has a non-`systemd --user` session bootstrap path for imported Wayland desktops: the wrapper starts a session bus when needed, exports the XDG session variables, and opportunistically launches common user daemons such as PipeWire, portals, polkit agents, `at-spi`, and `gnome-keyring` if those packages are installed later via `.gpkg`.
+It also means GeminiOS now has a non-`systemd --user` session bootstrap path for imported Wayland desktops: the wrapper starts a session bus when needed, exports the XDG session variables, and opportunistically launches common user daemons such as PipeWire, portals, polkit agents, `at-spi`, and `gnome-keyring` if those packages are installed later from Debian packages.
 The base login/session layer now also seeds the standard XDG home directories, infers the runtime D-Bus socket when one already exists, and supports shell drop-ins under `/usr/libexec/geminios/session-env.d`, `/etc/geminios/session-env.d`, and `$HOME/.config/geminios/session-env.d` so future Wayland packages can extend the session environment without patching `geminios_core` again.
 
 What it does **not** mean yet:
 
-- GeminiOS does not ship a Wayland compositor in-tree, but you can install any with `gpkg`.
+- GeminiOS does not ship a Wayland compositor in-tree, but you can install one later with `apt`.
 - The default desktop/session flow is still X11 unless you explicitly start a Wayland session.
 
 So the current state is: **Wayland-capable userspace foundation plus a real session bootstrap path, but the compositor still need to be installed on top.**
@@ -179,112 +179,34 @@ Those wrappers are the supported bridge between GeminiOS login/PAM/elogind and i
 
 ## Package Sources
 
-`gpkg` now uses Debian testing as its primary package source and merges that metadata with any configured GeminiOS/S2 `.gpkg` repositories.
+The current GeminiOS image stages Debian package management through the `apt-src` port.
+That means the built rootfs ships Debian `apt`, `apt-utils`, `gpgv`, the Debian archive keyring, and a standard `dpkg` state layout instead of the older staged `gpkg` runtime.
 
 The default image seeds:
 
-- `/etc/gpkg/debian.conf`: built-in Debian testing backend configuration
-- `/etc/gpkg/import-policy.json`: testing import blocklist, dependency/provider policy, and base-system ownership rules
-- `/etc/gpkg/sources.list.d/*.list`: optional secondary `.gpkg` repositories, with defaults taken from `build_system/gpkg_default_sources.list`
-
-Debian testing is the main source for `search`, `show`, `install`, and `upgrade`.
-Public `.gpkg` repositories are still supported for GeminiOS-native packages such as `gpkg`, `gtop`, and other curated packages that are not available from testing.
-
-If you published `.gpkg` files to a public bucket or custom domain, `gpkg` can consume that repository directly as a secondary source. The repository base URL should point to the directory that contains the `x86_64/` folder. For example, if your index is at `https://repo.creitingameplays.com/x86_64/Packages.json.zst`, the repository URL to add is:
-
-```text
-https://repo.creitingameplays.com
-```
-
-`gpkg add-repo` now normalizes URLs, so it also accepts inputs ending in `/x86_64` or `/x86_64/Packages.json.zst`.
+- `/etc/apt/sources.list`: the Debian testing source generated from `build_system/gpkg_debian.conf`
+- `/etc/apt/apt.conf.d/99geminios-debian.conf`: GeminiOS apt defaults
+- `/var/repo/debian/Packages` and `/var/repo/debian/Packages.gz`: cached Debian index copies used by the build
+- `/usr/share/keyrings/debian-archive-keyring.gpg`: Debian archive keyring used for signed repository verification
 
 Typical flow inside GeminiOS:
 
 ```bash
-gpkg list-repos
-sudo gpkg update
-gpkg show nano
-gpkg search nano
-sudo gpkg install nano
-sudo gpkg add-repo https://repo.creitingameplays.com
-```
-
-What each step verifies:
-- `gpkg list-repos`: Shows the built-in Debian testing backend plus any configured S2 repos.
-- `gpkg update`: Syncs the raw Debian testing Packages index plus all configured `.gpkg` repository indices, reuses cached copies when they are unchanged, and defers the heavy merged/imported catalog rebuild until a later `search`, `show`, `install`, `upgrade`, or `doctor` run actually needs it.
-- `gpkg show <pkg>`: Displays the selected candidate, its source kind, origin URL, and dependency list.
-- `gpkg search <query>`: Searches the merged local cache and, when needed, lazily rebuilds the derived Debian metadata used for installability diagnostics before falling back to on-demand raw Debian lookups.
-- `gpkg install <pkg>`: Downloads either a `.gpkg` from S2 or a `.deb` from testing, installs Debian packages through native `dpkg`, keeps GeminiOS-native packages on the `.gpkg` worker path, and now reports exact-package "available but not installable" cases before dependency resolution falls back to generic errors.
-- `gpkg install <pkg> --reinstall`: Forces a reinstall of the selected repository package even when the same version is already installed.
-- `gpkg add-repo ...`: Validates that the remote `Packages.json.zst` exists and is readable before adding it as a secondary source.
-
-Manual configuration is also supported by writing one repository URL per line into:
-
-```text
-/etc/gpkg/sources.list
-/etc/gpkg/sources.list.d/*.list
+sudo apt update
+apt search nano
+apt show nano
+sudo apt install nano
+sudo apt install weston
 ```
 
 Important:
-- Debian testing is configured through `/etc/gpkg/debian.conf`; the v1 default backend is `main/binary-amd64`.
-- The testing importer is intentionally policy-limited by `/etc/gpkg/import-policy.json`; packages such as `apt`, `linux-image-*`, bootloader/init packages, and other protected base packages are not installable through testing import.
-- Debian `task-*` desktop metapackages are supported as dependency anchors through import-policy overrides; GeminiOS keeps `apt` blocked, but packages such as `task-mate-desktop`, `task-lxqt-desktop`, and `tasksel` can still resolve when their policy-approved dependencies are available.
-- The bucket must be publicly readable, or be exposed through a public custom domain, because `gpkg` currently performs plain HTTP(S) fetches.
-- Secondary `.gpkg` repositories must still expose `x86_64/Packages.json.zst` and the package files referenced by that index underneath the same base URL.
-- `gpkg update` keeps Debian testing as the backend, synchronizes raw indices first, and rebuilds the merged runtime catalog lazily only when another command needs it.
-- `gpkg` reads `system_provides` and `upgradeable_system` from `/etc/gpkg/import-policy.json` during dependency resolution so GeminiOS can keep control over base/runtime ownership.
 
-Per-transaction optional dependency control is also available for testing-backed installs, upgrades, and repairs:
-
-```bash
-sudo gpkg install fastfetch --recommended-no
-sudo gpkg install python3 --reinstall
-sudo gpkg upgrade --recommended-yes
-sudo gpkg upgrade --reinstall
-sudo gpkg repair --suggested-yes
-```
+- The staged image currently expects Debian testing to be the primary package source.
+- `apt-src` is the integration point that populates the runtime apt layout in the image.
+- The build no longer stages `/etc/gpkg`, `/usr/share/gpkg`, or `/var/lib/gpkg` into the final rootfs.
+- The `gpkg/` tree still exists in the repo for development, but it is not the package manager shipped in the current image.
 
 GeminiOS also ships a system-wide `fastfetch` default at `/etc/xdg/fastfetch/config.jsonc`, with GeminiOS logo assets under `/usr/share/fastfetch/logos/`. Users can still override that per-account with `~/.config/fastfetch/config.jsonc`.
-
-`--recommended-yes` / `--recommended-no` override Debian `Recommends` handling for the current transaction, and `--suggested-yes` / `--suggested-no` do the same for `Suggests`. `--reinstall` is valid with `install` and `upgrade`; it forces the selected transaction targets back through download/prepare/install even when the installed version is already current. Without those flags, `gpkg` follows the package policy stored in the merged metadata.
-
-`gpkg` now also maintains a dpkg-style status ledger at `/var/lib/gpkg/status` alongside `/var/lib/gpkg/info/`. Installations transition through `half-installed`, `unpacked`, `half-configured`, and `installed`; removals keep package conffiles and land in `config-files`; `gpkg remove --purge` follows the remove step with a purge step that deletes retained conffiles and the remaining package metadata; and retirements forget the package entry entirely after success. The worker restores the previous status automatically if a transaction rolls back.
-
-`gpkg remove` and `gpkg remove --purge` now follow apt/dpkg-style semantics more closely:
-
-- `gpkg remove <pkg>` removes package payload files but keeps retained `/etc` conffiles for that package.
-- `gpkg remove <pkg> --purge` removes the package and then purges the retained conffiles and purge-time metadata.
-- `gpkg remove <pkg> --autoremove` removes newly unneeded dependency packages.
-- `gpkg remove <pkg> --autoremove --purge` removes the package set and purges their retained conffiles too.
-
-`gpkg clean` clears the local package cache under `/var/repo/`: cached `.deb` archives, cached `.gpkg` archives, partial downloads, and merged/package-list indices. That makes it behave closer to `apt` archive cleanup while still resetting gpkg’s merged repository cache in one step.
-
-On SELinux-enabled installs, `gpkg-worker` now relabels the files it just wrote before finishing the transaction, and it drops `/.autorelabel` automatically if an upgrade touches the SELinux policy store itself. GeminiOS also blocks Debian-imported SELinux userspace/policy packages from replacing the distro-managed SELinux stack through normal `gpkg upgrade` runs.
-
-`gpkg doctor` provides a read-only health report for the package manager state. It checks repository/index availability, installed-package metadata consistency, base-system registry drift, and whether `gpkg upgrade` can build a safe dry-run transaction plan.
-
-`builder.py` now seeds `/etc/gpkg/sources.list.d/00-default.list` from `build_system/gpkg_default_sources.list` when that file exists.
-That keeps the default GeminiOS-native repository policy in build config instead of hardcoding it into `gpkg` itself.
-
-The default Debian backend config is taken from `build_system/gpkg_debian.conf` and copied into the image as:
-
-```text
-/etc/gpkg/debian.conf
-```
-
-The default import policy is taken from `build_system/gpkg_import_policy.json` and copied into the image as:
-
-```text
-/etc/gpkg/import-policy.json
-```
-
-The default secondary repository list is taken from `build_system/gpkg_default_sources.list` and copied into the image as:
-
-```text
-/etc/gpkg/sources.list.d/00-default.list
-```
-
-That policy file is shared with the Debian import/publisher tooling so the testing importer and the optional bulk publisher use the same blocklist, dependency-choice, provider-choice, rewrite defaults, and base-runtime ownership lists.
 
 ## Ginit (Init System)
 
@@ -295,30 +217,23 @@ cd ginit && make
 ```
 For more information, see [ginit/README.md](https://github.com/CreitinGameplays/ginit/blob/master/README.md).
 
-## GPKG (Package Manager)
+## Legacy GPKG
 
-`gpkg` keeps its base-system knowledge in `/etc/gpkg/import-policy.json`:
+The top-level `gpkg/` tree is now a standalone or experimental package-manager source tree, not the package manager staged into the default GeminiOS image.
 
-- `system_provides`: packages or capabilities GeminiOS should treat as already present
-- `upgradeable_system`: base runtimes that may exist in the image, but should still be upgraded from the repository when a newer compatible package exists
-
-This split is important for a testing-first Debian-derived userland. It avoids treating every base library as permanently frozen while still letting GeminiOS keep control over its own boot and init policy.
-During image finalization, `builder.py` also writes `/usr/share/gpkg/base-debian-packages.json`, an exact Debian base-package manifest generated from the bootstrap `.deb` payloads. `gpkg` uses that manifest as the authoritative source for base Debian package names, versions, and file ownership during compat-dpkg bootstrap, dry-run upgrade planning, and live repair, while `/etc/gpkg/import-policy.json` remains the higher-level policy layer that decides which base families are system-provided or upgradeable.
-When a transaction pulls in one of those upgradeable runtime packages, `gpkg` also expands the configured companion stack for already-present or base-provided runtime peers (for example `libc6` pulling in `libc-bin`, but not the libc development stack during a normal app install) and verifies the live runtime aliases before committing the install, so partial base-library upgrades are rolled back instead of being left half-applied.
-GeminiOS now uses Debian-native multiarch as the canonical runtime layout: package-owned shared libraries live under `/lib/x86_64-linux-gnu` and `/usr/lib/x86_64-linux-gnu`. The legacy `/lib64` and `/usr/lib64` paths are compatibility symlinks so older tooling and manifests continue to resolve during the transition.
-Before running `ldconfig`, `gpkg-worker` reconciles those canonical and compatibility runtime families using installed-package ownership as the source of truth: owned valid Debian-layout payloads win, compatibility copies are demoted to aliases, and invalid orphaned runtime entries are discarded. The normal `ldconfig` trigger path goes through that same worker repair step, so post-install trigger processing and direct runtime transactions use the same recovery logic.
-
-To build the package manager standalone:
+If you want to build it manually for local experimentation:
 
 ```bash
 cd gpkg && make
 ```
 
-To install it into a rootfs:
+To install it into a separate rootfs manually:
 
 ```bash
 cd gpkg && make install DESTDIR=/path/to/rootfs
 ```
+
+The current builder no longer stages `gpkg`, `/etc/gpkg`, `/usr/share/gpkg`, or `/var/lib/gpkg` into the final image by default.
 
 ## Build System Architecture
 

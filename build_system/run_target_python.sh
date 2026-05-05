@@ -21,7 +21,7 @@ if [ -z "$TARGET_MULTIARCH" ]; then
 fi
 PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
 PYTHON_BIN="$ROOTFS/usr/bin/python3"
-PYTHON_LOADER="$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+PYTHON_LOADER=""
 
 LIBRARY_PATH="$ROOTFS/lib/x86_64-linux-gnu:$ROOTFS/usr/lib/x86_64-linux-gnu:$ROOTFS/lib64:$ROOTFS/usr/lib64"
 export PYTHONNOUSERSITE=1
@@ -51,6 +51,35 @@ fi
 
 if [ ! -x "$PYTHON_BIN" ]; then
     echo "Error: Python not found at $PYTHON_BIN"
+    exit 1
+fi
+
+resolve_loader_from_binary() {
+    local binary_path="$1"
+    local interpreter interpreter_name candidate
+
+    interpreter="$(LC_ALL=C readelf -l "$binary_path" 2>/dev/null | sed -n 's/.*Requesting program interpreter: \(.*\)]/\1/p' | head -n1)"
+    interpreter_name="${interpreter##*/}"
+    if [ -z "$interpreter_name" ]; then
+        interpreter_name="ld-linux-x86-64.so.2"
+    fi
+
+    for candidate in \
+        "$ROOTFS/lib64/$interpreter_name" \
+        "$ROOTFS/usr/lib64/$interpreter_name" \
+        "$ROOTFS/lib/x86_64-linux-gnu/$interpreter_name" \
+        "$ROOTFS/usr/lib/x86_64-linux-gnu/$interpreter_name"
+    do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if ! PYTHON_LOADER="$(resolve_loader_from_binary "$PYTHON_BIN")"; then
+    echo "Error: staged loader not found for $PYTHON_BIN"
     exit 1
 fi
 

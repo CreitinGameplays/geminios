@@ -15,9 +15,21 @@ export CXX="${CXX:-c++}"
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
-export CFLAGS="-O2 -fPIC -Wno-error"
-export CXXFLAGS="-O2 -fPIC -Wno-error"
-export LDFLAGS=""
+export CFLAGS="${CFLAGS:+$CFLAGS }-Wno-error"
+export CXXFLAGS="${CXXFLAGS:+$CXXFLAGS }-Wno-error"
+export LDFLAGS="${LDFLAGS:+$LDFLAGS }-Wl,-rpath-link,$ROOTFS/usr/lib/x86_64-linux-gnu -Wl,-rpath-link,$ROOTFS/lib/x86_64-linux-gnu"
+
+if [ ! -f "$ROOTFS/usr/lib/x86_64-linux-gnu/pkgconfig/libselinux.pc" ]; then
+    echo "linux-pam requires staged libselinux metadata before building with SELinux support."
+    echo "Build selinux_userspace before linux-pam."
+    exit 1
+fi
+
+if [ ! -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libpcre2-8.so" ] && [ ! -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0" ]; then
+    echo "linux-pam requires staged PCRE2 runtime libraries before building with SELinux support."
+    echo "Build pcre2 before linux-pam."
+    exit 1
+fi
 
 PKG_CONFIG_REAL="${PKG_CONFIG:-pkg-config}"
 PKG_CONFIG_FILTER="$PWD/pkg-config-linux-pam-filter.sh"

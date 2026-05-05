@@ -7,8 +7,17 @@ SRC="$ROOT_DIR/src"
 PKGS="$ROOT_DIR/src/packages/system"
 TARGET_MULTIARCH="x86_64-linux-gnu"
 TARGET_CXX_VERSION="$(find "$ROOTFS/usr/include/c++" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | grep -E '^[0-9]+$' | sort -V | tail -n1)"
+TARGET_COMPILER="${TARGET_CXX:-${CXX:-/usr/bin/g++}}"
+TARGET_STRIP_TOOL="${TARGET_STRIP:-strip}"
 COMMON_CXXFLAGS=(--sysroot="$ROOTFS" -O2 -I "$GINIT_SRC" -I "$SRC")
-COMMON_LDFLAGS=(--sysroot="$ROOTFS" -L"$GINIT_LIB" -L"$ROOTFS/usr/lib/$TARGET_MULTIARCH" -L"$ROOTFS/lib/$TARGET_MULTIARCH")
+COMMON_LDFLAGS=(
+    --sysroot="$ROOTFS"
+    -L"$GINIT_LIB"
+    -L"$ROOTFS/usr/lib/$TARGET_MULTIARCH"
+    -L"$ROOTFS/lib/$TARGET_MULTIARCH"
+    -Wl,-rpath-link,"$ROOTFS/usr/lib/$TARGET_MULTIARCH"
+    -Wl,-rpath-link,"$ROOTFS/lib/$TARGET_MULTIARCH"
+)
 COMMON_LIBS=(-lgemcore -lssl -lcrypto -lz -lzstd -ldl -lpthread -lcrypt)
 
 if [ -n "$TARGET_CXX_VERSION" ]; then
@@ -23,8 +32,8 @@ fi
 build_tool() {
     local output="$1"
     shift
-    /usr/bin/g++ "${COMMON_CXXFLAGS[@]}" -o "$output" "$@" "${COMMON_LDFLAGS[@]}" "${COMMON_LIBS[@]}"
-    /usr/bin/strip "$output"
+    "$TARGET_COMPILER" "${COMMON_CXXFLAGS[@]}" -o "$output" "$@" "${COMMON_LDFLAGS[@]}" "${COMMON_LIBS[@]}"
+    "$TARGET_STRIP_TOOL" "$output"
 }
 
 echo "Removing staged gpkg runtimes..."

@@ -25,10 +25,12 @@ mkdir -p '/media/creitin/External SSD/geminios-artifacts/isodir'
 mkdir -p '/media/creitin/External SSD/geminios-artifacts/iso'
 mkdir -p '/media/creitin/External SSD/geminios-artifacts/logs'
 mkdir -p '/media/creitin/External SSD/geminios-artifacts/output'
+mkdir -p '/media/creitin/External SSD/geminios-artifacts/external_dependencies'
 
 GEMINIOS_BOOTSTRAP_CACHE_DIR='/media/creitin/External SSD/geminios-cache/debian-bootstrap' \
 GEMINIOS_ISO_WORK_DIR='/media/creitin/External SSD/geminios-artifacts/isodir' \
 GEMINIOS_ISO_OUTPUT_DIR='/media/creitin/External SSD/geminios-artifacts/iso' \
 GEMINIOS_LOG_DIR='/media/creitin/External SSD/geminios-artifacts/logs' \
 GEMINIOS_OUTPUT_DIR='/media/creitin/External SSD/geminios-artifacts/output' \
+GEMINIOS_EXTERNAL_DEPENDENCIES_DIR='/home/creitin/Documents/geminios/external_dependencies/' \
 python3 builder.py

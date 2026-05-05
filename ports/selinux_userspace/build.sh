@@ -37,6 +37,17 @@ run_selinux_make libselinux clean || true
 run_selinux_make libselinux -j"$JOBS" LDFLAGS="$LDFLAGS -L$LIBSEPOL_SRC_DIR"
 run_selinux_make libselinux DESTDIR="$ROOTFS" LDFLAGS="$LDFLAGS -L$LIBSEPOL_SRC_DIR" install
 
+if [ ! -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libaudit.so" ] && [ ! -e "$ROOTFS/usr/lib/x86_64-linux-gnu/libaudit.so.1" ]; then
+    echo "Disabling libaudit-backed libsemanage support; no staged libaudit is available."
+    sed -i 's/ -laudit / /g' "$SELINUX_SRC_ROOT/libsemanage/src/Makefile"
+    sed -i 's/ -laudit / /g' "$SELINUX_SRC_ROOT/libsemanage/tests/Makefile"
+    if ! grep -q "(void)audit_type;" "$SELINUX_SRC_ROOT/libsemanage/src/seusers_local.c"; then
+        sed -i '/#include <libaudit.h>/d' "$SELINUX_SRC_ROOT/libsemanage/src/seusers_local.c"
+        perl -0pi -e 's@static int semanage_seuser_audit\(semanage_handle_t \* handle,.*?\n}\n\nint semanage_seuser_modify_local@static int semanage_seuser_audit(semanage_handle_t * handle,\n\t\t\t  const semanage_seuser_t * seuser,\n\t\t\t  const semanage_seuser_t * previous,\n\t\t\t  int audit_type,\n\t\t\t  int success)\n{\n\t(void)handle;\n\t(void)seuser;\n\t(void)previous;\n\t(void)audit_type;\n\t(void)success;\n\treturn 0;\n}\n\nint semanage_seuser_modify_local@s' "$SELINUX_SRC_ROOT/libsemanage/src/seusers_local.c"
+    fi
+    sed -i 's/AUDIT_ROLE_ASSIGN/0/g; s/AUDIT_ROLE_REMOVE/0/g' "$SELINUX_SRC_ROOT/libsemanage/src/seusers_local.c"
+fi
+
 run_selinux_make libsemanage clean || true
 run_selinux_make libsemanage -j"$JOBS" LDFLAGS="$LDFLAGS -L$LIBSEPOL_SRC_DIR"
 run_selinux_make libsemanage DESTDIR="$ROOTFS" LDFLAGS="$LDFLAGS -L$LIBSEPOL_SRC_DIR" install

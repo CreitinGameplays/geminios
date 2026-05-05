@@ -125,6 +125,12 @@ BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS = (
     "systemd",
     "systemd-*",
 )
+BOOTSTRAP_VALIDATION_EXCLUDED_PACKAGE_PATTERNS = (
+    "systemd",
+    "systemd-*",
+    "libsystemd*",
+    "openssh-*",
+)
 SYSTEMD_PAYLOAD_EXACT_PATHS = (
     os.path.join("etc", "systemd"),
     os.path.join("etc", "xdg", "systemd"),
@@ -224,7 +230,10 @@ def read_env_config_export(var_name, default_value):
 
 
 KERNEL_VERSION = read_env_config_export("KERNEL_VERSION", "linux-7.0-rc5")
-EXTERNAL_DEPENDENCIES_DIR = os.path.join(ROOT_DIR, "external_dependencies")
+EXTERNAL_DEPENDENCIES_DIR = os.environ.get(
+    "GEMINIOS_EXTERNAL_DEPENDENCIES_DIR",
+    os.path.join(ROOT_DIR, "external_dependencies")
+)
 KERNEL_BZIMAGE_PATH = os.path.join(
     EXTERNAL_DEPENDENCIES_DIR, KERNEL_VERSION, "arch", "x86", "boot", "bzImage"
 )
@@ -288,6 +297,18 @@ UDEV_RUNTIME_DIRS = [
 ]
 
 _DEB_ARCHIVE_FILE_LIST_CACHE = {}
+_DEB_ARCHIVE_PAYLOAD_FILE_LIST_CACHE = {}
+_DEB_ARCHIVE_MEMBER_TEXT_CACHE = {}
+_BOOTSTRAP_LINKER_SCRIPT_TEXT_CACHE = {}
+APT_RUNTIME_SEED_PACKAGES = (
+    "apt",
+    "apt-utils",
+    "libseccomp2",
+    "gpgv",
+    "libgcrypt20",
+    "libgpg-error0",
+    "debian-archive-keyring",
+)
 
 # Load Manifests
 try:
@@ -332,12 +353,12 @@ PACKAGES = [
     "gettext",
     "perl",
     "texinfo",
+    "pcre2",
+    "selinux_userspace",
     "linux-pam",
     "libcap",
     "util-macros",
     "elfutils",
-    "pcre2",
-    "selinux_userspace",
     "refpolicy",
     "util-linux",
     "e2fsprogs",
@@ -490,8 +511,8 @@ PACKAGE_DEPENDENCIES = {
     "lzo": [],
     "dosfstools": [],
     "xfsprogs": ["util-linux", "e2fsprogs", "inih", "liburcu"],
-    "btrfs-progs": ["util-linux", "e2fsprogs", "zlib", "zstd", "lzo"],
-    "f2fs-tools": ["util-linux"],
+    "btrfs-progs": ["util-linux", "e2fsprogs", "zlib", "zstd", "lzo", "eudev"],
+    "f2fs-tools": ["util-linux", "lzo"],
     "selinux_userspace": ["pcre2", "libcap", "gettext", "python", "pkg-config", "bison", "flex"],
     "refpolicy": ["selinux_userspace"],
     "linux-pam": ["libxcrypt", "meson", "ninja", "pkg-config"],
@@ -500,6 +521,7 @@ PACKAGE_DEPENDENCIES = {
     "wayland-protocols": ["python", "meson", "ninja", "pkg-config"],
     "wayland": ["expat", "libffi", "pkg-config", "meson", "ninja", "wayland-protocols"],
     "json-glib": ["glib", "meson", "ninja", "pkg-config"],
+    "libdrm": ["eudev", "meson", "ninja", "pkg-config"],
     "libxkbcommon": [
         "wayland",
         "xkeyboard-config",
@@ -538,6 +560,7 @@ PACKAGE_DEPENDENCIES = {
         "meson",
         "ninja",
     ],
+    "xorg-server": ["eudev", "libdrm"],
     "geminios_core": ["kernel_headers", "glibc", "dbus", "eudev", "linux-pam", "elogind"],
     "geminios_complex": [
         "kernel_headers",
@@ -550,12 +573,13 @@ PACKAGE_DEPENDENCIES = {
 }
 
 def resolve_requested_packages(requested_packages):
-    """Resolve requested packages and their dependencies in build order."""
-    needed = set()
+    """Resolve requested packages and their dependencies in stable topological order."""
+    ordered = []
+    added = set()
     visiting = set()
 
     def visit(pkg_name):
-        if pkg_name in needed:
+        if pkg_name in added:
             return
         if pkg_name in visiting:
             raise ValueError(f"Circular dependency detected at '{pkg_name}'")
@@ -566,12 +590,13 @@ def resolve_requested_packages(requested_packages):
         for dep_name in PACKAGE_DEPENDENCIES.get(pkg_name, []):
             visit(dep_name)
         visiting.remove(pkg_name)
-        needed.add(pkg_name)
+        added.add(pkg_name)
+        ordered.append(pkg_name)
 
     for pkg_name in requested_packages:
         visit(pkg_name)
 
-    return [pkg_name for pkg_name in PACKAGES if pkg_name in needed]
+    return ordered
 
 def load_os_identity():
     """Reads GeminiOS identity macros from src/sys_info.h."""
@@ -663,6 +688,12 @@ def audit_port_build_script(pkg_name):
     ]
     pkg_config_disable_pattern = re.compile(r'^\s*(?:export\s+)?PKG_CONFIG\s*=\s*["\']?/bin/false["\']?\s*$')
     python_setup_install_pattern = re.compile(r'\bsetup\.py\s+install\b')
+    explicit_udev_enable_patterns = (
+        re.compile(r'--enable-config-udev\b'),
+        re.compile(r'-Dudev=true\b'),
+        re.compile(r'pkg-config.*\blibudev\b'),
+    )
+    has_explicit_udev_enable = False
 
     for lineno, raw_line in enumerate(lines, 1):
         stripped = raw_line.strip()
@@ -681,6 +712,13 @@ def audit_port_build_script(pkg_name):
             issues.append(
                 f"{pkg_name} build script line {lineno} installs a Python package without TARGET_PYTHON; use the staged Python wrapper for target installs"
             )
+        if any(pattern.search(raw_line) for pattern in explicit_udev_enable_patterns):
+            has_explicit_udev_enable = True
+
+    if has_explicit_udev_enable and "eudev" not in PACKAGE_DEPENDENCIES.get(pkg_name, []):
+        warnings.append(
+            f"{pkg_name} build script enables libudev/udev integration but PACKAGE_DEPENDENCIES does not list eudev; targeted builds may leak host libudev or fail verification"
+        )
 
     return issues, warnings
 
@@ -900,6 +938,19 @@ def load_debian_package_index():
 
     return base_url, index
 
+def clear_cached_debian_package_index():
+    """Remove the cached Debian Packages index so it can be refreshed."""
+    for stale_path in (
+        os.path.join(BOOTSTRAP_CACHE_DIR, "Packages.gz"),
+        os.path.join(BOOTSTRAP_CACHE_DIR, "Packages.gz.part"),
+        os.path.join(BOOTSTRAP_CACHE_DIR, "Packages"),
+    ):
+        if os.path.exists(stale_path):
+            os.remove(stale_path)
+
+class StaleDebianPackageIndexError(RuntimeError):
+    """Raised when cached Debian metadata points at a package archive that no longer exists."""
+
 def normalize_dependency_name(token):
     """Extract the package name from a Debian dependency token."""
     token = token.strip()
@@ -914,6 +965,13 @@ def normalize_dependency_name(token):
 def is_bootstrap_excluded_package(package_name):
     """Return whether a Debian bootstrap package is intentionally excluded."""
     return any(fnmatch.fnmatch(package_name, pattern) for pattern in BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS)
+
+def is_bootstrap_validation_excluded_package(package_name):
+    """Return whether a staged Debian package is intentionally absent after pruning."""
+    return any(
+        fnmatch.fnmatch(package_name, pattern)
+        for pattern in BOOTSTRAP_VALIDATION_EXCLUDED_PACKAGE_PATTERNS
+    )
 
 def resolve_bootstrap_requested_packages(index, requested_patterns):
     """Resolve manifest entries to concrete Debian package names."""
@@ -1084,6 +1142,7 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
     desired_plan = build_bootstrap_plan(package_names, package_index)
     expected_set = set(package_names)
     reused_completed = set()
+    reset_stage = False
 
     if os.path.exists(stage_dir):
         existing_plan = load_bootstrap_stage_progress(plan_path)
@@ -1103,11 +1162,18 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
         elif transition == "reset":
             print_warning(f"WARNING: Bootstrap plan changed for {stage_name}; resetting staged directory.")
             shutil.rmtree(stage_dir)
+            reset_stage = True
     os.makedirs(stage_dir, exist_ok=True)
 
-    existing_progress = load_bootstrap_stage_progress(progress_path)
-    if not existing_progress and os.path.exists(legacy_progress_path):
-        existing_progress = load_bootstrap_stage_progress(legacy_progress_path)
+    if reset_stage:
+        for stale_path in (plan_path, progress_path, legacy_plan_path, legacy_progress_path):
+            if os.path.exists(stale_path):
+                os.remove(stale_path)
+        existing_progress = {}
+    else:
+        existing_progress = load_bootstrap_stage_progress(progress_path)
+        if not existing_progress and os.path.exists(legacy_progress_path):
+            existing_progress = load_bootstrap_stage_progress(legacy_progress_path)
     if existing_progress.get("completed"):
         completed = set(existing_progress.get("completed", [])) & expected_set
     else:
@@ -1138,11 +1204,18 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
             raise RuntimeError(f"Bootstrap package '{package_name}' is missing a Filename entry")
         deb_url = urljoin(base_url, filename)
         deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
-        fetch_url_cached(
-            deb_url,
-            deb_path,
-            label=f"{stage_name} [{index}/{total_packages}] {package_name}",
-        )
+        try:
+            fetch_url_cached(
+                deb_url,
+                deb_path,
+                label=f"{stage_name} [{index}/{total_packages}] {package_name}",
+            )
+        except RuntimeError as exc:
+            if "404" in str(exc):
+                raise StaleDebianPackageIndexError(
+                    f"cached Debian metadata for {package_name} points at an unavailable archive ({filename})"
+                ) from exc
+            raise
         if package_name in completed:
             continue
         print_info(f"[*] Extracting {stage_name} [{index}/{total_packages}] {package_name}...")
@@ -1172,7 +1245,7 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
     if os.path.exists(progress_path):
         os.remove(progress_path)
 
-def ensure_debian_bootstrap():
+def ensure_debian_bootstrap(allow_index_refresh=True):
     """Ensure bootstrap_rootfs and build_sysroot are seeded from Debian packages."""
     runtime_stamp = os.path.join(BOOTSTRAP_ROOTFS_DIR, ".bootstrap-complete")
     sysroot_stamp = os.path.join(BUILD_SYSROOT_DIR, ".bootstrap-complete")
@@ -1201,41 +1274,94 @@ def ensure_debian_bootstrap():
         and os.path.exists(sysroot_stamp)
         and open(sysroot_stamp, "r").read() == desired_sysroot_stamp
     )
-    if runtime_stage_ready and sysroot_stage_ready:
-        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-        return
-
-    print_section("\n=== Bootstrapping Debian Base Stages ===")
 
     if runtime_stage_ready:
-        print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
-        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-    else:
-        print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
-        bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
-        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-        with open(runtime_stamp, "w") as f:
-            f.write(desired_runtime_stamp)
+        missing_runtime_packages = get_bootstrap_stage_missing_packages(
+            BOOTSTRAP_ROOTFS_DIR,
+            runtime_packages,
+            package_index,
+        )
+        if missing_runtime_packages:
+            sample = ", ".join(missing_runtime_packages[:6])
+            if len(missing_runtime_packages) > 6:
+                sample += ", ..."
+            print_warning(
+                "WARNING: bootstrap_rootfs stamp is current but extracted Debian payload is missing for "
+                f"{len(missing_runtime_packages)} package(s): {sample}. Re-extracting the missing packages."
+            )
+            mark_bootstrap_stage_for_repair(
+                BOOTSTRAP_ROOTFS_DIR,
+                runtime_packages,
+                package_index,
+                missing_runtime_packages,
+            )
+            runtime_stage_ready = False
 
     if sysroot_stage_ready:
-        print_success(f"  ✓ build_sysroot already matches {len(build_sysroot_packages)} Debian packages.")
-        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-    else:
-        print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
-        bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
-        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-        with open(sysroot_stamp, "w") as f:
-            f.write(desired_sysroot_stamp)
+        missing_sysroot_packages = get_bootstrap_stage_missing_packages(
+            BUILD_SYSROOT_DIR,
+            build_sysroot_packages,
+            package_index,
+        )
+        if missing_sysroot_packages:
+            sample = ", ".join(missing_sysroot_packages[:6])
+            if len(missing_sysroot_packages) > 6:
+                sample += ", ..."
+            print_warning(
+                "WARNING: build_sysroot stamp is current but extracted Debian payload is missing for "
+                f"{len(missing_sysroot_packages)} package(s): {sample}. Re-extracting the missing packages."
+            )
+            mark_bootstrap_stage_for_repair(
+                BUILD_SYSROOT_DIR,
+                build_sysroot_packages,
+                package_index,
+                missing_sysroot_packages,
+            )
+            sysroot_stage_ready = False
+
+    try:
+        if runtime_stage_ready and sysroot_stage_ready:
+            prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+            prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+            restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+            return
+
+        print_section("\n=== Bootstrapping Debian Base Stages ===")
+
+        if runtime_stage_ready:
+            print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
+            prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        else:
+            print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
+            bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
+            prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            with open(runtime_stamp, "w") as f:
+                f.write(desired_runtime_stamp)
+
+        if sysroot_stage_ready:
+            print_success(f"  ✓ build_sysroot already matches {len(build_sysroot_packages)} Debian packages.")
+            prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+            prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+            restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+        else:
+            print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
+            bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
+            prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+            prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+            restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+            with open(sysroot_stamp, "w") as f:
+                f.write(desired_sysroot_stamp)
+    except StaleDebianPackageIndexError as exc:
+        if not allow_index_refresh:
+            raise
+        print_warning(f"WARNING: {exc}. Refreshing the cached Debian package index and retrying bootstrap once.")
+        clear_cached_debian_package_index()
+        ensure_debian_bootstrap(allow_index_refresh=False)
+        return
 
 def prepare_stage_dirs():
     """Ensure the staged build directories exist and are bootstrapped."""
@@ -1243,6 +1369,7 @@ def prepare_stage_dirs():
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     ensure_debian_bootstrap()
+    remove_staged_gpkg_paths(root_dir=ROOTFS_DIR, report=True)
 
 def prepare_build_system_helpers():
     """Rebuild the local shim/wrapper helpers so env changes take effect immediately."""
@@ -1404,6 +1531,16 @@ def get_missing_manifest_artifacts(pkg_name, root_dir=None):
         if not artifact_exists_from_manifest(artifact, root_dir=root_dir):
             missing_artifacts.append(artifact)
     return missing_artifacts
+
+def get_brittle_manifest_shared_object_entries():
+    """Return manifest entries that pin exact shared-object patch versions."""
+    issues = []
+    pattern = re.compile(r".+\.so\.\d+\.[^*?\[]+")
+    for pkg_name, artifacts in PACKAGE_MANIFESTS.items():
+        for artifact in artifacts:
+            if pattern.fullmatch(os.path.basename(artifact)):
+                issues.append((pkg_name, artifact))
+    return issues
 
 def collect_package_artifact_paths(pkg_name, root_dir=None):
     """Collect concrete existing filesystem paths from a package manifest."""
@@ -1613,6 +1750,192 @@ def list_deb_archive_paths(deb_path):
     _DEB_ARCHIVE_FILE_LIST_CACHE[deb_path] = tuple(normalized_paths)
     return list(normalized_paths)
 
+def list_deb_archive_payload_paths(deb_path):
+    """Return materialized file/symlink payload paths from a Debian archive."""
+    cached = _DEB_ARCHIVE_PAYLOAD_FILE_LIST_CACHE.get(deb_path)
+    if cached is not None:
+        return list(cached)
+
+    process = subprocess.Popen(
+        ["dpkg-deb", "--fsys-tarfile", deb_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    normalized_paths = []
+    seen = set()
+    try:
+        assert process.stdout is not None
+        with tarfile.open(fileobj=process.stdout, mode="r|*") as archive:
+            for member in archive:
+                if not (member.isfile() or member.issym() or member.islnk()):
+                    continue
+                member_name = member.name.strip()
+                if not member_name:
+                    continue
+                if member_name.startswith("./"):
+                    member_name = member_name[2:]
+                member_name = member_name.strip("/")
+                if not member_name:
+                    continue
+                normalized = "/" + member_name
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                normalized_paths.append(normalized)
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+
+    stderr = ""
+    if process.stderr is not None:
+        stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+        process.stderr.close()
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(
+            f"Failed to inspect Debian archive {deb_path}: {stderr or f'exit {return_code}'}"
+        )
+
+    _DEB_ARCHIVE_PAYLOAD_FILE_LIST_CACHE[deb_path] = tuple(normalized_paths)
+    return list(normalized_paths)
+
+def read_deb_archive_member_text(deb_path, rel_path):
+    """Read one text member from a cached Debian archive."""
+    normalized_rel_path = rel_path.strip().lstrip("/")
+    cache_key = (deb_path, normalized_rel_path)
+    cached = _DEB_ARCHIVE_MEMBER_TEXT_CACHE.get(cache_key)
+    if cached is not None:
+        return None if cached is False else cached
+
+    process = subprocess.Popen(
+        ["dpkg-deb", "--fsys-tarfile", deb_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    member_text = None
+    try:
+        assert process.stdout is not None
+        with tarfile.open(fileobj=process.stdout, mode="r|*") as archive:
+            for member in archive:
+                member_name = member.name.strip()
+                if not member_name:
+                    continue
+                if member_name.startswith("./"):
+                    member_name = member_name[2:]
+                member_name = member_name.strip("/")
+                if member_name != normalized_rel_path:
+                    continue
+                if not member.isfile():
+                    break
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    break
+                member_text = extracted.read().decode("utf-8", errors="replace")
+                break
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+
+    stderr = ""
+    if process.stderr is not None:
+        stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+        process.stderr.close()
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(
+            f"Failed to inspect Debian archive {deb_path}: {stderr or f'exit {return_code}'}"
+        )
+
+    _DEB_ARCHIVE_MEMBER_TEXT_CACHE[cache_key] = member_text if member_text is not None else False
+    return member_text
+
+def is_bootstrap_metadata_payload_path(path):
+    """Return whether a Debian payload path is documentation/metadata only."""
+    normalized = "/" + path.lstrip("/")
+    metadata_prefixes = (
+        "/usr/share/doc/",
+        "/usr/share/man/",
+        "/usr/share/info/",
+        "/usr/share/lintian/",
+        "/usr/share/bug/",
+    )
+    return normalized.startswith(metadata_prefixes)
+
+def is_bootstrap_linkable_payload_path(path):
+    """Return whether a Debian payload path is important for linking or execution."""
+    normalized = "/" + path.lstrip("/")
+    basename = os.path.basename(normalized)
+
+    if normalized.startswith(("/usr/bin/", "/bin/", "/usr/sbin/", "/sbin/", "/usr/libexec/")):
+        return True
+
+    if normalized.startswith(("/usr/lib/", "/lib/")):
+        if basename.endswith((".a", ".la")):
+            return True
+        if ".so" in basename:
+            return True
+
+    return False
+
+def get_bootstrap_stage_missing_packages(stage_dir, package_names, package_index):
+    """Return staged Debian packages whose extracted payload has gone missing."""
+    missing_packages = []
+    for package_name in package_names:
+        if is_bootstrap_validation_excluded_package(package_name):
+            continue
+        entry = package_index.get(package_name)
+        if not entry:
+            continue
+        filename = entry.get("Filename", "").strip()
+        if not filename:
+            continue
+
+        deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
+        if not os.path.exists(deb_path):
+            missing_packages.append(package_name)
+            continue
+
+        payload_paths = list_deb_archive_payload_paths(deb_path)
+        if not payload_paths:
+            continue
+
+        material_paths = [
+            payload_path
+            for payload_path in payload_paths
+            if not is_bootstrap_metadata_payload_path(payload_path)
+        ]
+        critical_paths = [
+            payload_path
+            for payload_path in material_paths
+            if is_bootstrap_linkable_payload_path(payload_path)
+        ]
+        candidate_paths = critical_paths or material_paths or payload_paths
+
+        if not any(os.path.exists(os.path.join(stage_dir, payload_path.lstrip("/"))) for payload_path in candidate_paths):
+            missing_packages.append(package_name)
+
+    return missing_packages
+
+def mark_bootstrap_stage_for_repair(stage_dir, package_names, package_index, missing_packages):
+    """Update bootstrap progress so missing Debian packages are re-extracted."""
+    stage_name = os.path.basename(stage_dir.rstrip(os.sep))
+    plan_path, progress_path = get_bootstrap_stage_metadata_paths(stage_dir)
+    desired_plan = build_bootstrap_plan(package_names, package_index)
+    missing_set = set(missing_packages)
+    completed = [package_name for package_name in package_names if package_name not in missing_set]
+
+    save_bootstrap_stage_progress(plan_path, desired_plan)
+    save_bootstrap_stage_progress(
+        progress_path,
+        {
+            "stage": stage_name,
+            "total": len(package_names),
+            "completed": completed,
+        },
+    )
+
 def build_base_debian_registry_entries(root_dir=None):
     """Return exact Debian package records for the shipped base/bootstrap image."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
@@ -1668,6 +1991,145 @@ def write_gpkg_base_debian_registry(root_dir=None):
     with open(registry_path, "w", encoding="utf-8") as f:
         json.dump(entries, f, indent=2, sort_keys=True)
         f.write("\n")
+    return entries
+
+def remove_staged_gpkg_paths(root_dir=None, report=False):
+    """Ensure legacy gpkg runtime paths are absent from a staged rootfs."""
+    root_dir = root_dir or ROOTFS_DIR
+    removed = []
+    for rel_path in (
+        os.path.join("bin", "apps", "system", "gpkg"),
+        os.path.join("bin", "apps", "system", "gpkg-worker"),
+        os.path.join("bin", "apps", "system", "gpkg-v2"),
+        os.path.join("bin", "apps", "system", "gpkg-v2-worker"),
+        os.path.join("bin", "gpkg"),
+        os.path.join("bin", "gpkg-worker"),
+        os.path.join("bin", "gpkg-v2"),
+        os.path.join("bin", "gpkg-v2-worker"),
+        os.path.join("usr", "bin", "gpkg"),
+        os.path.join("usr", "bin", "gpkg-worker"),
+        os.path.join("usr", "bin", "gpkg-v2"),
+        os.path.join("usr", "bin", "gpkg-v2-worker"),
+        os.path.join("etc", "gpkg"),
+        os.path.join("usr", "share", "gpkg"),
+        os.path.join("var", "lib", "gpkg"),
+    ):
+        abs_path = os.path.join(root_dir, rel_path)
+        if not os.path.lexists(abs_path):
+            continue
+        if os.path.isdir(abs_path) and not os.path.islink(abs_path):
+            shutil.rmtree(abs_path)
+        else:
+            os.remove(abs_path)
+        removed.append(rel_path.replace(os.sep, "/"))
+
+    if report and removed:
+        print_info("[*] Removing staged gpkg paths...")
+        for rel_path in removed:
+            print_info(f"  Removed /{rel_path}")
+    return removed
+
+def build_seeded_dpkg_entries(root_dir=None):
+    """Return Debian package records that should appear as installed in the staged image."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    _, package_index = load_debian_package_index()
+    bootstrap_sets = get_bootstrap_package_sets(package_index)
+    package_names = list(bootstrap_sets["runtime_packages"])
+    for package_name in APT_RUNTIME_SEED_PACKAGES:
+        if package_name not in package_names:
+            package_names.append(package_name)
+
+    entries = []
+    for package_name in package_names:
+        record = package_index.get(package_name)
+        if not record:
+            continue
+
+        filename = record.get("Filename", "").strip()
+        version = record.get("Version", "").strip()
+        architecture = record.get("Architecture", "amd64").strip() or "amd64"
+        if not filename or not version:
+            continue
+
+        deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
+        if not os.path.exists(deb_path):
+            continue
+
+        payload_paths = []
+        for payload_path in list_deb_archive_paths(deb_path):
+            rel_path = payload_path.lstrip("/")
+            if not rel_path:
+                continue
+            full_path = os.path.join(root_dir, rel_path)
+            if os.path.lexists(full_path):
+                payload_paths.append(payload_path)
+        if not payload_paths:
+            continue
+
+        entries.append({
+            "package": package_name,
+            "version": version,
+            "architecture": architecture,
+            "fields": record,
+            "files": sorted(set(payload_paths)),
+        })
+
+    return sorted(entries, key=lambda entry: entry["package"])
+
+def seed_dpkg_database(root_dir=None, report=False):
+    """Seed dpkg status/info metadata for Debian bootstrap and apt runtime packages."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    dpkg_dir = os.path.join(root_dir, "var", "lib", "dpkg")
+    info_dir = os.path.join(dpkg_dir, "info")
+    updates_dir = os.path.join(dpkg_dir, "updates")
+    os.makedirs(info_dir, exist_ok=True)
+    os.makedirs(updates_dir, exist_ok=True)
+
+    entries = build_seeded_dpkg_entries(root_dir=root_dir)
+    status_chunks = []
+    for entry in entries:
+        fields = entry["fields"]
+        package_name = entry["package"]
+        version = entry["version"]
+        architecture = entry["architecture"]
+        stanza_lines = [
+            f"Package: {package_name}",
+            "Status: install ok installed",
+            f"Architecture: {architecture}",
+            f"Version: {version}",
+        ]
+        for optional_field in ("Priority", "Section", "Maintainer", "Installed-Size", "Multi-Arch", "Essential", "Homepage", "Description"):
+            value = fields.get(optional_field, "").strip()
+            if not value:
+                continue
+            if "\n" in value:
+                first_line, *rest = value.splitlines()
+                stanza_lines.append(f"{optional_field}: {first_line}")
+                for line in rest:
+                    stanza_lines.append(f" {line}")
+            else:
+                stanza_lines.append(f"{optional_field}: {value}")
+        status_chunks.append("\n".join(stanza_lines))
+
+        list_suffix = ".list" if architecture == "all" else f":{architecture}.list"
+        list_path = os.path.join(info_dir, f"{package_name}{list_suffix}")
+        with open(list_path, "w", encoding="utf-8") as f:
+            for payload_path in entry["files"]:
+                f.write(payload_path + "\n")
+
+    status_path = os.path.join(dpkg_dir, "status")
+    with open(status_path, "w", encoding="utf-8") as f:
+        if status_chunks:
+            f.write("\n\n".join(status_chunks))
+            f.write("\n")
+
+    available_path = os.path.join(dpkg_dir, "available")
+    if not os.path.exists(available_path):
+        with open(available_path, "w", encoding="utf-8") as f:
+            f.write("")
+
+    if report:
+        print_success(f"  ✓ Seeded dpkg database with {len(entries)} installed Debian package records")
     return entries
 
 def shared_object_exact_version_family(filename, full_path=None):
@@ -2504,10 +2966,10 @@ def extract_glibc_release_version(binary_path):
 def get_glibc_runtime_issues(root_dir=None):
     """Return staged glibc loader/runtime mismatches inside the rootfs."""
     rootfs_dir = root_dir or ROOTFS_DIR
-    libc_path = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu", "libc.so.6")
-    loader_path = os.path.join(rootfs_dir, "lib", "x86_64-linux-gnu", "ld-linux-x86-64.so.2")
+    libc_path = find_rootfs_library(rootfs_dir, "libc.so.6")
+    loader_path = find_rootfs_library(rootfs_dir, "ld-linux-x86-64.so.2")
 
-    if not (os.path.exists(libc_path) and os.path.exists(loader_path)):
+    if not (libc_path and loader_path and os.path.exists(libc_path) and os.path.exists(loader_path)):
         return []
 
     issues = []
@@ -2677,6 +3139,211 @@ def get_all_pkgconfig_layout_issues(root_dir=None):
     issues = []
     for path in iter_pkgconfig_metadata_paths(root_dir=root_dir):
         issues.extend(get_pkgconfig_metadata_issues(path, root_dir=root_dir))
+    return issues
+
+def iter_linker_script_paths(root_dir=None):
+    """Yield installed GNU ld scripts inside the staged rootfs."""
+    root_dir = root_dir or ROOTFS_DIR
+    search_roots = [
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
+        os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
+        os.path.join(root_dir, "usr", "lib"),
+        os.path.join(root_dir, "lib"),
+    ]
+    paths = set()
+    for search_root in search_roots:
+        if not os.path.isdir(search_root):
+            continue
+        paths.update(glob.glob(os.path.join(search_root, "*.so")))
+        paths.update(glob.glob(os.path.join(search_root, "*.a")))
+    return sorted(paths)
+
+def is_gnu_ld_script(path):
+    """Return True when a .so file is a textual GNU ld script rather than an ELF object."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(256)
+    except OSError:
+        return False
+
+    if not head or head.startswith(b"\x7fELF") or b"\0" in head:
+        return False
+
+    text = head.decode("utf-8", errors="ignore")
+    return "GROUP" in text or "INPUT" in text or "GNU ld script" in text
+
+def is_gnu_ld_script_text(data):
+    """Return True when text looks like a GNU ld script rather than an ELF object."""
+    return "GROUP" in data or "INPUT" in data or "GNU ld script" in data
+
+def get_bootstrap_linker_script_text(rel_path, package_index=None):
+    """Return canonical linker-script text for a bootstrap-owned path from cached Debian archives."""
+    normalized_rel_path = rel_path.replace(os.sep, "/").lstrip("/")
+    cached = _BOOTSTRAP_LINKER_SCRIPT_TEXT_CACHE.get(normalized_rel_path)
+    if cached is not None:
+        return None if cached is False else cached
+
+    candidate_paths = [normalized_rel_path]
+    if normalized_rel_path.startswith("lib/x86_64-linux-gnu/"):
+        candidate_paths.append("usr/" + normalized_rel_path)
+    elif normalized_rel_path.startswith("usr/lib/x86_64-linux-gnu/"):
+        candidate_paths.append(normalized_rel_path[len("usr/"):])
+
+    if package_index is None:
+        _, package_index = load_debian_package_index()
+    package_names = get_bootstrap_package_sets(package_index)["build_sysroot_packages"]
+
+    for package_name in package_names:
+        if is_bootstrap_validation_excluded_package(package_name):
+            continue
+        entry = package_index.get(package_name)
+        if not entry:
+            continue
+        filename = entry.get("Filename", "").strip()
+        if not filename:
+            continue
+        deb_path = os.path.join(BOOTSTRAP_CACHE_DIR, filename)
+        if not os.path.exists(deb_path):
+            continue
+        archive_paths = set(list_deb_archive_paths(deb_path))
+        for candidate_path in candidate_paths:
+            archive_rel = "/" + candidate_path.lstrip("/")
+            if archive_rel not in archive_paths:
+                continue
+            member_text = read_deb_archive_member_text(deb_path, candidate_path)
+            if member_text and is_gnu_ld_script_text(member_text):
+                _BOOTSTRAP_LINKER_SCRIPT_TEXT_CACHE[normalized_rel_path] = member_text
+                return member_text
+
+    _BOOTSTRAP_LINKER_SCRIPT_TEXT_CACHE[normalized_rel_path] = False
+    return None
+
+def normalize_linker_script_token(token):
+    """Collapse linker-script absolute library paths back to in-root basenames."""
+    if not token or not token.startswith("/"):
+        return token
+
+    normalized = collapse_pkgconfig_staged_path(token)
+    for prefix in (
+        "/usr/lib/x86_64-linux-gnu/",
+        "/lib/x86_64-linux-gnu/",
+        "/usr/lib64/",
+        "/lib64/",
+    ):
+        if normalized.startswith(prefix):
+            suffix = normalized[len(prefix):]
+            if suffix and "/" not in suffix:
+                return suffix
+    return normalized
+
+def repair_gnu_ld_script_comment(data):
+    """Repair an unterminated GNU ld comment block if a stale normalizer corrupted it."""
+    if "/*" not in data or "*/" in data:
+        return data
+
+    body_end = None
+    for marker in ("\nOUTPUT_FORMAT", "\nGROUP", "\nINPUT"):
+        idx = data.find(marker)
+        if idx != -1:
+            body_end = idx
+            break
+    if body_end is None:
+        return data
+
+    comment = data[:body_end].rstrip()
+    remainder = data[body_end:]
+    if comment.endswith("*"):
+        comment = comment.rstrip() + "/"
+    else:
+        comment += "\n*/"
+    return comment + remainder
+
+def normalize_linker_script_metadata(root_dir=None, report=False):
+    """Scrub GNU ld scripts so they do not point the staged linker at lib64 paths."""
+    root_dir = root_dir or ROOTFS_DIR
+    rewritten_paths = []
+    _, package_index = load_debian_package_index()
+    prefixes = [
+        stage_root.rstrip("/") + "/"
+        for stage_root in PKGCONFIG_STAGE_ROOTS
+        if stage_root
+    ]
+    prefixes.extend(
+        [
+            "/usr/lib/x86_64-linux-gnu/",
+            "/lib/x86_64-linux-gnu/",
+            "/usr/lib64/",
+            "/lib64/",
+        ]
+    )
+    path_pattern = re.compile(
+        r"(?P<path>(?:"
+        + "|".join(re.escape(prefix) for prefix in sorted(set(prefixes), key=len, reverse=True))
+        + r")[^()\s]+)"
+    )
+
+    for path in iter_linker_script_paths(root_dir=root_dir):
+        if not is_gnu_ld_script(path):
+            continue
+
+        rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                data = f.read()
+        except OSError:
+            continue
+
+        source_data = get_bootstrap_linker_script_text(rel_path, package_index=package_index) or data
+        new_data = path_pattern.sub(lambda match: normalize_linker_script_token(match.group("path")), source_data)
+        new_data = repair_gnu_ld_script_comment(new_data)
+        if new_data == data:
+            continue
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new_data)
+        rewritten_paths.append(path)
+
+    if report and rewritten_paths:
+        print_info("[*] Normalizing GNU ld scripts back to staged multiarch basenames...")
+        for path in rewritten_paths[:12]:
+            rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+            print_info(f"  Rewrote /{rel_path}")
+        if len(rewritten_paths) > 12:
+            print_info(f"  Rewrote {len(rewritten_paths) - 12} additional GNU ld script files.")
+
+    return rewritten_paths
+
+def get_linker_script_metadata_issues(path, root_dir=None):
+    """Return layout issues for a single staged GNU ld script."""
+    root_dir = root_dir or ROOTFS_DIR
+    rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+
+    if not is_gnu_ld_script(path):
+        return []
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            data = f.read()
+    except OSError as exc:
+        return [f"failed to inspect linker script {rel_path}: {exc}"]
+
+    issues = []
+    if "/*" in data and "*/" not in data:
+        issues.append(f"{rel_path} contains an unterminated GNU ld comment block")
+    if any(pattern in data for pattern in ("/usr/lib64/", "/lib64/")):
+        issues.append(f"{rel_path} still points the linker at legacy lib64 paths")
+    if re.search(r"/(?:usr/)?lib/x86_64-linux-gnu/[^)\s]+", data):
+        issues.append(f"{rel_path} still embeds absolute multiarch library paths instead of linker basenames")
+    if any(marker and marker in data for marker in PKGCONFIG_LEAK_MARKERS):
+        issues.append(f"{rel_path} leaks staged build paths into linker scripts")
+    return issues
+
+def get_all_linker_script_layout_issues(root_dir=None):
+    """Return GNU ld script layout issues across the entire staged rootfs."""
+    root_dir = root_dir or ROOTFS_DIR
+    issues = []
+    for path in iter_linker_script_paths(root_dir=root_dir):
+        issues.extend(get_linker_script_metadata_issues(path, root_dir=root_dir))
     return issues
 
 def iter_libtool_archive_paths(root_dir=None):
@@ -3384,6 +4051,16 @@ def resolve_rootfs_copy_destination(dest_path):
             return target_path
     return dest_path
 
+def relocated_symlink_target(source_path, dest_path):
+    """Retarget a relative symlink so it still points at the same filesystem entry after relocation."""
+    target = os.readlink(source_path)
+    if os.path.isabs(target):
+        return target
+    source_target_abs = os.path.normpath(os.path.join(os.path.dirname(source_path), target))
+    if source_target_abs == os.path.normpath(dest_path):
+        return None
+    return os.path.relpath(source_target_abs, os.path.dirname(dest_path))
+
 def merge_rootfs_entry(source_path, dest_path):
     """Move a rootfs entry into place, merging directories when needed."""
     if os.path.isdir(source_path) and not os.path.islink(source_path):
@@ -3400,6 +4077,18 @@ def merge_rootfs_entry(source_path, dest_path):
             os.rmdir(source_path)
         return moved_count
 
+    if os.path.islink(source_path):
+        relocated_target = relocated_symlink_target(source_path, dest_path)
+        if relocated_target is None:
+            os.unlink(source_path)
+            return 0
+        if os.path.lexists(dest_path):
+            remove_path(dest_path)
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        os.symlink(relocated_target, dest_path)
+        os.unlink(source_path)
+        return 1
+
     if os.path.lexists(dest_path):
         remove_path(dest_path)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -3409,10 +4098,13 @@ def merge_rootfs_entry(source_path, dest_path):
 def overlay_rootfs_entry(source_path, dest_path):
     """Copy a rootfs entry into place, replacing conflicting files or symlinks."""
     if os.path.islink(source_path):
+        relocated_target = relocated_symlink_target(source_path, dest_path)
+        if relocated_target is None:
+            return 0
         if os.path.lexists(dest_path):
             remove_path(dest_path)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        os.symlink(os.readlink(source_path), dest_path)
+        os.symlink(relocated_target, dest_path)
         return 1
 
     if os.path.isdir(source_path):
@@ -3478,6 +4170,7 @@ def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     normalize_rootfs_usr_lib_top_level(root_dir=root_dir, report=report)
     normalize_pkgconfig_metadata(root_dir=root_dir, report=report)
     normalize_libtool_archive_metadata(root_dir=root_dir, report=report)
+    normalize_linker_script_metadata(root_dir=root_dir, report=report)
     ensure_multiarch_dev_compat(root_dir=root_dir, report=report)
     return migrated_entries
 
@@ -3741,6 +4434,8 @@ def sync_kernel():
     print_section("\n=== Syncing Kernel Image ===")
     kernel_src, used_fallback_kernel = resolve_kernel_bzimage_path()
     kernel_dest = os.path.join(ROOTFS_DIR, "boot", "kernel")
+    zoneinfo_src = "/usr/share/zoneinfo"
+    zoneinfo_dest = os.path.join(ROOTFS_DIR, "usr", "share", "zoneinfo")
     
     if os.path.exists(kernel_src):
         if used_fallback_kernel:
@@ -3750,8 +4445,15 @@ def sync_kernel():
             )
         print_info(f"[*] Copying {kernel_src} to {kernel_dest} and zoneinfo...")
         os.makedirs(os.path.dirname(kernel_dest), exist_ok=True)
-        subprocess.run(f"cp {kernel_src} {kernel_dest}", shell=True, executable="/usr/bin/bash")
-        subprocess.run(f"cp -r /usr/share/zoneinfo {os.path.join(ROOTFS_DIR, 'usr', 'share')}", shell=True, executable="/usr/bin/bash")
+        os.makedirs(os.path.dirname(zoneinfo_dest), exist_ok=True)
+        try:
+            shutil.copy2(kernel_src, kernel_dest)
+            if os.path.lexists(zoneinfo_dest):
+                remove_path(zoneinfo_dest)
+            shutil.copytree(zoneinfo_src, zoneinfo_dest, symlinks=True)
+        except (OSError, shutil.Error) as exc:
+            print_error(f"ERROR: Failed to sync kernel assets: {exc}")
+            return False
         return True
     else:
         print_warning(f" [WARNING] Kernel image not found at {kernel_src}")
@@ -3822,6 +4524,7 @@ def build_package(pkg_name, index, total, force=False, debug=False):
     duration = time.time() - start_time
     if ret == 0:
         normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=debug)
+        remove_staged_gpkg_paths(root_dir=ROOTFS_DIR, report=debug)
         # Post-build Verification
         verification_issues = get_package_verification_issues(pkg_name, root_dir=ROOTFS_DIR)
         closure_report = os.path.join(LOG_DIR, f"{pkg_name}-runtime-closure.json")
@@ -4213,6 +4916,13 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] pkg-config metadata layout")
 
+    linker_script_layout_issues = get_all_linker_script_layout_issues(root_dir=FINAL_ROOTFS_DIR)
+    if linker_script_layout_issues:
+        print_error(f"  [FAILED] {linker_script_layout_issues[0]}")
+        print_error("           Staged GNU ld scripts still leak lib64 or absolute sysroot library paths.")
+        return False
+    print_success("  [OK] GNU ld script layout")
+
     glibc_runtime_issues = get_glibc_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if glibc_runtime_issues:
         print_error(f"  [FAILED] {glibc_runtime_issues[0]}")
@@ -4278,20 +4988,6 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] LightDM config sanity")
 
-    gpkg_base_registry_issues = get_gpkg_base_system_registry_issues(root_dir=FINAL_ROOTFS_DIR)
-    if gpkg_base_registry_issues:
-        print_error(f"  [FAILED] {gpkg_base_registry_issues[0]}")
-        print_error("           The staged gpkg base-system registry is missing or incomplete.")
-        return False
-    print_success("  [OK] gpkg base-system registry")
-
-    gpkg_base_debian_registry_issues = get_gpkg_base_debian_registry_issues(root_dir=FINAL_ROOTFS_DIR)
-    if gpkg_base_debian_registry_issues:
-        print_error(f"  [FAILED] {gpkg_base_debian_registry_issues[0]}")
-        print_error("           The staged gpkg base Debian registry is missing or incomplete.")
-        return False
-    print_success("  [OK] gpkg base Debian registry")
-
     base_debian_runtime_provider_issues = get_base_debian_runtime_provider_issues(root_dir=FINAL_ROOTFS_DIR)
     if base_debian_runtime_provider_issues:
         print_error(f"  [FAILED] {base_debian_runtime_provider_issues[0]}")
@@ -4313,29 +5009,22 @@ def verify_rootfs_integrity():
 def finalize_rootfs():
     print_section("\n=== Finalizing Rootfs (Glue & Fixups) ===")
     assemble_final_rootfs()
+    remove_staged_gpkg_paths(root_dir=FINAL_ROOTFS_DIR, report=True)
 
-    print_info("[*] Normalizing DBus, udev, LightDM, and gpkg runtime metadata...")
+    print_info("[*] Normalizing DBus, udev, and LightDM runtime metadata...")
     normalize_dbus_runtime_layout(root_dir=FINAL_ROOTFS_DIR)
     copied_udev_entries = synchronize_udev_runtime_layout(root_dir=FINAL_ROOTFS_DIR)
     if copied_udev_entries:
         print_success(f"  ✓ Mirrored {copied_udev_entries} missing udev runtime entries between canonical and multiarch trees.")
     strip_ignored_lightdm_options(root_dir=FINAL_ROOTFS_DIR)
-    base_registry_entries = write_gpkg_base_system_registry(root_dir=FINAL_ROOTFS_DIR)
-    print_success(f"  ✓ Wrote gpkg base-system registry: {len(base_registry_entries)} package records")
-    base_debian_registry_entries = write_gpkg_base_debian_registry(root_dir=FINAL_ROOTFS_DIR)
-    print_success(
-        f"  ✓ Wrote gpkg base Debian registry: {len(base_debian_registry_entries)} package records"
-    )
     reconciled_runtime_entries = reconcile_base_debian_runtime_providers(root_dir=FINAL_ROOTFS_DIR, report=True)
     reconciled_runtime_entries.extend(
         reconcile_ncurses_runtime_fallbacks(root_dir=FINAL_ROOTFS_DIR, report=True)
     )
     if reconciled_runtime_entries:
         normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
-        base_registry_entries = write_gpkg_base_system_registry(root_dir=FINAL_ROOTFS_DIR)
-        print_success(
-            f"  ✓ Rewrote gpkg base-system registry after runtime reconciliation: {len(base_registry_entries)} package records"
-        )
+
+    remove_staged_gpkg_paths(root_dir=FINAL_ROOTFS_DIR, report=True)
     
     # 1. Permissions (su/sudo + dbus helper)
     print_info("[*] Setting SUID permissions...")
@@ -4449,61 +5138,10 @@ def finalize_rootfs():
     with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "geminios-live"), "w") as f:
         f.write("1")
 
-    # 5. Seed gpkg configuration files. Debian testing is built-in; optional
-    # GeminiOS-native repositories can be preseeded from build config.
-    print_info("[*] Seeding gpkg repository configuration...")
-    gpkg_dir = os.path.join(FINAL_ROOTFS_DIR, "etc", "gpkg")
-    gpkg_sources_dir = os.path.join(gpkg_dir, "sources.list.d")
-    os.makedirs(gpkg_sources_dir, exist_ok=True)
+    print_info("[*] Seeding dpkg database...")
+    seed_dpkg_database(root_dir=FINAL_ROOTFS_DIR, report=True)
 
-    sources_list_path = os.path.join(gpkg_dir, "sources.list")
-    if not os.path.exists(sources_list_path):
-        with open(sources_list_path, "w") as f:
-            f.write("")
-
-    for entry in os.listdir(gpkg_sources_dir):
-        if entry.endswith(".list"):
-            os.remove(os.path.join(gpkg_sources_dir, entry))
-    print_success("  ✓ Cleared staged secondary gpkg repositories")
-
-    default_sources_dest = os.path.join(gpkg_sources_dir, "00-default.list")
-    if os.path.exists(GPKG_DEFAULT_SOURCES_FILE):
-        shutil.copy2(GPKG_DEFAULT_SOURCES_FILE, default_sources_dest)
-        print_success(f"  ✓ Added default gpkg secondary repositories: {default_sources_dest}")
-    else:
-        print_success("  ✓ No default secondary gpkg repositories configured")
-
-    for legacy_name in ("system-provides.list", "upgradeable-system.list"):
-        legacy_path = os.path.join(gpkg_dir, legacy_name)
-        if os.path.exists(legacy_path):
-            os.remove(legacy_path)
-            print_success(f"  ✓ Removed legacy gpkg config: {legacy_path}")
-
-    upgrade_companions_dest = os.path.join(gpkg_dir, "upgrade-companions.conf")
-    if os.path.exists(GPKG_UPGRADE_COMPANIONS_FILE):
-        shutil.copy2(GPKG_UPGRADE_COMPANIONS_FILE, upgrade_companions_dest)
-        print_success(f"  ✓ Added gpkg upgrade companions: {upgrade_companions_dest}")
-    else:
-        with open(upgrade_companions_dest, "w") as f:
-            f.write("")
-
-    debian_config_dest = os.path.join(gpkg_dir, "debian.conf")
-    if os.path.exists(GPKG_DEBIAN_CONFIG_FILE):
-        shutil.copy2(GPKG_DEBIAN_CONFIG_FILE, debian_config_dest)
-        print_success(f"  ✓ Added gpkg Debian backend config: {debian_config_dest}")
-    else:
-        with open(debian_config_dest, "w") as f:
-            f.write("")
-
-    import_policy_dest = os.path.join(gpkg_dir, "import-policy.json")
-    if os.path.exists(GPKG_IMPORT_POLICY_FILE):
-        shutil.copy2(GPKG_IMPORT_POLICY_FILE, import_policy_dest)
-        print_success(f"  ✓ Added gpkg import policy: {import_policy_dest}")
-    else:
-        with open(import_policy_dest, "w") as f:
-            f.write("{}\n")
-
-    # 6. Versioning
+    # 5. Versioning
     release = get_geminios_release_info()
     print_info(f"[*] Setting system version: {release['display_version']} (build {release['build_id']})")
     with open(os.path.join(FINAL_ROOTFS_DIR, "etc", "geminios-version"), "w") as f:
@@ -5276,12 +5914,7 @@ def ensure_multiarch_dev_compat(root_dir=None, report=True):
         (
             os.path.join(root_dir, "lib", "x86_64-linux-gnu"),
             os.path.join(root_dir, "lib64"),
-            "lib/x86_64-linux-gnu",
-        ),
-        (
-            os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu"),
-            os.path.join(root_dir, "usr", "lib64"),
-            "lib/x86_64-linux-gnu",
+            "usr/lib64",
         ),
         (
             os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "pkgconfig"),
@@ -5301,6 +5934,56 @@ def ensure_multiarch_dev_compat(root_dir=None, report=True):
             linked_count += 1
 
         if replace_with_symlink(compat_link, compat_target):
+            linked_count += 1
+
+    usr_lib64_dir = os.path.join(root_dir, "usr", "lib64")
+    legacy_loader = os.path.join(usr_lib64_dir, "ld-linux-x86-64.so.2")
+    if os.path.islink(usr_lib64_dir):
+        os.unlink(usr_lib64_dir)
+        os.makedirs(usr_lib64_dir, exist_ok=True)
+        linked_count += 1
+    elif not os.path.isdir(usr_lib64_dir):
+        os.makedirs(usr_lib64_dir, exist_ok=True)
+        linked_count += 1
+
+    loader_name = "ld-linux-x86-64.so.2"
+    desired_usr_lib64_loader_target = "../lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
+    if not os.path.islink(legacy_loader) or os.readlink(legacy_loader) != desired_usr_lib64_loader_target:
+        if os.path.lexists(legacy_loader):
+            remove_path(legacy_loader)
+        os.symlink(desired_usr_lib64_loader_target, legacy_loader)
+        linked_count += 1
+
+    def ensure_loader_payload(dest_path, source_path):
+        if os.path.normpath(dest_path) == os.path.normpath(source_path):
+            return 0
+        if os.path.isfile(dest_path) and not os.path.islink(dest_path):
+            return 0
+        if os.path.lexists(dest_path):
+            remove_path(dest_path)
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        try:
+            os.link(source_path, dest_path)
+        except OSError:
+            shutil.copy2(source_path, dest_path)
+        return 1
+
+    canonical_loader_paths = [
+        os.path.join(root_dir, "lib", "x86_64-linux-gnu", loader_name),
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", loader_name),
+    ]
+    loader_payload_source = next(
+        (
+            path
+            for path in canonical_loader_paths
+            if os.path.isfile(path) and not os.path.islink(path)
+        ),
+        None,
+    )
+    if loader_payload_source:
+        for loader_path in canonical_loader_paths:
+            linked_count += ensure_loader_payload(loader_path, loader_payload_source)
+        if replace_with_symlink(os.path.join(root_dir, "lib64"), "usr/lib64"):
             linked_count += 1
 
     if report and linked_count:
@@ -5654,10 +6337,8 @@ setup_copy_root() {{
 setup_live_package_state() {{
     local live_pkgstate_root=/new_root/run/geminios/live-pkgstate
     local live_repo_root="$live_pkgstate_root/repo"
-    local live_gpkg_root="$live_pkgstate_root/gpkg"
 
     mkdir -p /new_root/var/repo
-    mkdir -p /new_root/var/lib/gpkg
     mkdir -p /new_root/run/geminios
     mkdir -p "$live_pkgstate_root"
 
@@ -5668,7 +6349,6 @@ setup_live_package_state() {{
     fi
 
     mkdir -p "$live_repo_root"
-    mkdir -p "$live_gpkg_root"
 
     if ! cp -a /new_root/var/repo/. "$live_repo_root/"; then
         echo "Failed to seed the live repository cache."
@@ -5676,21 +6356,8 @@ setup_live_package_state() {{
         return 1
     fi
 
-    if ! cp -a /new_root/var/lib/gpkg/. "$live_gpkg_root/"; then
-        echo "Failed to seed the live gpkg state."
-        umount "$live_pkgstate_root" || true
-        return 1
-    fi
-
     if ! mount --bind "$live_repo_root" /new_root/var/repo; then
         echo "Failed to bind-mount the live repository cache."
-        umount "$live_pkgstate_root" || true
-        return 1
-    fi
-
-    if ! mount --bind "$live_gpkg_root" /new_root/var/lib/gpkg; then
-        echo "Failed to bind-mount the live gpkg state."
-        umount /new_root/var/repo || true
         umount "$live_pkgstate_root" || true
         return 1
     fi
@@ -5973,6 +6640,15 @@ def main():
         sys.exit(verify_source_urls(requested_packages))
 
     os.makedirs(LOG_DIR, exist_ok=True)
+    brittle_manifest_entries = get_brittle_manifest_shared_object_entries()
+    if brittle_manifest_entries:
+        print_error("FATAL: package_manifests.json contains brittle exact-version shared-library entries.")
+        for pkg_name, artifact in brittle_manifest_entries[:12]:
+            print_error(f"  {pkg_name}: {artifact}")
+        if len(brittle_manifest_entries) > 12:
+            print_error(f"  ... and {len(brittle_manifest_entries) - 12} more")
+        print_error("Use a SONAME-level glob such as libfoo.so.1.* instead.")
+        sys.exit(1)
     prepare_rootfs()
     sync_kernel()
     
@@ -6005,7 +6681,7 @@ def main():
             sys.exit(1)
     else:
         # Build everything
-        packages_to_build = PACKAGES
+        packages_to_build = resolve_requested_packages(PACKAGES)
         if force_rebuild:
             forced_packages = set(PACKAGES)
 

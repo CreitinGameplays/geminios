@@ -615,7 +615,7 @@ bool bootstrap_target_filesystem(const ToolRegistry& tools, std::string& error) 
         ensure_symlink("usr/lib", kTargetRoot + "/lib");
     }
     if (!path_exists_no_follow(kTargetRoot + "/lib64")) {
-        ensure_symlink("lib/x86_64-linux-gnu", kTargetRoot + "/lib64");
+        ensure_symlink("usr/lib64", kTargetRoot + "/lib64");
     }
     if (!path_exists_no_follow(kTargetRoot + "/bin")) {
         ensure_symlink("usr/bin", kTargetRoot + "/bin");
