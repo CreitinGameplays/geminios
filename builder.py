@@ -5137,8 +5137,8 @@ def verify_rootfs_integrity():
         "sbin/init",
         "bin/bash",
         "bin/sh",
-        "bin/login",
-        "sbin/getty",
+        "usr/bin/login",
+        "sbin/agetty",
         "boot/kernel",
         "usr/lib/grub/i386-pc/modinfo.sh",
         "usr/share/terminfo/l/linux",
@@ -5176,6 +5176,24 @@ def verify_rootfs_integrity():
     if missing:
         print_error("FATAL: Rootfs integrity check failed. Some critical files are missing.")
         return False
+
+    login_getty_binaries = [
+        "usr/bin/login",
+        "sbin/agetty",
+    ]
+    for rel_path in login_getty_binaries:
+        if not rootfs_regular_file_exists(FINAL_ROOTFS_DIR, rel_path):
+            print_error(f"  [FAILED] {rel_path} must be a real executable file, not a symlink or directory")
+            return False
+
+    for rel_path in ["bin/login", "sbin/getty", "usr/sbin/getty"]:
+        abs_path = os.path.join(FINAL_ROOTFS_DIR, rel_path)
+        if os.path.lexists(abs_path):
+            if os.path.islink(abs_path):
+                print_error(f"  [FAILED] {rel_path} is a symlink; GeminiOS must ship real login/getty binaries")
+            else:
+                print_error(f"  [FAILED] {rel_path} is still present; GeminiOS must not ship legacy login/getty aliases")
+            return False
 
     required_runtime_libs = [
         "usr/lib/x86_64-linux-gnu/libpam.so.0",
@@ -5802,6 +5820,15 @@ def rootfs_entry_exists(rootfs_dir, rel_or_abs_path):
     """Return True when a staged rootfs path exists after resolving in-root symlinks."""
     candidate = resolve_rootfs_path(rootfs_dir, rel_or_abs_path)
     return os.path.exists(candidate)
+
+def rootfs_regular_file_exists(rootfs_dir, rel_or_abs_path):
+    """Return True when a staged rootfs path is a real regular file, not a symlink."""
+    candidate = resolve_rootfs_path(rootfs_dir, rel_or_abs_path)
+    try:
+        file_mode = os.lstat(candidate).st_mode
+    except FileNotFoundError:
+        return False
+    return stat.S_ISREG(file_mode)
 
 def expand_rootfs_runtime_search_dirs(rootfs_dir, current_path=None, rpaths=None):
     """Map ELF RPATH/RUNPATH entries into concrete directories inside the staged rootfs."""

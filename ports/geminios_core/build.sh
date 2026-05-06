@@ -7,24 +7,15 @@ make install DESTDIR="$ROOTFS"
 cd -
 
 # Additional setup for ginit.
-# The ginit Makefile installs the real login/getty binaries to /usr/bin and /usr/sbin.
-# Only create /bin and /sbin compatibility links when those are separate directories.
+# util-linux supplies the real login and agetty binaries.
+# Keep only the boot-time init entrypoint and remove any stale legacy aliases.
 
 # The live initramfs hands off with switch_root /new_root /sbin/init.
 # Keep a boot-compatible /sbin/init entrypoint, but do not ship /bin/init
-# as a general user-facing command alias.
+# or legacy login/getty aliases as package-owned compatibility shims.
 rm -f "$ROOTFS/init" "$ROOTFS/bin/init"
 ln -sfn ../bin/ginit "$ROOTFS/sbin/init"
-
-if [ ! -L "$ROOTFS/bin" ]; then
-    rm -f "$ROOTFS/bin/login"
-    ln -sfn ../usr/bin/login "$ROOTFS/bin/login"
-fi
-
-if [ ! -L "$ROOTFS/sbin" ]; then
-    rm -f "$ROOTFS/sbin/getty"
-    ln -sfn ../usr/sbin/getty "$ROOTFS/sbin/getty"
-fi
+rm -f "$ROOTFS/bin/login" "$ROOTFS/sbin/getty" "$ROOTFS/usr/sbin/getty"
 
 ln -sfn dash "$ROOTFS/bin/sh"
 if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
@@ -221,16 +212,15 @@ EOF
 mkdir -p "$ROOTFS/etc/selinux/default/contexts/files"
 cat > "$ROOTFS/etc/selinux/default/contexts/files/file_contexts.local" <<'EOF'
 # GeminiOS path overrides for the local tty/login stack.
-# GeminiOS uses a merged-/usr layout, so keep both the real /usr/... paths
-# and the compatibility /bin,/sbin paths covered.
+# Keep the real /usr/bin login binary and the boot-time /sbin init/getty paths
+# labeled for the local console stack.
 /usr/bin/ginit(\-netcfg)?		--	system_u:object_r:init_exec_t
 /bin/ginit(\-netcfg)?		--	system_u:object_r:init_exec_t
 /usr/sbin/init		--	system_u:object_r:init_exec_t
 /sbin/init		--	system_u:object_r:init_exec_t
-/usr/sbin/.*getty		--	system_u:object_r:getty_exec_t
-/sbin/.*getty		--	system_u:object_r:getty_exec_t
+/usr/sbin/agetty		--	system_u:object_r:getty_exec_t
+/sbin/agetty		--	system_u:object_r:getty_exec_t
 /usr/bin/login		--	system_u:object_r:login_exec_t
-/bin/login		--	system_u:object_r:login_exec_t
 EOF
 
 mkdir -p "$ROOTFS/etc/default"
