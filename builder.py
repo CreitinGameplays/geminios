@@ -1568,6 +1568,7 @@ def assemble_final_rootfs():
     prune_ssh_payload(FINAL_ROOTFS_DIR, report=True)
     restore_elogind_systemd_compat(FINAL_ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
+    ensure_usrmerge_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
     sync_dpkg_status_with_built_versions(FINAL_ROOTFS_DIR)
 
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
@@ -4406,6 +4407,45 @@ def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     normalize_linker_script_metadata(root_dir=root_dir, report=report)
     ensure_multiarch_dev_compat(root_dir=root_dir, report=report)
     return migrated_entries
+
+def ensure_usrmerge_layout(root_dir=None, report=False):
+    """Enforce the modern Debian merged-/usr layout."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    merge_map = {
+        "bin": "usr/bin",
+        "sbin": "usr/sbin",
+        "lib": "usr/lib",
+        "lib64": "usr/lib64",
+    }
+
+    migrated = 0
+    for src_rel, dst_rel in merge_map.items():
+        src_path = os.path.join(root_dir, src_rel)
+        dst_path = os.path.join(root_dir, dst_rel)
+
+        if os.path.islink(src_path):
+            continue
+
+        if not os.path.exists(src_path):
+            if os.path.exists(dst_path):
+                os.symlink(dst_rel, src_path)
+                migrated += 1
+            continue
+
+        # If it's a directory, move its contents
+        if os.path.isdir(src_path):
+            os.makedirs(dst_path, exist_ok=True)
+            for entry in sorted(os.listdir(src_path)):
+                s = os.path.join(src_path, entry)
+                d = os.path.join(dst_path, entry)
+                merge_rootfs_entry(s, d)
+            shutil.rmtree(src_path)
+            os.symlink(dst_rel, src_path)
+            migrated += 1
+
+    if report and migrated:
+        print_info(f"[*] Enforced merged-/usr layout for {migrated} root directories.")
+    return migrated
 
 def normalize_duplicate_usr_lib_subdir(root_dir=None, report=False):
     """Move misinstalled library artifacts from /usr/lib/lib into the multiarch libdir."""

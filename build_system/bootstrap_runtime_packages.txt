@@ -17,6 +17,7 @@ libattr1
 libblkid1
 libbz2-1.0
 libc6
+libc-bin
 libcap2
 libcom-err2
 libcrypt1
@@ -46,3 +47,11 @@ selinux-utils
 checkpolicy
 secilc
 init-system-helpers
+nano
+sudo
+passwd
+adduser
+procps
+gawk
+kbd
+util-linux
