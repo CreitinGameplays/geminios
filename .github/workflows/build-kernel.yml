@@ -1,0 +1,69 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "screenshot/**"
+      - "LICENSE"
+
+concurrency:
+  group: build-kernel-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-kernel:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GEMINIOS_ISO_CI == 'true'
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:13
+    timeout-minutes: 360
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GEMINIOS_LOG_DIR: /tmp/geminios-artifacts/logs
+      GEMINIOS_OUTPUT_DIR: /tmp/geminios-artifacts/output
+      GEMINIOS_KERNEL_OUTPUT_DIR: /tmp/geminios-artifacts/output/kernel
+      GEMINIOS_KERNEL_STAGE_DIR: /tmp/geminios-kernel-stage
+      GEMINIOS_KERNEL_BUILD_DIR: /tmp/geminios-kernel-build
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install host build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential bison flex bc libncurses-dev libssl-dev libelf-dev \
+            dwarves kmod rsync wget ca-certificates xz-utils file perl python3
+
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GEMINIOS_LOG_DIR"
+          bash tools/ci_build_kernel.sh 2>&1 | tee "$GEMINIOS_LOG_DIR/kernel-build.log"
+
+      - name: Upload kernel artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geminios-kernel-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.GEMINIOS_OUTPUT_DIR }}/kernel/**
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geminios-kernel-logs-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.GEMINIOS_LOG_DIR }}/**

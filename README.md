@@ -108,15 +108,15 @@ This ensures that every package build automagically targets GeminiOS without req
     python3 builder.py --clean
     ```
 
-### GitHub Actions ISO Builds
+### GitHub Actions Kernel Builds
 
-The repo now includes an automatic ISO workflow at [.github/workflows/build-iso.yml](.github/workflows/build-iso.yml).
+The repo now includes an automatic kernel workflow at [.github/workflows/build-kernel.yml](.github/workflows/build-kernel.yml).
 
 - It can be started manually with `workflow_dispatch`.
 - It also runs automatically on pushes to `main`.
-- The workflow installs the host build dependencies, creates the expected `~/.pyenv/versions/3.11.9` compatibility path, downloads and builds the configured kernel, runs `python3 builder.py`, and uploads the resulting ISO plus build logs as workflow artifacts.
+- The workflow installs the host build dependencies, downloads and builds the configured kernel, and uploads the final kernel image plus build logs as workflow artifacts.
 
-The CI helper logic lives in [`tools/ci_build_iso.sh`](tools/ci_build_iso.sh).
+The CI helper logic lives in [`tools/ci_build_kernel.sh`](tools/ci_build_kernel.sh).
 
 ### VM Console Debugging
 
