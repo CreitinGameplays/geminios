@@ -1394,6 +1394,17 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
 
 def ensure_debian_bootstrap(allow_index_refresh=True):
     """Ensure bootstrap_rootfs and build_sysroot are seeded from Debian packages."""
+    try:
+        _ensure_debian_bootstrap_impl()
+    except StaleDebianPackageIndexError as exc:
+        if not allow_index_refresh:
+            raise
+        print_warning(f"WARNING: Debian package index is stale ({exc}); refreshing and retrying bootstrap...")
+        clear_cached_debian_package_index()
+        _ensure_debian_bootstrap_impl()
+
+def _ensure_debian_bootstrap_impl():
+    """Implementation of Debian bootstrap seeding."""
     runtime_stamp = os.path.join(BOOTSTRAP_ROOTFS_DIR, ".bootstrap-complete")
     sysroot_stamp = os.path.join(BUILD_SYSROOT_DIR, ".bootstrap-complete")
 
@@ -1466,55 +1477,47 @@ def ensure_debian_bootstrap(allow_index_refresh=True):
             )
             sysroot_stage_ready = False
 
-    try:
-        if runtime_stage_ready and sysroot_stage_ready:
-            prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-            prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-            populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
-            prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-            prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-            restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-            populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
-            return
-
-        print_section("\n=== Bootstrapping Debian Base Stages ===")
-
-        if runtime_stage_ready:
-            print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
-            prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-            prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-            populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
-        else:
-            print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
-            bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
-            prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-            prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
-            populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
-            with open(runtime_stamp, "w") as f:
-                f.write(desired_runtime_stamp)
-
-        if sysroot_stage_ready:
-            print_success(f"  ✓ build_sysroot already matches {len(build_sysroot_packages)} Debian packages.")
-            prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-            prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-            restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-            populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
-        else:
-            print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
-            bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
-            prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
-            prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
-            restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
-            populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
-            with open(sysroot_stamp, "w") as f:
-                f.write(desired_sysroot_stamp)
-    except StaleDebianPackageIndexError as exc:
-        if not allow_index_refresh:
-            raise
-        print_warning(f"WARNING: {exc}. Refreshing the cached Debian package index and retrying bootstrap once.")
-        clear_cached_debian_package_index()
-        ensure_debian_bootstrap(allow_index_refresh=False)
+    if runtime_stage_ready and sysroot_stage_ready:
+        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
+        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+        populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
         return
+
+    print_section("\n=== Bootstrapping Debian Base Stages ===")
+
+    if runtime_stage_ready:
+        print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
+        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
+    else:
+        print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
+        bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
+        prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+        populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
+        with open(runtime_stamp, "w") as f:
+            f.write(desired_runtime_stamp)
+
+    if sysroot_stage_ready:
+        print_success(f"  ✓ build_sysroot already matches {len(build_sysroot_packages)} Debian packages.")
+        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+        populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
+    else:
+        print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
+        bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
+        prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
+        prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
+        restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+        populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
+        with open(sysroot_stamp, "w") as f:
+            f.write(desired_sysroot_stamp)
 
 def prepare_stage_dirs():
     """Ensure the staged build directories exist and are bootstrapped."""
