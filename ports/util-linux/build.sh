@@ -40,13 +40,6 @@ ac_cv_func_sched_setattr=no ./configure --prefix=/usr --libdir=/usr/lib/x86_64-l
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
-# Ship util-linux login as the canonical /usr/bin/login entrypoint.
-mkdir -p "$ROOTFS/usr/bin"
-if [ -e "$ROOTFS/bin/login" ]; then
-    cp "$ROOTFS/bin/login" "$ROOTFS/usr/bin/login"
-    rm -f "$ROOTFS/bin/login"
-fi
-
 # GeminiOS uses util-linux for the canonical login and agetty binaries.
 # Keep the remaining account-management frontends out of the image for now.
 rm -f "$ROOTFS/bin/su" \

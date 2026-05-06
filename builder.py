@@ -5186,7 +5186,7 @@ def verify_rootfs_integrity():
             print_error(f"  [FAILED] {rel_path} must be a real executable file, not a symlink or directory")
             return False
 
-    for rel_path in ["bin/login", "sbin/getty", "usr/sbin/getty"]:
+    for rel_path in ["sbin/getty", "usr/sbin/getty"]:
         abs_path = os.path.join(FINAL_ROOTFS_DIR, rel_path)
         if os.path.lexists(abs_path):
             if os.path.islink(abs_path):

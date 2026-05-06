@@ -15,7 +15,7 @@ cd -
 # or legacy login/getty aliases as package-owned compatibility shims.
 rm -f "$ROOTFS/init" "$ROOTFS/bin/init"
 ln -sfn ../bin/ginit "$ROOTFS/sbin/init"
-rm -f "$ROOTFS/bin/login" "$ROOTFS/sbin/getty" "$ROOTFS/usr/sbin/getty"
+rm -f "$ROOTFS/sbin/getty" "$ROOTFS/usr/sbin/getty"
 
 ln -sfn dash "$ROOTFS/bin/sh"
 if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
