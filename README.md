@@ -462,8 +462,8 @@ Optional but good signs:
 - `CONFIG_NVME_CORE=y`
 - `CONFIG_SND_HDA_INTEL=y`
 
-GeminiOS keeps `/etc/selinux/config` in the base rootfs with `SELINUX=enforcing`.
-The live ISO currently boots with `selinux=0`, and the installer writes installed systems with `SELINUX=permissive` by default after labeling.
+GeminiOS keeps `/etc/selinux/config` in the base rootfs with `SELINUX=disabled`.
+The live ISO currently boots with `selinux=0`, and the installer writes installed systems with `SELINUX=disabled` by default.
 
 ## Kernel Packages
 
