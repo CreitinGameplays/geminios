@@ -5301,6 +5301,12 @@ def finalize_rootfs():
     # 10. Restore multiarch compatibility symlinks for the in-OS toolchain.
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
+    # 10b. Regenerate ld.so.cache so the dynamic linker can find all staged
+    # shared libraries at boot. The cache shipped by glibc only covers the
+    # glibc build itself; post-glibc libraries (libxcrypt, libselinux, etc.)
+    # are invisible to ld.so without a regenerated cache.
+    regenerate_ldconfig_cache(root_dir=FINAL_ROOTFS_DIR)
+
     # 11. Materialize the Debian SELinux module set into a usable staged
     # policy/file-context store before any relabel or integrity verification.
     materialize_selinux_policy_store(root_dir=FINAL_ROOTFS_DIR)
@@ -5987,6 +5993,51 @@ def prune_host_dev_overlay_artifacts(root_dir=None):
     if kept_count:
         print_info(f"  Kept {kept_count} overlay artifacts because they are package-owned or still needed.")
 
+def regenerate_ldconfig_cache(root_dir=None):
+    """Regenerate ld.so.cache inside the staged rootfs.
+
+    The dynamic linker only consults ld.so.cache and its own compiled-in
+    default paths (/lib64, /usr/lib64) at runtime — it does NOT read
+    /etc/ld.so.conf directly. Without a fresh cache the linker cannot
+    find libraries installed after the initial glibc build (e.g.
+    libxcrypt's libcrypt.so.1), causing init to crash on boot.
+    """
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    print_info("[*] Regenerating ld.so.cache for staged rootfs...")
+
+    ldconfig_bin = shutil.which("ldconfig") or "/sbin/ldconfig"
+    result = subprocess.run(
+        [ldconfig_bin, "-X", "-r", root_dir],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        msg = detail[-1] if detail else f"exit code {result.returncode}"
+        print_warning(f"  ldconfig -r failed: {msg}")
+        return False
+
+    cache_path = os.path.join(root_dir, "etc", "ld.so.cache")
+    if os.path.exists(cache_path):
+        # Count entries for reporting
+        check = subprocess.run(
+            [ldconfig_bin, "-p", "-C", "etc/ld.so.cache", "-r", root_dir],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        entry_count = 0
+        if check.returncode == 0:
+            for line in check.stdout.splitlines():
+                if "=>" in line:
+                    entry_count += 1
+        print_success(f"  ✓ Regenerated ld.so.cache with {entry_count} library entries.")
+    else:
+        print_warning("  ldconfig ran but ld.so.cache was not created.")
+        return False
+    return True
+
 def ensure_multiarch_dev_compat(root_dir=None, report=True):
     """Collapse lib64 trees into Debian-style multiarch with compatibility symlinks."""
     if report:
@@ -6575,7 +6626,8 @@ echo "$SELECTED_ROOT_MODE" > /new_root/run/geminios/live-root-mode
 echo "$LIVE_PKGSTATE_MODE" > /new_root/run/geminios/live-pkgstate-mode
 
 # Unmount boot media to allow switch_root to clean up
-umount /mnt/cdrom
+umount /mnt/ro 2>/dev/null || true
+umount /mnt/cdrom 2>/dev/null || umount -l /mnt/cdrom 2>/dev/null || true
 
 # Switch root
 echo "Switching to real root ($SELECTED_ROOT_MODE mode)..."
