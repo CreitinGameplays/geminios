@@ -125,6 +125,21 @@ BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS = (
     "systemd",
     "systemd-*",
 )
+SYSTEMD_FORBIDDEN_PACKAGE_PATTERNS = (
+    "libpam-systemd",
+    "libnss-systemd",
+    "libsystemd-shared*",
+    "systemd",
+    "systemd-*",
+)
+KERNEL_FORBIDDEN_PACKAGE_PATTERNS = (
+    "linux-compiler-gcc-*",
+    "linux-headers-*",
+    "linux-headers-amd64",
+    "linux-image-*",
+    "linux-image-amd64",
+    "linux-kbuild-*",
+)
 BOOTSTRAP_VALIDATION_EXCLUDED_PACKAGE_PATTERNS = (
     "systemd",
     "systemd-*",
@@ -964,9 +979,32 @@ def normalize_dependency_name(token):
     token = re.sub(r"\[.*?\]", "", token).strip()
     return token
 
+def split_dependency_alternatives(raw_value):
+    """Return Debian dependency groups as lists of normalized alternatives."""
+    groups = []
+    if not raw_value:
+        return groups
+
+    for dep_token in raw_value.split(","):
+        alternatives = []
+        for alt_token in dep_token.split("|"):
+            dep_name = normalize_dependency_name(alt_token)
+            if dep_name:
+                alternatives.append(dep_name)
+        if alternatives:
+            groups.append(alternatives)
+    return groups
+
 def is_bootstrap_excluded_package(package_name):
     """Return whether a Debian bootstrap package is intentionally excluded."""
     return any(fnmatch.fnmatch(package_name, pattern) for pattern in BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS)
+
+def is_forbidden_systemd_package(package_name):
+    """Return whether a Debian package belongs to a forbidden init/kernel family."""
+    return (
+        any(fnmatch.fnmatch(package_name, pattern) for pattern in SYSTEMD_FORBIDDEN_PACKAGE_PATTERNS)
+        or any(fnmatch.fnmatch(package_name, pattern) for pattern in KERNEL_FORBIDDEN_PACKAGE_PATTERNS)
+    )
 
 def is_bootstrap_validation_excluded_package(package_name):
     """Return whether a staged Debian package is intentionally absent after pruning."""
@@ -974,6 +1012,66 @@ def is_bootstrap_validation_excluded_package(package_name):
         fnmatch.fnmatch(package_name, pattern)
         for pattern in BOOTSTRAP_VALIDATION_EXCLUDED_PACKAGE_PATTERNS
     )
+
+def resolve_dependency_closure_with_policy(index, requested_packages, excluded_predicate):
+    """Resolve a Debian dependency closure while honoring a forbidden-package policy."""
+    resolved = set()
+    queued = list(requested_packages)
+    issues = []
+
+    while queued:
+        package_name = queued.pop()
+        if package_name in resolved:
+            continue
+        if package_name not in index:
+            continue
+        if excluded_predicate(package_name):
+            issues.append(f"forbidden package selected in dependency closure: {package_name}")
+            continue
+
+        resolved.add(package_name)
+        entry = index[package_name]
+        for field in ("Pre-Depends", "Depends"):
+            raw_value = entry.get(field, "")
+            if not raw_value:
+                continue
+            for group in split_dependency_alternatives(raw_value):
+                selected = None
+                forbidden_candidates = []
+                for dep_name in group:
+                    if excluded_predicate(dep_name):
+                        forbidden_candidates.append(dep_name)
+                        continue
+                    if dep_name in index:
+                        selected = dep_name
+                        break
+                if selected:
+                    if selected not in resolved:
+                        queued.append(selected)
+                    continue
+                if forbidden_candidates:
+                    issues.append(
+                        f"{package_name} {field} can only be satisfied by forbidden packages: "
+                        + ", ".join(sorted(set(forbidden_candidates)))
+                    )
+
+    return sorted(resolved), sorted(set(issues))
+
+def get_forbidden_systemd_dependency_issues(index, requested_packages):
+    """Return dependency-closure issues for forbidden systemd-family packages."""
+    _, issues = resolve_dependency_closure_with_policy(index, requested_packages, is_forbidden_systemd_package)
+    return issues
+
+def enforce_forbidden_systemd_dependency_policy(index, requested_packages, context_label):
+    """Fail when a Debian package closure would pull in forbidden systemd-family packages."""
+    issues = get_forbidden_systemd_dependency_issues(index, requested_packages)
+    if not issues:
+        return
+
+    print_error(f"FATAL: {context_label} would pull forbidden systemd-family packages:")
+    for issue in issues:
+        print_error(f"  - {issue}")
+    raise RuntimeError(f"{context_label} violates GeminiOS systemd dependency policy")
 
 def resolve_bootstrap_requested_packages(index, requested_patterns):
     """Resolve manifest entries to concrete Debian package names."""
@@ -1416,6 +1514,16 @@ def _ensure_debian_bootstrap_impl():
     toolchain_seed = resolve_bootstrap_requested_packages(package_index, toolchain_requests)
     runtime_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed)
     build_sysroot_packages = resolve_bootstrap_dependency_closure(package_index, runtime_seed + toolchain_seed)
+    enforce_forbidden_systemd_dependency_policy(
+        package_index,
+        runtime_packages,
+        "bootstrap_rootfs package closure",
+    )
+    enforce_forbidden_systemd_dependency_policy(
+        package_index,
+        build_sysroot_packages,
+        "build_sysroot package closure",
+    )
     runtime_plan = build_bootstrap_plan(runtime_packages, package_index)
     sysroot_plan = build_bootstrap_plan(build_sysroot_packages, package_index)
 
@@ -1570,6 +1678,7 @@ def assemble_final_rootfs():
     prune_systemd_payload(FINAL_ROOTFS_DIR, report=True)
     prune_ssh_payload(FINAL_ROOTFS_DIR, report=True)
     prune_legacy_getty_aliases(FINAL_ROOTFS_DIR, report=True)
+    seed_apt_no_systemd_preferences(FINAL_ROOTFS_DIR, report=True)
     restore_elogind_systemd_compat(FINAL_ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
     ensure_usrmerge_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
@@ -4190,6 +4299,47 @@ def prune_ssh_payload(root_dir, report=False):
 
     return removed_rel_paths, removed_account_entries
 
+APT_NO_SYSTEMD_PREFERENCES_REL_PATH = os.path.join("etc", "apt", "preferences.d", "99geminios-no-systemd")
+
+def seed_apt_no_systemd_preferences(root_dir=None, report=False):
+    """Seed apt pinning that rejects the upstream systemd family in GeminiOS images."""
+    root_dir = root_dir or ROOTFS_DIR
+    pref_path = os.path.join(root_dir, APT_NO_SYSTEMD_PREFERENCES_REL_PATH)
+    os.makedirs(os.path.dirname(pref_path), exist_ok=True)
+
+    pinned_packages = [
+        "libpam-systemd",
+        "libnss-systemd",
+        "libsystemd-shared*",
+        "linux-compiler-gcc-*",
+        "linux-headers-*",
+        "linux-image-*",
+        "linux-kbuild-*",
+        "systemd*",
+    ]
+    content = "\n".join(
+        f"Package: {pkg}\nPin: release *\nPin-Priority: -1"
+        for pkg in pinned_packages
+    ) + "\n"
+
+    current_content = None
+    if os.path.exists(pref_path):
+        try:
+            with open(pref_path, "r", encoding="utf-8") as f:
+                current_content = f.read()
+        except OSError:
+            current_content = None
+
+    if current_content != content:
+        with open(pref_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        if report:
+            print_info(f"[*] Seeded apt systemd blocklist at {pref_path}")
+    elif report:
+        print_success(f"  ✓ Apt systemd blocklist already present at {pref_path}")
+
+    return pref_path
+
 def restore_elogind_systemd_compat(root_dir, report=False):
     """Restore the elogind-provided libsystemd/pam_systemd compatibility links."""
     compat_links = [
@@ -5147,6 +5297,7 @@ def prepare_rootfs():
         sys.exit(1)
     prune_ssh_payload(ROOTFS_DIR, report=True)
     prune_legacy_getty_aliases(ROOTFS_DIR, report=True)
+    seed_apt_no_systemd_preferences(ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=True)
     reconcile_ncurses_runtime_fallbacks(root_dir=ROOTFS_DIR, report=True)
     subprocess.run(f"find {ROOTFS_DIR} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
@@ -5159,6 +5310,7 @@ def verify_rootfs_integrity():
         "bin/sh",
         "usr/bin/login",
         "sbin/agetty",
+        "etc/apt/preferences.d/99geminios-no-systemd",
         "boot/kernel",
         "usr/lib/grub/i386-pc/modinfo.sh",
         "usr/share/terminfo/l/linux",
