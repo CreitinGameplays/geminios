@@ -4,6 +4,9 @@ set -e
 GLIBC_VER="2.39"
 download_and_extract "https://ftp.gnu.org/gnu/glibc/glibc-$GLIBC_VER.tar.xz" "glibc-$GLIBC_VER.tar.xz" "glibc-$GLIBC_VER"
 
+mkdir -p "$ROOT_DIR/output/port_versions"
+printf '%s\n' "$GLIBC_VER" > "$ROOT_DIR/output/port_versions/libc6.txt"
+
 mkdir -p build
 cd build
 

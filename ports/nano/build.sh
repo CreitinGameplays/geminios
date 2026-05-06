@@ -9,3 +9,6 @@ export LDFLAGS="--sysroot=$ROOTFS -static"
     --disable-help --disable-browser --disable-speller --disable-justify --host=x86_64-linux-gnu
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
+
+mkdir -p "$ROOT_DIR/output/port_versions"
+printf '%s\n' "$NANO_VER" > "$ROOT_DIR/output/port_versions/nano.txt"

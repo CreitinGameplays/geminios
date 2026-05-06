@@ -99,6 +99,13 @@ else
     : > "$FILE_CONTEXTS_LOCAL_BACKUP"
 fi
 
+SELINUX_CONFIG_PATH="$ROOTFS/etc/selinux/config"
+SELINUX_CONFIG_BACKUP=""
+if [ -f "$SELINUX_CONFIG_PATH" ]; then
+    SELINUX_CONFIG_BACKUP="$(mktemp)"
+    cp -a "$SELINUX_CONFIG_PATH" "$SELINUX_CONFIG_BACKUP"
+fi
+
 rm -f \
     "$ROOTFS/etc/selinux/default/policy"/policy.* \
     "$ROOTFS/etc/selinux/default/contexts/files"/file_contexts* 2>/dev/null || true
@@ -107,4 +114,9 @@ cp -a "$STAGE_DIR/." "$ROOTFS/"
 
 if [ -s "$FILE_CONTEXTS_LOCAL_BACKUP" ]; then
     cp -a "$FILE_CONTEXTS_LOCAL_BACKUP" "$LOCAL_CONTEXTS_PATH"
+fi
+
+if [ -n "$SELINUX_CONFIG_BACKUP" ] && [ -f "$SELINUX_CONFIG_BACKUP" ]; then
+    cp -a "$SELINUX_CONFIG_BACKUP" "$SELINUX_CONFIG_PATH"
+    rm -f "$SELINUX_CONFIG_BACKUP"
 fi

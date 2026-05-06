@@ -1035,6 +1035,132 @@ def extract_deb_to_dir(deb_path, dest_dir):
     if result.returncode != 0:
         raise RuntimeError(f"Failed to extract {deb_path}: {result.stderr.strip()}")
 
+def populate_dpkg_status(stage_dir, package_names, package_index):
+    """Generate a dpkg status file for extracted bootstrap packages."""
+    status_dir = os.path.join(stage_dir, "var", "lib", "dpkg")
+    os.makedirs(status_dir, exist_ok=True)
+    status_path = os.path.join(status_dir, "status")
+
+    entries = []
+    for package_name in sorted(package_names):
+        entry = package_index.get(package_name)
+        if not entry:
+            continue
+
+        status_entry = f"Package: {package_name}\n"
+        status_entry += "Status: install ok installed\n"
+
+        architecture = entry.get("Architecture", "amd64")
+        status_entry += f"Architecture: {architecture}\n"
+
+        version = entry.get("Version", "")
+        if version:
+            status_entry += f"Version: {version}\n"
+
+        priority = entry.get("Priority", "")
+        if priority:
+            status_entry += f"Priority: {priority}\n"
+
+        section = entry.get("Section", "")
+        if section:
+            status_entry += f"Section: {section}\n"
+
+        maintainer = entry.get("Maintainer", "")
+        if maintainer:
+            status_entry += f"Maintainer: {maintainer}\n"
+
+        installed_size = entry.get("Installed-Size", "")
+        if installed_size:
+            status_entry += f"Installed-Size: {installed_size}\n"
+
+        multi_arch = entry.get("Multi-Arch", "")
+        if multi_arch:
+            status_entry += f"Multi-Arch: {multi_arch}\n"
+
+        essential = entry.get("Essential", "")
+        if essential:
+            status_entry += f"Essential: {essential}\n"
+
+        description = entry.get("Description", "")
+        if description:
+            status_entry += f"Description: {description}\n"
+
+        entries.append(status_entry)
+
+    with open(status_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(entries))
+        if entries:
+            f.write("\n")
+
+def sync_dpkg_status_with_built_versions(root_dir):
+    """Update dpkg status entries to match actual built package versions on disk."""
+    status_path = os.path.join(root_dir, "var", "lib", "dpkg", "status")
+    if not os.path.exists(status_path):
+        return
+
+    port_versions_dir = os.path.join(OUTPUT_DIR, "port_versions")
+    if not os.path.isdir(port_versions_dir):
+        return
+
+    built_versions = {}
+    for version_file in sorted(os.listdir(port_versions_dir)):
+        if not version_file.endswith(".txt"):
+            continue
+        pkg_name = version_file[:-4]
+        file_path = os.path.join(port_versions_dir, version_file)
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                version = f.read().strip()
+                if version:
+                    built_versions[pkg_name] = version
+        except OSError:
+            continue
+
+    if not built_versions:
+        return
+
+    with open(status_path, "r", encoding="utf-8", errors="replace") as f:
+        status_text = f.read()
+
+    updated = False
+    lines = status_text.splitlines(True)
+    new_lines = []
+    current_package = None
+    existing_packages = set()
+
+    for line in lines:
+        if line.startswith("Package: "):
+            current_package = line.split(":", 1)[1].strip()
+            existing_packages.add(current_package)
+            new_lines.append(line)
+        elif line.startswith("Version: ") and current_package:
+            current_version = line.split(":", 1)[1].strip()
+            if current_package in built_versions:
+                built_version = built_versions[current_package]
+                if current_version != built_version:
+                    new_lines.append(f"Version: {built_version}\n")
+                    updated = True
+                    continue
+            new_lines.append(line)
+        else:
+            new_lines.append(line)
+            if line.strip() == "":
+                current_package = None
+
+    for pkg_name, version in sorted(built_versions.items()):
+        if pkg_name not in existing_packages:
+            new_entry = f"\nPackage: {pkg_name}\n"
+            new_entry += "Status: install ok installed\n"
+            new_entry += "Architecture: amd64\n"
+            new_entry += f"Version: {version}\n"
+            new_entry += f"Description: {pkg_name} (built from source)\n"
+            new_lines.append(new_entry)
+            updated = True
+
+    if updated:
+        with open(status_path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+
 def load_bootstrap_stage_progress(progress_path):
     """Load resumable bootstrap stage progress from disk."""
     if not os.path.exists(progress_path):
@@ -1344,9 +1470,11 @@ def ensure_debian_bootstrap(allow_index_refresh=True):
         if runtime_stage_ready and sysroot_stage_ready:
             prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
             prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
             prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
             prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
             restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+            populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
             return
 
         print_section("\n=== Bootstrapping Debian Base Stages ===")
@@ -1355,11 +1483,13 @@ def ensure_debian_bootstrap(allow_index_refresh=True):
             print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
             prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
             prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
         else:
             print_info(f"[*] Seeding bootstrap_rootfs with {len(runtime_packages)} Debian packages...")
             bootstrap_debian_stage(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index, base_url)
             prune_systemd_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
             prune_ssh_payload(BOOTSTRAP_ROOTFS_DIR, report=True)
+            populate_dpkg_status(BOOTSTRAP_ROOTFS_DIR, runtime_packages, package_index)
             with open(runtime_stamp, "w") as f:
                 f.write(desired_runtime_stamp)
 
@@ -1368,12 +1498,14 @@ def ensure_debian_bootstrap(allow_index_refresh=True):
             prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
             prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
             restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+            populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
         else:
             print_info(f"[*] Seeding build_sysroot with {len(build_sysroot_packages)} Debian packages...")
             bootstrap_debian_stage(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index, base_url)
             prune_systemd_payload(BUILD_SYSROOT_DIR, report=True)
             prune_ssh_payload(BUILD_SYSROOT_DIR, report=True)
             restore_elogind_systemd_compat(BUILD_SYSROOT_DIR, report=True)
+            populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
             with open(sysroot_stamp, "w") as f:
                 f.write(desired_sysroot_stamp)
     except StaleDebianPackageIndexError as exc:
@@ -1436,6 +1568,7 @@ def assemble_final_rootfs():
     prune_ssh_payload(FINAL_ROOTFS_DIR, report=True)
     restore_elogind_systemd_compat(FINAL_ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
+    sync_dpkg_status_with_built_versions(FINAL_ROOTFS_DIR)
 
 def run_command(cmd, cwd=None, log_file=None, use_target_env=False, debug=False):
     """Runs a shell command and captures output to log"""

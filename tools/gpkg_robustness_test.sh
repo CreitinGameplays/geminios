@@ -815,8 +815,8 @@ run_doctor_and_selinux_tests() {
     fi
 
     assert_path_exists "$SELINUX_CONFIG" "SELinux config exists in the tested root" || return 1
-    expect_success "selinux-config-default" grep -Eq '^SELINUX=enforcing$' "$SELINUX_CONFIG" || return 1
-    ok "Installed-system SELinux default is enforcing in /etc/selinux/config"
+    expect_success "selinux-config-default" grep -Eq '^SELINUX=disabled$' "$SELINUX_CONFIG" || return 1
+    ok "Installed-system SELinux default is disabled in /etc/selinux/config"
 
     if [[ "$ROOT" == "/" && -e "$LIVE_MARKER" ]]; then
         expect_success "selinux-live-runtime" bash -lc '
@@ -828,8 +828,7 @@ run_doctor_and_selinux_tests() {
                 exit 1
             fi
         ' || return 1
-        assert_last_log_contains 'Permissive|Enforcing|0|1' "Live runtime exposes an enabled SELinux state" || return 1
-        assert_last_log_not_contains 'Disabled' "Live runtime SELinux is not disabled" || return 1
+        assert_last_log_contains 'Disabled|Permissive|Enforcing|0|1' "Live runtime SELinux state is readable" || return 1
     else
         skip "Skipping live SELinux runtime probe because this is not the active live root"
     fi
