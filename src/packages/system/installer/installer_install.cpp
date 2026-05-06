@@ -754,37 +754,10 @@ std::string build_target_selinux_spec_file(std::string& cleanup_path) {
 bool relabel_selinux_target(const ToolRegistry& tools, std::string& error) {
     if (!file_exists(kTargetRoot + "/etc/selinux/config")) return true;
 
-    if (!write_selinux_config("permissive", error)) return false;
+    // We disable SELinux by default to prevent context errors during first boot
+    if (!write_selinux_config("disabled", error)) return false;
 
-    std::string merged_file_contexts_cleanup;
-    const std::string file_contexts = build_target_selinux_spec_file(merged_file_contexts_cleanup);
-    if (tools.setfiles.empty() || file_contexts.empty()) {
-        log_message("WARN", "SELinux relabel skipped because setfiles or file_contexts is unavailable. Leaving target permissive.");
-        if (!write_text_file(kTargetRoot + "/.autorelabel", "")) {
-            error = "Failed to create /.autorelabel in the target filesystem.";
-            return false;
-        }
-        return true;
-    }
-
-    CommandResult relabel = run_command(
-        tools.setfiles,
-        {"-F", "-r", kTargetRoot, file_contexts, kTargetRoot}
-    );
-    if (!merged_file_contexts_cleanup.empty()) {
-        ensure_file_removed(merged_file_contexts_cleanup);
-    }
-    if (!relabel.success) {
-        log_message("WARN", "SELinux relabel failed. Leaving target permissive and scheduling a first-boot relabel.");
-        if (!write_text_file(kTargetRoot + "/.autorelabel", "")) {
-            error = "Failed to create /.autorelabel after a relabel failure.";
-            return false;
-        }
-        return true;
-    }
-
-    ensure_file_removed(kTargetRoot + "/.autorelabel");
-    return write_selinux_config("permissive", error);
+    return true;
 }
 
 bool replace_shadow_password(std::vector<std::string>& lines, const std::string& username, const std::string& password_hash) {
@@ -1122,7 +1095,7 @@ bool write_grub_config(const InstallerConfig& config, const InstallArtifacts& ar
     }
     std::ostringstream grub;
     const std::string base_kernel_args =
-        "root=" + kernel_root + " rootfstype=" + filesystem_label(config.filesystem) + " rootwait rw security=selinux selinux=1";
+        "root=" + kernel_root + " rootfstype=" + filesystem_label(config.filesystem) + " rootwait rw audit=0 selinux=0";
     grub << "set timeout=5\n";
     grub << "set default=0\n";
     grub << "insmod part_msdos\n";
