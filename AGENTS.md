@@ -1,2 +1,2 @@
 # Rules
-DO NOT spawn subagents!
+Mandatory: DO NOT spawn subagents!
