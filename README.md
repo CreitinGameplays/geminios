@@ -77,6 +77,12 @@ To recompile the wrapper if you modify `shim_wrapper.c`:
 make -C build_system
 ```
 
+You will need to clone APT source code so the builder script will be able to find and compile it:
+```
+git clone https://salsa.debian.org/apt-team/apt.git 
+mv apt apt-src
+```
+
 This ensures that every package build automagically targets GeminiOS without requiring every single makefile to be perfectly configured for cross-compilation.
 
 1.  **Run Builder**:
