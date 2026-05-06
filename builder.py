@@ -4327,8 +4327,8 @@ def seed_apt_no_systemd_preferences(root_dir=None, report=False):
         "linux-kbuild-*",
         "systemd*",
     ]
-    content = "\n".join(
-        f"Package: {pkg}\nPin: release *\nPin-Priority: -1"
+    content = "\n\n".join(
+        f"Package: {pkg}\nPin: version *\nPin-Priority: -1"
         for pkg in pinned_packages
     ) + "\n"
 
