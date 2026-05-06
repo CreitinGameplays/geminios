@@ -61,7 +61,9 @@
         "usr/lib/x86_64-linux-gnu/libtextstyle.so.0"
     ],
     "perl": [
-        "usr/bin/perl"
+        "usr/bin/perl",
+        "usr/lib/x86_64-linux-gnu/perl-base/auto/POSIX/POSIX.so",
+        "usr/lib/x86_64-linux-gnu/perl/*/auto/POSIX/POSIX.so"
     ],
     "texinfo": [
         "usr/bin/makeinfo"
@@ -627,6 +629,16 @@
     ],
     "ncurses": [
         "usr/lib/x86_64-linux-gnu/libncursesw.a",
+        "usr/lib/x86_64-linux-gnu/libtinfo.so*",
+        "usr/lib/x86_64-linux-gnu/libtinfow.so*",
+        "usr/lib/x86_64-linux-gnu/libncurses.so*",
+        "usr/lib/x86_64-linux-gnu/libncursesw.so*",
+        "usr/lib/x86_64-linux-gnu/libform.so*",
+        "usr/lib/x86_64-linux-gnu/libformw.so*",
+        "usr/lib/x86_64-linux-gnu/libmenu.so*",
+        "usr/lib/x86_64-linux-gnu/libmenuw.so*",
+        "usr/lib/x86_64-linux-gnu/libpanel.so*",
+        "usr/lib/x86_64-linux-gnu/libpanelw.so*",
         "bin/clear"
     ],
     "nano": [
@@ -697,7 +709,8 @@
         "bin/rm",
         "bin/mkdir",
         "bin/cat",
-        "bin/pwd"
+        "bin/pwd",
+        "usr/bin/stty"
     ],
     "curl": [
         "usr/bin/curl",

@@ -11,7 +11,7 @@ download_and_extract \
     "$SUDO_DIR"
 
 cd "$DEP_DIR/$SUDO_DIR"
-make distclean || true
+prune_autotools_build_tree "$PWD"
 
 ./configure \
     --prefix=/usr \

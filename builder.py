@@ -2337,6 +2337,12 @@ def _parse_glibc_version_tuple(version):
         parts.append(int(piece))
     return tuple(parts) if parts else None
 
+def format_glibc_version_tuple(version):
+    """Render a parsed GLIBC version tuple back into GLIBC_x.y form."""
+    if not version:
+        return None
+    return "GLIBC_" + ".".join(str(part) for part in version)
+
 def get_staged_libc_release_version(root_dir=None):
     """Return the staged libc release version as a comparable tuple."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
@@ -3952,6 +3958,7 @@ def get_package_verification_issues(pkg_name, root_dir=None):
     issues = []
     issues.extend(f"missing artifact: {artifact}" for artifact in get_missing_manifest_artifacts(pkg_name, root_dir=root_dir))
     issues.extend(get_pkgconfig_layout_issues(pkg_name, root_dir=root_dir))
+    issues.extend(get_package_glibc_compatibility_issues(pkg_name, root_dir=root_dir))
 
     if pkg_name == "glibc":
         issues.extend(get_glibc_runtime_issues(root_dir=root_dir))
@@ -3970,6 +3977,39 @@ def get_package_verification_issues(pkg_name, root_dir=None):
         issues.extend(get_shared_mime_info_runtime_issues(root_dir=root_dir))
     elif pkg_name == "util-linux":
         issues.extend(get_util_linux_runtime_issues(root_dir=root_dir))
+
+    return issues
+
+def get_package_glibc_compatibility_issues(pkg_name, root_dir=None):
+    """Return package artifacts that require a newer staged GLIBC than is available."""
+    root_dir = root_dir or ROOTFS_DIR
+    if pkg_name not in PACKAGE_MANIFESTS:
+        return []
+
+    staged_glibc = get_staged_libc_release_version(root_dir=root_dir)
+    if not staged_glibc:
+        return []
+
+    issues = []
+    seen = set()
+    for path in collect_package_artifact_paths(pkg_name, root_dir=root_dir):
+        if path in seen or not os.path.isfile(path) or os.path.islink(path):
+            continue
+        seen.add(path)
+        try:
+            with open(path, "rb") as f:
+                if f.read(4) != b"\x7fELF":
+                    continue
+        except OSError:
+            continue
+
+        required_glibc = get_elf_required_glibc_version(path)
+        if required_glibc and required_glibc > staged_glibc:
+            rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+            issues.append(
+                f"{pkg_name}: {rel_path} requires {format_glibc_version_tuple(required_glibc)} "
+                f"but staged libc provides {format_glibc_version_tuple(staged_glibc)}"
+            )
 
     return issues
 
@@ -5179,7 +5219,11 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] Debian multiarch runtime layout")
 
-    runtime_closure_issues = generate_runtime_closure_report(FINAL_ROOTFS_DIR, RUNTIME_CLOSURE_REPORT)
+    runtime_closure_issues = generate_runtime_closure_report(
+        FINAL_ROOTFS_DIR,
+        RUNTIME_CLOSURE_REPORT,
+        full_scan=True,
+    )
     if runtime_closure_issues:
         print_error(f"  [FAILED] {runtime_closure_issues[0]}")
         print_error(f"           See {RUNTIME_CLOSURE_REPORT} for the full staged ELF closure report.")
@@ -5843,15 +5887,16 @@ def get_shadowed_runtime_library_issues(root_dir=None):
             )
     return issues
 
-def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None):
+def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None, full_scan=False):
     """Generate a runtime-closure JSON report for staged ELF files."""
     report = {"root_dir": root_dir, "files": []}
     issues = []
     allowed_rpath_prefixes = ("/lib", "/usr/lib", "$ORIGIN")
     allowed_interpreter_prefixes = ("/lib", "/lib64", "/usr/lib", "/usr/lib64")
+    staged_glibc = get_staged_libc_release_version(root_dir=root_dir)
 
     if candidate_paths is None:
-        paths_to_scan = sorted(iter_rootfs_elf_files(root_dir))
+        paths_to_scan = sorted(iter_rootfs_elf_files(root_dir, full_scan=full_scan))
     else:
         paths_to_scan = sorted(
             path for path in {resolve_rootfs_path(root_dir, path) for path in candidate_paths}
@@ -5863,9 +5908,17 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
         interpreter = get_elf_interpreter(path)
         needed = get_elf_needed(path)
         rpaths = get_elf_rpaths(path)
+        required_glibc = get_elf_required_glibc_version(path)
         resolved = {}
         unresolved = []
         interpreter_resolved = None
+        glibc_compatible = True
+
+        if staged_glibc and required_glibc and required_glibc > staged_glibc:
+            glibc_compatible = False
+            issues.append(
+                f"{rel_path} requires {format_glibc_version_tuple(required_glibc)} but staged libc provides {format_glibc_version_tuple(staged_glibc)}"
+            )
 
         for lib_name in needed:
             candidate = find_rootfs_library(root_dir, lib_name, current_path=path, rpaths=rpaths)
@@ -5915,6 +5968,9 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
                 "resolved": resolved,
                 "unresolved": unresolved,
                 "rpath_runpath": rpaths,
+                "required_glibc": format_glibc_version_tuple(required_glibc),
+                "staged_glibc": format_glibc_version_tuple(staged_glibc),
+                "glibc_compatible": glibc_compatible,
             }
         )
 
@@ -5933,21 +5989,25 @@ def generate_runtime_closure_report(root_dir, report_path, candidate_paths=None)
         unique_issues.append(issue)
     return unique_issues
 
-def iter_rootfs_elf_files(rootfs_dir):
-    """Yield likely ELF-bearing files from runtime-relevant rootfs paths."""
-    candidate_dirs = [
-        "bin",
-        "sbin",
-        "lib/x86_64-linux-gnu",
-        "usr/bin",
-        "usr/sbin",
-        "usr/lib/x86_64-linux-gnu",
-        "usr/libexec",
-    ]
+def iter_rootfs_elf_files(rootfs_dir, full_scan=False):
+    """Yield likely ELF-bearing files from runtime paths or the full rootfs."""
+    rootfs_real = os.path.realpath(rootfs_dir)
+    if full_scan:
+        candidate_dirs = ["."]
+    else:
+        candidate_dirs = [
+            "bin",
+            "sbin",
+            "lib/x86_64-linux-gnu",
+            "usr/bin",
+            "usr/sbin",
+            "usr/lib/x86_64-linux-gnu",
+            "usr/libexec",
+        ]
 
     seen = set()
     for rel_dir in candidate_dirs:
-        base_dir = os.path.join(rootfs_dir, rel_dir)
+        base_dir = rootfs_dir if rel_dir == "." else os.path.join(rootfs_dir, rel_dir)
         if not os.path.exists(base_dir):
             continue
 
@@ -5956,6 +6016,17 @@ def iter_rootfs_elf_files(rootfs_dir):
                 path = os.path.join(dirpath, filename)
                 resolved_path = resolve_rootfs_path(rootfs_dir, path)
                 if resolved_path in seen or not os.path.isfile(resolved_path):
+                    continue
+                try:
+                    if os.path.commonpath([rootfs_real, os.path.realpath(resolved_path)]) != rootfs_real:
+                        continue
+                except ValueError:
+                    continue
+                try:
+                    with open(resolved_path, "rb") as f:
+                        if f.read(4) != b"\x7fELF":
+                            continue
+                except OSError:
                     continue
                 seen.add(resolved_path)
                 yield resolved_path

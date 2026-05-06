@@ -149,4 +149,31 @@ normalize_ncurses_runtime_aliases() {
 }
 export -f normalize_ncurses_runtime_aliases
 
+prune_autotools_build_tree() {
+    local src_dir="$1"
+
+    [ -d "$src_dir" ] || return 0
+
+    if [ -f "$src_dir/Makefile" ]; then
+        make -C "$src_dir" distclean >/dev/null 2>&1 || true
+    fi
+
+    rm -f \
+        "$src_dir/config.cache" \
+        "$src_dir/config.log" \
+        "$src_dir/config.status" \
+        "$src_dir/libtool"
+
+    find "$src_dir" -type d -name .libs -prune -exec rm -rf {} +
+    find "$src_dir" -type f \( \
+        -name '*.o' -o \
+        -name '*.lo' -o \
+        -name '*.la' -o \
+        -name '*.a' -o \
+        -name '*.so' -o \
+        -name '*.so.*' \
+    \) -delete
+}
+export -f prune_autotools_build_tree
+
 configure_gdk_pixbuf_loader_env
