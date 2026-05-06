@@ -155,6 +155,8 @@ SYSTEMD_PAYLOAD_KEEP_PATHS = {
     os.path.join("usr", "include", "systemd"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "libsystemd.so.0"),
+    os.path.join("usr", "lib64", "libsystemd.so"),
+    os.path.join("usr", "lib64", "libsystemd.so.0"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "pkgconfig", "libsystemd.pc"),
     os.path.join("usr", "lib", "x86_64-linux-gnu", "security", "pam_systemd.so"),
     os.path.join("usr", "share", "mime", "text", "x-systemd-unit.xml"),
@@ -6033,6 +6035,26 @@ def regenerate_ldconfig_cache(root_dir=None):
                 if "=>" in line:
                     entry_count += 1
         print_success(f"  ✓ Regenerated ld.so.cache with {entry_count} library entries.")
+
+        # Create fallback symlinks in /usr/lib64 for aliases that ldconfig ignores due to SONAME mismatch
+        usr_lib64 = os.path.join(root_dir, "usr", "lib64")
+        os.makedirs(usr_lib64, exist_ok=True)
+        missing_aliases = [
+            "libsystemd.so.0", "libsystemd.so",
+            "libtinfo.so.6", "libncurses.so.6", "libform.so.6", "libmenu.so.6", "libpanel.so.6"
+        ]
+        fallback_count = 0
+        for alias in missing_aliases:
+            target = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", alias)
+            if os.path.exists(target):
+                link_path = os.path.join(usr_lib64, alias)
+                if os.path.lexists(link_path):
+                    os.unlink(link_path)
+                os.symlink(os.path.join("..", "lib", "x86_64-linux-gnu", alias), link_path)
+                fallback_count += 1
+        if fallback_count > 0:
+            print_success(f"  ✓ Generated {fallback_count} dynamic linker fallback aliases in /usr/lib64.")
+
     else:
         print_warning("  ldconfig ran but ld.so.cache was not created.")
         return False
