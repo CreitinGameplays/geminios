@@ -28,6 +28,7 @@ ac_cv_func_sched_setattr=no ./configure --prefix=/usr --libdir=/usr/lib/x86_64-l
     --enable-write \
     --enable-mesg \
     --disable-chfn-chsh \
+    --disable-schedutils \
     --disable-su \
     --disable-runuser \
     --disable-makeinstall-chown \
