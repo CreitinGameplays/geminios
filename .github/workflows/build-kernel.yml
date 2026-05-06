@@ -19,7 +19,6 @@ permissions:
 
 jobs:
   build-kernel:
-    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GEMINIOS_ISO_CI == 'true'
     runs-on: ubuntu-24.04
     container:
       image: debian:13
@@ -31,12 +30,25 @@ jobs:
       GEMINIOS_KERNEL_OUTPUT_DIR: /tmp/geminios-artifacts/output/kernel
       GEMINIOS_KERNEL_STAGE_DIR: /tmp/geminios-kernel-stage
       GEMINIOS_KERNEL_BUILD_DIR: /tmp/geminios-kernel-build
+      GEMINIOS_KERNEL_BUILD_ENABLED: ${{ vars.ENABLE_GEMINIOS_ISO_CI == 'true' || github.run_attempt != '1' }}
 
     steps:
+      - name: Gate kernel build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GEMINIOS_KERNEL_BUILD_ENABLED}" != "true" ]]; then
+            echo "::notice::Kernel build is gated off for the first run while ENABLE_GEMINIOS_ISO_CI is false."
+            echo "::notice::Use the GitHub Actions 'Re-run jobs' button on this same job to execute the full build."
+            exit 0
+          fi
+
       - name: Check out repository
+        if: env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
         uses: actions/checkout@v4
 
       - name: Install host build dependencies
+        if: env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
         run: |
           apt-get update
           apt-get install -y \
@@ -44,6 +56,7 @@ jobs:
             dwarves kmod rsync wget ca-certificates xz-utils file perl python3
 
       - name: Build kernel
+        if: env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -51,7 +64,7 @@ jobs:
           bash tools/ci_build_kernel.sh 2>&1 | tee "$GEMINIOS_LOG_DIR/kernel-build.log"
 
       - name: Upload kernel artifacts
-        if: always()
+        if: always() && env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: geminios-kernel-${{ github.sha }}
@@ -60,7 +73,7 @@ jobs:
             ${{ env.GEMINIOS_OUTPUT_DIR }}/kernel/**
 
       - name: Upload build logs
-        if: always()
+        if: always() && env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: geminios-kernel-logs-${{ github.sha }}

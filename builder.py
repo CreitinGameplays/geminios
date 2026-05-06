@@ -134,10 +134,13 @@ SYSTEMD_FORBIDDEN_PACKAGE_PATTERNS = (
 )
 KERNEL_FORBIDDEN_PACKAGE_PATTERNS = (
     "linux-compiler-gcc-*",
+    "linux-base*",
+    "linux-binary-*",
     "linux-headers-*",
     "linux-headers-amd64",
     "linux-image-*",
     "linux-image-amd64",
+    "linux-modules-*",
     "linux-kbuild-*",
 )
 BOOTSTRAP_VALIDATION_EXCLUDED_PACKAGE_PATTERNS = (
@@ -4311,9 +4314,16 @@ def seed_apt_no_systemd_preferences(root_dir=None, report=False):
         "libpam-systemd",
         "libnss-systemd",
         "libsystemd-shared*",
+        "dracut*",
+        "initramfs-tools*",
+        "linux-base*",
+        "linux-binary-*",
         "linux-compiler-gcc-*",
         "linux-headers-*",
+        "linux-headers-amd64",
         "linux-image-*",
+        "linux-image-amd64",
+        "linux-modules-*",
         "linux-kbuild-*",
         "systemd*",
     ]
