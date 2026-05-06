@@ -5329,9 +5329,9 @@ def finalize_rootfs():
     materialize_selinux_policy_store(root_dir=FINAL_ROOTFS_DIR)
 
     # 12. Prepare SELinux policy/config and opportunistically pre-label the
-    # staged rootfs when the build host can support it. The live image boots
-    # with SELinux enabled in permissive mode; the installer flips installed
-    # systems to enforcing after a successful relabel.
+    # staged rootfs when the build host can support it. The live image and 
+    # installed systems boot with SELinux disabled by default to ensure
+    # maximum compatibility and avoid context-related errors.
     stage_selinux_rootfs_labels(root_dir=FINAL_ROOTFS_DIR)
 
     # 13. Final Integrity Check
@@ -5433,7 +5433,7 @@ def stage_selinux_rootfs_labels(root_dir=None):
         detail = detail_lines[-1] if detail_lines else f"exit code {result.returncode}"
         print_warning(
             "  Staged SELinux relabel failed; the build will continue with SELinux disabled in live boot, "
-            "and installed systems will still default to permissive mode. "
+            "and installed systems will also default to disabled mode. "
             f"Detail: {detail}"
         )
         return

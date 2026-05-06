@@ -213,7 +213,7 @@ EOF
 
 cat > "$ROOTFS/etc/selinux/config" <<EOF
 # GeminiOS SELinux defaults
-SELINUX=enforcing
+SELINUX=disabled
 SELINUXTYPE=default
 SETLOCALDEFS=0
 EOF
@@ -260,8 +260,8 @@ session     required      pam_limits.so
 session     required      pam_unix.so
 session     optional      pam_loginuid.so
 session     optional      pam_keyinit.so force revoke
-session     optional      pam_selinux.so close
-session     optional      pam_selinux.so open env_params
+# session     optional      pam_selinux.so close
+# session     optional      pam_selinux.so open env_params
 session     optional      pam_elogind.so
 EOF
 
