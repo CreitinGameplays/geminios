@@ -2125,6 +2125,9 @@ def seed_dpkg_database(root_dir=None, report=False):
     os.makedirs(info_dir, exist_ok=True)
     os.makedirs(updates_dir, exist_ok=True)
 
+    with open(os.path.join(dpkg_dir, "arch"), "w", encoding="utf-8") as f:
+        f.write("amd64\n")
+
     entries = build_seeded_dpkg_entries(root_dir=root_dir)
     status_chunks = []
     for entry in entries:
@@ -2151,7 +2154,7 @@ def seed_dpkg_database(root_dir=None, report=False):
                 stanza_lines.append(f"{optional_field}: {value}")
         status_chunks.append("\n".join(stanza_lines))
 
-        list_suffix = ".list" if architecture == "all" else f":{architecture}.list"
+        list_suffix = ".list" if architecture in ("all", "amd64") else f":{architecture}.list"
         list_path = os.path.join(info_dir, f"{package_name}{list_suffix}")
         with open(list_path, "w", encoding="utf-8") as f:
             for payload_path in entry["files"]:
@@ -5175,6 +5178,18 @@ def finalize_rootfs():
                     os.symlink(rel_target, link_path)
                 except FileExistsError:
                     pass
+
+    # 2b. Debian Policy Shims (for apt/dpkg compatibility)
+    print_info("[*] Creating Debian policy shims...")
+    shims = ["update-rc.d", "invoke-rc.d", "service"]
+    os.makedirs(os.path.join(FINAL_ROOTFS_DIR, "usr", "sbin"), exist_ok=True)
+    for shim in shims:
+        shim_path = os.path.join(FINAL_ROOTFS_DIR, "usr", "sbin", shim)
+        if not os.path.exists(shim_path):
+            with open(shim_path, "w") as f:
+                f.write("#!/bin/sh\n")
+                f.write("exit 0\n")
+            os.chmod(shim_path, 0o755)
 
     # 3. Database Updates
     print_info("[*] Updating system databases (Mime/Schemas)...")

@@ -45,3 +45,4 @@ selinux-policy-default
 selinux-utils
 checkpolicy
 secilc
+init-system-helpers
