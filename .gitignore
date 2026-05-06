@@ -96,3 +96,4 @@ gpkg-v2/obj/
 apt-src/
 !ports/*
 apt-src/
+.openclaude*
