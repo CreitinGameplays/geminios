@@ -130,4 +130,23 @@ move_rootfs_entry_if_distinct() {
 }
 export -f move_rootfs_entry_if_distinct
 
+normalize_ncurses_runtime_aliases() {
+    local root_dir="${1:-$ROOTFS}"
+    local canonical_dir="$root_dir/usr/lib/x86_64-linux-gnu"
+
+    [ -d "$canonical_dir" ] || return 0
+
+    local lib
+    for lib in ncurses form panel menu tinfo; do
+        local fallback_name="lib${lib}w.so.6"
+        local fallback_path="$canonical_dir/$fallback_name"
+        [ -e "$fallback_path" ] || continue
+
+        # Keep the wide runtime SONAMEs as the single source of truth.
+        ln -sfn "$fallback_name" "$canonical_dir/lib${lib}.so.6"
+        ln -sfn "$fallback_name" "$canonical_dir/lib${lib}.so"
+    done
+}
+export -f normalize_ncurses_runtime_aliases
+
 configure_gdk_pixbuf_loader_env

@@ -5088,6 +5088,7 @@ def prepare_rootfs():
         sys.exit(1)
     prune_ssh_payload(ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=True)
+    reconcile_ncurses_runtime_fallbacks(root_dir=ROOTFS_DIR, report=True)
     subprocess.run(f"find {ROOTFS_DIR} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
 
 def verify_rootfs_integrity():

@@ -20,6 +20,7 @@ rm -f config.cache config.status
 
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
+normalize_ncurses_runtime_aliases "$ROOTFS"
 
 # Move clear to /bin
 mkdir -p "$ROOTFS/bin"
@@ -27,14 +28,9 @@ if [ -f "$ROOTFS/usr/bin/clear" ]; then
     move_rootfs_entry_if_distinct "$ROOTFS/usr/bin/clear" "$ROOTFS/bin/clear"
 fi
 
-# Preserve Debian bootstrap's ncurses/tinfo provider links when they already
-# exist. The runtime packages own the SONAME symlinks, so only backfill
-# link-time aliases that are still missing after install.
+# Backfill linker-name aliases for the wide ncurses libraries when the package
+# install did not provide them. The runtime SONAMEs are normalized separately.
 for lib in ncurses form panel menu tinfo; do
-    # Link libX.so -> libXw.so only when no canonical linker name exists yet.
-    if [ ! -e "$ROOTFS$LIBDIR/lib${lib}.so" ] && [ -f "$ROOTFS$LIBDIR/lib${lib}w.so" ]; then
-        ln -sf "lib${lib}w.so" "$ROOTFS$LIBDIR/lib${lib}.so"
-    fi
     # Link libX.a -> libXw.a only when the canonical archive is still absent.
     if [ ! -e "$ROOTFS$LIBDIR/lib${lib}.a" ] && [ -f "$ROOTFS$LIBDIR/lib${lib}w.a" ]; then
         ln -sf "lib${lib}w.a" "$ROOTFS$LIBDIR/lib${lib}.a"
