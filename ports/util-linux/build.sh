@@ -40,6 +40,9 @@ ac_cv_func_sched_setattr=no ./configure --prefix=/usr --libdir=/usr/lib/x86_64-l
 make -j$JOBS
 make install DESTDIR="$ROOTFS"
 
+# GeminiOS does not ship legacy getty aliases; use util-linux agetty directly.
+rm -f "$ROOTFS/sbin/getty" "$ROOTFS/usr/sbin/getty"
+
 # GeminiOS uses util-linux for the canonical login and agetty binaries.
 # Keep the remaining account-management frontends out of the image for now.
 rm -f "$ROOTFS/bin/su" \

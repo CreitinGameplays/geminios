@@ -1569,6 +1569,7 @@ def assemble_final_rootfs():
             remove_path(leaked_abs_path)
     prune_systemd_payload(FINAL_ROOTFS_DIR, report=True)
     prune_ssh_payload(FINAL_ROOTFS_DIR, report=True)
+    prune_legacy_getty_aliases(FINAL_ROOTFS_DIR, report=True)
     restore_elogind_systemd_compat(FINAL_ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
     ensure_usrmerge_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
@@ -2204,6 +2205,24 @@ def remove_staged_gpkg_paths(root_dir=None, report=False):
         print_info("[*] Removing staged gpkg paths...")
         for rel_path in removed:
             print_info(f"  Removed /{rel_path}")
+    return removed
+
+def prune_legacy_getty_aliases(root_dir=None, report=False):
+    """Remove stale getty compatibility aliases; GeminiOS uses util-linux agetty directly."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    removed = []
+    for rel_path in ("sbin/getty", "usr/sbin/getty"):
+        abs_path = os.path.join(root_dir, rel_path)
+        if os.path.lexists(abs_path):
+            remove_path(abs_path)
+            removed.append(rel_path)
+
+    if report:
+        if removed:
+            print_info(f"  Removed {len(removed)} legacy getty aliases.")
+        else:
+            print_success("  ✓ No legacy getty aliases needed pruning.")
+
     return removed
 
 def build_seeded_dpkg_entries(root_dir=None):
@@ -5127,6 +5146,7 @@ def prepare_rootfs():
     if not prepare_build_system_helpers():
         sys.exit(1)
     prune_ssh_payload(ROOTFS_DIR, report=True)
+    prune_legacy_getty_aliases(ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=True)
     reconcile_ncurses_runtime_fallbacks(root_dir=ROOTFS_DIR, report=True)
     subprocess.run(f"find {ROOTFS_DIR} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
