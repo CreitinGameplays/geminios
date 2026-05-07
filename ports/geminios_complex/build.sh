@@ -37,19 +37,12 @@ build_tool() {
 }
 
 echo "Removing staged gpkg runtimes..."
-rm -f "$ROOTFS/bin/apps/system/gpkg" \
-      "$ROOTFS/bin/apps/system/gpkg-worker" \
-      "$ROOTFS/bin/apps/system/gpkg-v2" \
+rm -f "$ROOTFS/bin/apps/system/gpkg-v2" \
       "$ROOTFS/bin/apps/system/gpkg-v2-worker" \
-      "$ROOTFS/bin/gpkg" \
-      "$ROOTFS/bin/gpkg-worker" \
       "$ROOTFS/bin/gpkg-v2" \
       "$ROOTFS/bin/gpkg-v2-worker" \
-      "$ROOTFS/usr/bin/gpkg" \
-      "$ROOTFS/usr/bin/gpkg-worker" \
       "$ROOTFS/usr/bin/gpkg-v2" \
       "$ROOTFS/usr/bin/gpkg-v2-worker"
-rm -rf "$ROOTFS/etc/gpkg"
 
 echo "Compiling ping..."
 build_tool "$ROOTFS/bin/apps/system/ping" "$PKGS/ping/ping.cpp"

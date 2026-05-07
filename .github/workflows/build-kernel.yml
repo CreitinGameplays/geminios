@@ -28,9 +28,11 @@ jobs:
       GEMINIOS_LOG_DIR: /tmp/geminios-artifacts/logs
       GEMINIOS_OUTPUT_DIR: /tmp/geminios-artifacts/output
       GEMINIOS_KERNEL_OUTPUT_DIR: /tmp/geminios-artifacts/output/kernel
+      GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR: /tmp/geminios-artifacts/output/kernel-packages
       GEMINIOS_KERNEL_STAGE_DIR: /tmp/geminios-kernel-stage
       GEMINIOS_KERNEL_BUILD_DIR: /tmp/geminios-kernel-build
       GEMINIOS_KERNEL_BUILD_ENABLED: ${{ vars.ENABLE_GEMINIOS_ISO_CI == 'true' || github.run_attempt != '1' }}
+      GEMINIOS_KERNEL_PACKAGE_BUILD_ID: ${{ github.run_id }}.${{ github.run_attempt }}
 
     steps:
       - name: Gate kernel build
@@ -53,7 +55,7 @@ jobs:
           apt-get update
           apt-get install -y \
             build-essential bison flex bc libncurses-dev libssl-dev libelf-dev \
-            dwarves kmod rsync wget ca-certificates xz-utils file perl python3
+            dwarves kmod rsync wget ca-certificates xz-utils zstd file perl python3
 
       - name: Build kernel
         if: env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
@@ -63,6 +65,25 @@ jobs:
           mkdir -p "$GEMINIOS_LOG_DIR"
           bash tools/ci_build_kernel.sh 2>&1 | tee "$GEMINIOS_LOG_DIR/kernel-build.log"
 
+      - name: Build kernel package
+        if: env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          kernel_dir="/home/creitin/Documents/geminios/external_dependencies/linux-7.1-rc2"
+          kernel_release="$(make -s -C "$kernel_dir" kernelrelease)"
+          modules_dir="$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release"
+          mkdir -p "$GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR"
+          python3 tools/build_kernel_gpkg.py \
+            --kernel-release "$kernel_release" \
+            --bzimage "$kernel_dir/arch/x86/boot/bzImage" \
+            --modules-dir "$modules_dir" \
+            --config-file "$kernel_dir/.config" \
+            --output-root "$GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR" \
+            --export-root "$GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR/export" \
+            --build-id "$GEMINIOS_KERNEL_PACKAGE_BUILD_ID" \
+            --channel stable
+
       - name: Upload kernel artifacts
         if: always() && env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
         uses: actions/upload-artifact@v4
@@ -71,6 +92,16 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ env.GEMINIOS_OUTPUT_DIR }}/kernel/**
+
+      - name: Upload kernel package artifacts
+        if: always() && env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: geminios-kernel-packages-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR }}/packages/**
+            ${{ env.GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR }}/export/**
 
       - name: Upload build logs
         if: always() && env.GEMINIOS_KERNEL_BUILD_ENABLED == 'true'

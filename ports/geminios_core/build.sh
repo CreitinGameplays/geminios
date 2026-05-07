@@ -6,6 +6,27 @@ cd "$ROOT_DIR/ginit"
 make install DESTDIR="$ROOTFS"
 cd -
 
+# Install the canonical gpkg runtime here so the base image ships a working
+# package manager with the default GeminiOS repository already configured.
+echo "Installing Gpkg Core..."
+cd "$ROOT_DIR/gpkg-v2"
+make install DESTDIR="$ROOTFS" ROOTFS="$ROOTFS"
+cd -
+
+mkdir -p "$ROOTFS/etc/gpkg"
+mkdir -p "$ROOTFS/var/lib/gpkg" "$ROOTFS/var/repo"
+cp "$ROOT_DIR/build_system/gpkg_default_sources.list" "$ROOTFS/etc/gpkg/sources.list"
+cp "$ROOT_DIR/build_system/gpkg_debian.conf" "$ROOTFS/etc/gpkg/debian.conf"
+cp "$ROOT_DIR/build_system/gpkg_import_policy.json" "$ROOTFS/etc/gpkg/import-policy.json"
+cp "$ROOT_DIR/build_system/gpkg_upgrade_companions.conf" "$ROOTFS/etc/gpkg/upgrade-companions.conf"
+mkdir -p "$ROOTFS/usr/share/gpkg"
+cat > "$ROOTFS/usr/share/gpkg/base-system.json" <<'EOF'
+[]
+EOF
+cat > "$ROOTFS/usr/share/gpkg/base-debian-packages.json" <<'EOF'
+[]
+EOF
+
 # Additional setup for ginit.
 # util-linux supplies the real login and agetty binaries.
 # Keep only the boot-time init entrypoint and remove any stale legacy aliases.
@@ -21,10 +42,6 @@ ln -sfn dash "$ROOTFS/bin/sh"
 if ! rootfs_dirs_alias "$ROOTFS/usr/bin" "$ROOTFS/bin"; then
     ln -sfn dash "$ROOTFS/usr/bin/sh"
 fi
-
-# apt-src owns package-management tooling for now, so keep the legacy gpkg
-# entrypoints out of the staged image.
-rm -f "$ROOTFS/bin/gpkg" "$ROOTFS/usr/bin/gpkg"
 
 # Create default system files (passwd, group, shadow)
 mkdir -p "$ROOTFS/etc"
@@ -1175,4 +1192,4 @@ EOF
 
 # Cleanup (don't remove signals.o and user_mgmt.o, geminios_complex needs them)
 echo "Cleaning up compiled artifacts..."
-rm -f ginit login getty init gpkg gpkg-worker
+rm -f ginit login getty init

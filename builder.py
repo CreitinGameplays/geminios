@@ -1955,6 +1955,39 @@ def write_gpkg_base_system_registry(root_dir=None):
         f.write("\n")
     return entries
 
+def write_gpkg_default_sources_list(root_dir=None):
+    """Write the default GeminiOS repository source list."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    sources_path = os.path.join(root_dir, "etc", "gpkg", "sources.list")
+    os.makedirs(os.path.dirname(sources_path), exist_ok=True)
+
+    if os.path.exists(GPKG_DEFAULT_SOURCES_FILE):
+        shutil.copy2(GPKG_DEFAULT_SOURCES_FILE, sources_path)
+    else:
+        with open(sources_path, "w", encoding="utf-8") as f:
+            f.write("# GeminiOS native repository\n")
+            f.write("https://repo.creitingameplays.com\n")
+    return sources_path
+
+def write_gpkg_runtime_config(root_dir=None):
+    """Seed gpkg runtime config files shipped with GeminiOS."""
+    root_dir = root_dir or FINAL_ROOTFS_DIR
+    etc_gpkg_dir = os.path.join(root_dir, "etc", "gpkg")
+    os.makedirs(etc_gpkg_dir, exist_ok=True)
+
+    config_files = {
+        "debian.conf": GPKG_DEBIAN_CONFIG_FILE,
+        "import-policy.json": GPKG_IMPORT_POLICY_FILE,
+        "upgrade-companions.conf": GPKG_UPGRADE_COMPANIONS_FILE,
+    }
+    for filename, source_path in config_files.items():
+        if os.path.exists(source_path):
+            shutil.copy2(source_path, os.path.join(etc_gpkg_dir, filename))
+
+    os.makedirs(os.path.join(etc_gpkg_dir, "sources.list.d"), exist_ok=True)
+    write_gpkg_default_sources_list(root_dir=root_dir)
+    return etc_gpkg_dir
+
 def get_bootstrap_package_sets(package_index):
     """Return the exact Debian package sets that seed the runtime and sysroot stages."""
     runtime_requests = read_manifest_lines(BOOTSTRAP_RUNTIME_MANIFEST)
@@ -2284,25 +2317,16 @@ def write_gpkg_base_debian_registry(root_dir=None):
     return entries
 
 def remove_staged_gpkg_paths(root_dir=None, report=False):
-    """Ensure legacy gpkg runtime paths are absent from a staged rootfs."""
+    """Ensure legacy gpkg-v2 runtime paths are absent from a staged rootfs."""
     root_dir = root_dir or ROOTFS_DIR
     removed = []
     for rel_path in (
-        os.path.join("bin", "apps", "system", "gpkg"),
-        os.path.join("bin", "apps", "system", "gpkg-worker"),
         os.path.join("bin", "apps", "system", "gpkg-v2"),
         os.path.join("bin", "apps", "system", "gpkg-v2-worker"),
-        os.path.join("bin", "gpkg"),
-        os.path.join("bin", "gpkg-worker"),
         os.path.join("bin", "gpkg-v2"),
         os.path.join("bin", "gpkg-v2-worker"),
-        os.path.join("usr", "bin", "gpkg"),
-        os.path.join("usr", "bin", "gpkg-worker"),
         os.path.join("usr", "bin", "gpkg-v2"),
         os.path.join("usr", "bin", "gpkg-v2-worker"),
-        os.path.join("etc", "gpkg"),
-        os.path.join("usr", "share", "gpkg"),
-        os.path.join("var", "lib", "gpkg"),
     ):
         abs_path = os.path.join(root_dir, rel_path)
         if not os.path.lexists(abs_path):
@@ -5502,6 +5526,24 @@ def verify_rootfs_integrity():
         return False
     print_success("  [OK] DBus runtime layout")
 
+    gpkg_required_paths = [
+        "bin/apps/system/gpkg",
+        "bin/apps/system/gpkg-worker",
+        "bin/gpkg",
+        "etc/gpkg/sources.list",
+        "etc/gpkg/debian.conf",
+        "etc/gpkg/import-policy.json",
+        "etc/gpkg/upgrade-companions.conf",
+        "usr/share/gpkg/base-system.json",
+        "usr/share/gpkg/base-debian-packages.json",
+    ]
+    gpkg_missing = [rel_path for rel_path in gpkg_required_paths if not rootfs_entry_exists(FINAL_ROOTFS_DIR, rel_path)]
+    if gpkg_missing:
+        print_error(f"  [FAILED] missing gpkg support files: {gpkg_missing[0]}")
+        print_error("           GeminiOS must ship the canonical gpkg runtime and default repository metadata.")
+        return False
+    print_success("  [OK] gpkg runtime and default repository")
+
     lightdm_config_issues = get_lightdm_config_issues(root_dir=FINAL_ROOTFS_DIR)
     if lightdm_config_issues:
         print_error(f"  [FAILED] {lightdm_config_issues[0]}")
@@ -5538,6 +5580,11 @@ def finalize_rootfs():
     if copied_udev_entries:
         print_success(f"  ✓ Mirrored {copied_udev_entries} missing udev runtime entries between canonical and multiarch trees.")
     strip_ignored_lightdm_options(root_dir=FINAL_ROOTFS_DIR)
+    print_info("[*] Seeding gpkg runtime configuration...")
+    write_gpkg_runtime_config(root_dir=FINAL_ROOTFS_DIR)
+    write_gpkg_base_system_registry(root_dir=FINAL_ROOTFS_DIR)
+    write_gpkg_base_debian_registry(root_dir=FINAL_ROOTFS_DIR)
+
     reconciled_runtime_entries = reconcile_base_debian_runtime_providers(root_dir=FINAL_ROOTFS_DIR, report=True)
     reconciled_runtime_entries.extend(
         reconcile_ncurses_runtime_fallbacks(root_dir=FINAL_ROOTFS_DIR, report=True)

@@ -13,6 +13,14 @@ SYS_INFO_PATH = ROOT_DIR / "src" / "sys_info.h"
 DEFAULT_EXPORT_ROOT = ROOT_DIR / "export"
 
 
+def resolve_gpkg_checkout(root_dir=ROOT_DIR):
+    root_dir = Path(root_dir).resolve()
+    for candidate in (root_dir / "gpkg-v2", root_dir / "gpkg"):
+        if candidate.exists():
+            return candidate
+    return root_dir / "gpkg-v2"
+
+
 def capture(cmd, *, cwd=None):
     result = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
     if result.returncode != 0:
@@ -58,9 +66,10 @@ def build_deterministic_gpkg_version(root_dir=ROOT_DIR):
     root_dir = Path(root_dir).resolve()
     macros = read_sys_info_macros(root_dir / "src" / "sys_info.h")
     version_id = sanitize_version_component(macros.get("OS_VERSION_ID", "rolling"))
-    revision, dirty = detect_git_revision(root_dir / "gpkg")
+    repo_dir = resolve_gpkg_checkout(root_dir)
+    revision, dirty = detect_git_revision(repo_dir)
     timestamp = datetime.fromtimestamp(
-        detect_git_commit_timestamp(root_dir / "gpkg"),
+        detect_git_commit_timestamp(repo_dir),
         tz=timezone.utc,
     ).strftime("%Y%m%d%H%M%S")
     suffix = f"{version_id}.git{timestamp}.{revision}"
@@ -99,7 +108,7 @@ def iter_exported_gpkg_versions(export_root):
 
 def find_matching_exported_gpkg_version(root_dir=ROOT_DIR, export_root=DEFAULT_EXPORT_ROOT):
     root_dir = Path(root_dir).resolve()
-    revision, _ = detect_git_revision(root_dir / "gpkg")
+    revision, _ = detect_git_revision(resolve_gpkg_checkout(root_dir))
     matches = []
     for version in iter_exported_gpkg_versions(export_root):
         if extract_revision_from_version(version) != revision:

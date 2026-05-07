@@ -488,7 +488,8 @@ build_system/kernel_package_channels.json
 build_system/gpkg_default_sources.list
 ```
 
-`tools/build_kernel_gpkg.py` generates SDK-compatible package source trees, builds `.gpkg` archives through the GeminiOS SDK, and can refresh a repository index in one pass.
+`tools/build_kernel_gpkg.py` generates the kernel `.gpkg` archives and repository index in one pass.
+It will use the GeminiOS SDK when available, but it also has a local fallback so the GitHub workflow can build the packages without the SDK checkout.
 
 Typical flow:
 
