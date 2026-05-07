@@ -70,15 +70,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          kernel_dir="/home/creitin/Documents/geminios/external_dependencies/linux-7.1-rc2"
-          kernel_release="$(make -s -C "$kernel_dir" kernelrelease)"
-          modules_dir="$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release"
+          artifact_dir="$(find "$GEMINIOS_KERNEL_OUTPUT_DIR" -mindepth 1 -maxdepth 1 -type d -name 'linux-*' | sort | tail -n 1)"
+          if [[ -z "$artifact_dir" ]]; then
+            echo "::error::No kernel artifact directory found under $GEMINIOS_KERNEL_OUTPUT_DIR"
+            exit 1
+          fi
+          kernel_release="$(<"$artifact_dir/kernelrelease.txt")"
+          modules_dir="$artifact_dir/modules/$kernel_release"
           mkdir -p "$GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR"
           python3 tools/build_kernel_gpkg.py \
             --kernel-release "$kernel_release" \
-            --bzimage "$kernel_dir/arch/x86/boot/bzImage" \
+            --bzimage "$artifact_dir/bzImage" \
             --modules-dir "$modules_dir" \
-            --config-file "$kernel_dir/.config" \
+            --system-map "$artifact_dir/System.map" \
+            --config-file "$artifact_dir/config" \
             --output-root "$GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR" \
             --export-root "$GEMINIOS_KERNEL_PACKAGE_OUTPUT_DIR/export" \
             --build-id "$GEMINIOS_KERNEL_PACKAGE_BUILD_ID" \

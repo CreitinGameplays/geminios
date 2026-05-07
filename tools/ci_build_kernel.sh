@@ -253,18 +253,34 @@ build_kernel() {
   popd >/dev/null
 }
 
+prune_module_tree() {
+  local modules_dir="$1"
+
+  [[ -d "$modules_dir" ]] || return 0
+
+  # Runtime artifacts do not need kernel source/build links, and keeping them
+  # causes CI artifact uploads to traverse the full source tree.
+  rm -f "$modules_dir/build" "$modules_dir/source"
+}
+
 save_kernel_artifacts() {
   local kernel_release
+  local staged_modules_dir
+  local artifact_modules_dir
   kernel_release="$(make -s -C "$KERNEL_SRC_DIR" kernelrelease)"
+  staged_modules_dir="$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release"
 
   cp -f "$KERNEL_SRC_DIR/arch/x86/boot/bzImage" "$KERNEL_ARTIFACT_DIR/bzImage"
   cp -f "$KERNEL_SRC_DIR/.config" "$KERNEL_ARTIFACT_DIR/config"
   cp -f "$KERNEL_SRC_DIR/System.map" "$KERNEL_ARTIFACT_DIR/System.map"
   printf '%s\n' "$kernel_release" > "$KERNEL_ARTIFACT_DIR/kernelrelease.txt"
 
-  if [[ -d "$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release" ]]; then
+  if [[ -d "$staged_modules_dir" ]]; then
+    prune_module_tree "$staged_modules_dir"
     mkdir -p "$KERNEL_ARTIFACT_DIR/modules"
-    rsync -a "$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release" "$KERNEL_ARTIFACT_DIR/modules/"
+    rsync -a "$staged_modules_dir" "$KERNEL_ARTIFACT_DIR/modules/"
+    artifact_modules_dir="$KERNEL_ARTIFACT_DIR/modules/$kernel_release"
+    prune_module_tree "$artifact_modules_dir"
   fi
 
   echo "[*] Saved kernel image and metadata in $KERNEL_ARTIFACT_DIR"
