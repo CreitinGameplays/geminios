@@ -127,7 +127,6 @@ BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS = (
 )
 SYSTEMD_FORBIDDEN_PACKAGE_PATTERNS = (
     "libpam-systemd",
-    "libnss-systemd",
     "libsystemd-shared*",
     "systemd",
     "systemd-*",
@@ -4336,7 +4335,6 @@ def seed_apt_no_systemd_preferences(root_dir=None, report=False):
 
     pinned_packages = [
         "libpam-systemd",
-        "libnss-systemd",
         "libsystemd-shared*",
         "dracut*",
         "initramfs-tools*",
