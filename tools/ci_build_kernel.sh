@@ -249,7 +249,7 @@ build_kernel() {
   echo "[*] Building kernel $KERNEL_VERSION with $(nproc) jobs"
   make -j"$(nproc)" bzImage modules
   echo "[*] Installing kernel modules into staged artifact tree"
-  make modules_install INSTALL_MOD_PATH="$KERNEL_STAGE_DIR"
+  make modules_install INSTALL_MOD_PATH="$GEMINIOS_KERNEL_STAGE_DIR"
   popd >/dev/null
 }
 
@@ -262,9 +262,9 @@ save_kernel_artifacts() {
   cp -f "$KERNEL_SRC_DIR/System.map" "$KERNEL_ARTIFACT_DIR/System.map"
   printf '%s\n' "$kernel_release" > "$KERNEL_ARTIFACT_DIR/kernelrelease.txt"
 
-  if [[ -d "$KERNEL_STAGE_DIR/lib/modules/$kernel_release" ]]; then
+  if [[ -d "$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release" ]]; then
     mkdir -p "$KERNEL_ARTIFACT_DIR/modules"
-    rsync -a "$KERNEL_STAGE_DIR/lib/modules/$kernel_release" "$KERNEL_ARTIFACT_DIR/modules/"
+    rsync -a "$GEMINIOS_KERNEL_STAGE_DIR/lib/modules/$kernel_release" "$KERNEL_ARTIFACT_DIR/modules/"
   fi
 
   echo "[*] Saved kernel image and metadata in $KERNEL_ARTIFACT_DIR"
