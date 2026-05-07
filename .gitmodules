@@ -3,6 +3,6 @@
 	url = https://github.com/CreitinGameplays/ginit.git
 
 [submodule "gpkg-v2"]
-	path = ginit
+	path = gpkg-v2
 	url = https://github.com/CreitinGameplays/gpkg-v2.git
 
