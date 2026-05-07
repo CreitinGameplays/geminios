@@ -1,6 +1,6 @@
 # Minimal stage0 runtime seed.
-# This is only the coherent Debian base we need before GeminiOS-built packages
-# and gpkg-managed Debian packages layer on top later.
+# This is only the coherent Devuan base we need before GeminiOS-built packages
+# and gpkg-managed Devuan-family packages layer on top later.
 base-files
 bash
 coreutils

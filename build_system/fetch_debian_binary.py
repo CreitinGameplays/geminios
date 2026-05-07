@@ -24,7 +24,7 @@ def read_simple_kv_config(path):
 def download(url, dest_path):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     tmp_path = dest_path + ".part"
-    request = urllib.request.Request(url, headers={"User-Agent": "GeminiOS fetch_debian_binary"})
+    request = urllib.request.Request(url, headers={"User-Agent": "GeminiOS fetch_archive_binary"})
     try:
         with urllib.request.urlopen(request) as response, open(tmp_path, "wb") as output:
             while True:
@@ -89,9 +89,9 @@ def main():
     config = read_simple_kv_config(args.config)
     packages_url = config.get(
         "PACKAGES_URL",
-        "https://deb.debian.org/debian/dists/testing/main/binary-amd64/Packages.gz",
+        "http://deb.devuan.org/merged/dists/freia/main/binary-amd64/Packages.gz",
     )
-    base_url = config.get("BASE_URL", "https://deb.debian.org/debian").rstrip("/")
+    base_url = config.get("BASE_URL", "http://deb.devuan.org/merged").rstrip("/")
 
     cache_dir = os.path.abspath(args.cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
@@ -100,7 +100,7 @@ def main():
 
     record = parse_package_index(packages_path, args.package, args.arch)
     if record is None:
-        print(f"failed to resolve Debian package {args.package} for architecture {args.arch}", file=sys.stderr)
+        print(f"failed to resolve archive package {args.package} for architecture {args.arch}", file=sys.stderr)
         return 1
 
     filename = record.get("Filename", "")

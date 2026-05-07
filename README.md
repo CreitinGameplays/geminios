@@ -2,13 +2,13 @@
 
 # GeminiOS Documentation
 
-GeminiOS is a minimal, open-source, educational, Debian-derived Linux operating system that does not use `systemd` (initially made by Google Gemini 3, continued by Codex). It also does not rely on build systems like Buildroot.
+GeminiOS is a minimal, open-source, educational, Devuan-based Linux operating system that does not use `systemd` (initially made by Google Gemini 3, continued by Codex). It also does not rely on build systems like Buildroot.
 
 The project now follows a clear model:
 
-- Debian-derived userland and package ecosystem
+- Devuan-based userland and package ecosystem
 - GeminiOS-specific boot flow, init/service model, and packaging workflow
-- Debian-native `apt`/`dpkg` package management staged through `apt-src`
+- Devuan-native `apt`/`dpkg` package management staged through `apt-src`
 
 Versioning follows a rolling `stream + snapshot` model:
 
@@ -138,7 +138,7 @@ qemu-system-x86_64 -cdrom GeminiOS.iso -m 4G -serial stdio -smp 2 -vga std -enab
 
 - **Core System (Ginit)**: The initialization system and core utilities reside in the `ginit/` directory. It is built as part of the `geminios_core` port but can be developed independently using its own `Makefile`.
 
-- **Package Management**: The base image currently stages Debian `apt` tooling through [`ports/apt-src/build.sh`](ports/apt-src/build.sh). The top-level `gpkg/` tree is still in the repo for separate work, but it is not currently staged into the built rootfs.
+- **Package Management**: The base image currently stages Devuan `apt` tooling through [`ports/apt-src/build.sh`](ports/apt-src/build.sh). The top-level `gpkg/` tree is still in the repo for separate work, but it is not currently staged into the built rootfs.
 
 - **Userspace Packages**: Most other system utilities are in `src/packages/` (system utilities).
 
@@ -162,7 +162,7 @@ GeminiOS currently boots and runs a regular X11 desktop session. The base image 
   - `/usr/libexec/geminios/session-runtime`
 
 That solves the class of runtime failures caused by packages expecting GTK/Wayland client symbols to exist.
-It also means GeminiOS now has a non-`systemd --user` session bootstrap path for imported Wayland desktops: the wrapper starts a session bus when needed, exports the XDG session variables, and opportunistically launches common user daemons such as PipeWire, portals, polkit agents, `at-spi`, and `gnome-keyring` if those packages are installed later from Debian packages.
+It also means GeminiOS now has a non-`systemd --user` session bootstrap path for imported Wayland desktops: the wrapper starts a session bus when needed, exports the XDG session variables, and opportunistically launches common user daemons such as PipeWire, portals, polkit agents, `at-spi`, and `gnome-keyring` if those packages are installed later from Devuan packages.
 The base login/session layer now also seeds the standard XDG home directories, infers the runtime D-Bus socket when one already exists, and supports shell drop-ins under `/usr/libexec/geminios/session-env.d`, `/etc/geminios/session-env.d`, and `$HOME/.config/geminios/session-env.d` so future Wayland packages can extend the session environment without patching `geminios_core` again.
 
 What it does **not** mean yet:
@@ -185,15 +185,15 @@ Those wrappers are the supported bridge between GeminiOS login/PAM/elogind and i
 
 ## Package Sources
 
-The current GeminiOS image stages Debian package management through the `apt-src` port.
-That means the built rootfs ships Debian `apt`, `apt-utils`, `gpgv`, the Debian archive keyring, and a standard `dpkg` state layout instead of the older staged `gpkg` runtime.
+The current GeminiOS image stages Devuan package management through the `apt-src` port.
+That means the built rootfs ships Devuan `apt`, `apt-utils`, `gpgv`, the Devuan archive keyring, and a standard `dpkg` state layout instead of the older staged `gpkg` runtime.
 
 The default image seeds:
 
-- `/etc/apt/sources.list`: the Debian testing source generated from `build_system/gpkg_debian.conf`
-- `/etc/apt/apt.conf.d/99geminios-debian.conf`: GeminiOS apt defaults
-- `/var/repo/debian/Packages` and `/var/repo/debian/Packages.gz`: cached Debian index copies used by the build
-- `/usr/share/keyrings/debian-archive-keyring.gpg`: Debian archive keyring used for signed repository verification
+- `/etc/apt/sources.list`: the Devuan `freia` source generated from `build_system/gpkg_debian.conf`
+- `/etc/apt/apt.conf.d/99geminios-devuan.conf`: GeminiOS apt defaults
+- `/var/repo/devuan/Packages` and `/var/repo/devuan/Packages.gz`: cached Devuan index copies used by the build
+- `/usr/share/keyrings/devuan-archive-keyring.gpg`: Devuan archive keyring used for signed repository verification
 
 Typical flow inside GeminiOS:
 
@@ -207,7 +207,9 @@ sudo apt install weston
 
 Important:
 
-- The staged image currently expects Debian testing to be the primary package source.
+- The staged image currently expects Devuan `freia` to be the primary package source.
+- The staged image uses the Devuan merged archive on `deb.devuan.org` and stages `devuan-keyring` for repository trust.
+- Do not mix direct Debian package sources into a Devuan-backed GeminiOS image unless you are deliberately debugging cross-repo breakage.
 - `apt-src` is the integration point that populates the runtime apt layout in the image.
 - The build no longer stages `/etc/gpkg`, `/usr/share/gpkg`, or `/var/lib/gpkg` into the final rootfs.
 - The `gpkg-v2/` tree still exists in the repo for development, but it is not the package manager shipped in the current image.

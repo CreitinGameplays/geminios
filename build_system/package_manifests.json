@@ -843,12 +843,12 @@
         "usr/lib/x86_64-linux-gnu/libgcrypt.so.20*",
         "usr/lib/x86_64-linux-gnu/libgpg-error.so.0*",
         "usr/lib/x86_64-linux-gnu/libseccomp.so.2*",
-        "usr/share/keyrings/debian-archive-keyring.gpg",
-        "usr/share/keyrings/debian-archive-keyring.pgp",
+        "usr/share/keyrings/devuan-archive-keyring.gpg",
+        "usr/share/keyrings/devuan-keyring.gpg",
         "etc/apt/sources.list",
-        "etc/apt/apt.conf.d/99geminios-debian.conf",
-        "var/repo/debian/Packages",
-        "var/repo/debian/Packages.gz"
+        "etc/apt/apt.conf.d/99geminios-devuan.conf",
+        "var/repo/devuan/Packages",
+        "var/repo/devuan/Packages.gz"
     ],
     "gpkg": [
         "bin/apps/system/gpkg",

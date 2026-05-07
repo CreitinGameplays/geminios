@@ -1,6 +1,6 @@
 # Minimal stage1 toolchain/dev seed for building GeminiOS packages.
 # Keep this small; anything not required to bootstrap the distro can be pulled
-# later by gpkg from Debian testing.
+# later by gpkg from the Devuan freia archive.
 binutils
 build-essential
 gcc

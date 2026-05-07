@@ -93,7 +93,7 @@ ROOTFS_DIR = BUILD_SYSROOT_DIR
 OUTPUT_DIR = os.environ.get("GEMINIOS_OUTPUT_DIR", os.path.join(ROOT_DIR, "output"))
 BOOTSTRAP_CACHE_DIR = os.environ.get(
     "GEMINIOS_BOOTSTRAP_CACHE_DIR",
-    os.path.join(ROOT_DIR, "external_dependencies", "debian-bootstrap"),
+    os.path.join(ROOT_DIR, "external_dependencies", "devuan-bootstrap"),
 )
 ISO_WORK_DIR = os.environ.get("GEMINIOS_ISO_WORK_DIR", os.path.join(ROOT_DIR, "isodir"))
 ISO_OUTPUT_DIR = os.environ.get("GEMINIOS_ISO_OUTPUT_DIR", ROOT_DIR)
@@ -327,7 +327,7 @@ APT_RUNTIME_SEED_PACKAGES = (
     "gpgv",
     "libgcrypt20",
     "libgpg-error0",
-    "debian-archive-keyring",
+    "devuan-keyring",
 )
 
 # Load Manifests
@@ -767,7 +767,7 @@ def read_manifest_lines(path):
     return entries
 
 def load_debian_bootstrap_config():
-    """Load Debian metadata bootstrap URLs from gpkg's Debian config."""
+    """Load archive bootstrap URLs from gpkg's backend config."""
     config = {}
     if os.path.exists(GPKG_DEBIAN_CONFIG_FILE):
         with open(GPKG_DEBIAN_CONFIG_FILE, "r") as f:
@@ -778,8 +778,8 @@ def load_debian_bootstrap_config():
                 key, value = line.split("=", 1)
                 config[key.strip()] = value.strip()
 
-    packages_url = config.get("PACKAGES_URL", "https://deb.debian.org/debian/dists/testing/main/binary-amd64/Packages.gz")
-    base_url = config.get("BASE_URL", "https://deb.debian.org/debian")
+    packages_url = config.get("PACKAGES_URL", "http://deb.devuan.org/merged/dists/freia/main/binary-amd64/Packages.gz")
+    base_url = config.get("BASE_URL", "http://deb.devuan.org/merged")
     return base_url.rstrip("/") + "/", packages_url
 
 def format_bytes(num_bytes):
@@ -939,7 +939,7 @@ def load_debian_package_index():
     packages_txt = os.path.join(BOOTSTRAP_CACHE_DIR, "Packages")
 
     for attempt in range(2):
-        fetch_url_cached(packages_url, packages_gz, label="Debian package index")
+        fetch_url_cached(packages_url, packages_gz, label="Devuan package index")
         try:
             if not os.path.exists(packages_txt) or os.path.getmtime(packages_txt) < os.path.getmtime(packages_gz):
                 with gzip.open(packages_gz, "rb") as src, open(packages_txt, "wb") as dst:
@@ -947,8 +947,8 @@ def load_debian_package_index():
             break
         except (OSError, EOFError) as exc:
             if attempt == 1:
-                raise RuntimeError(f"Failed to unpack cached Debian package index: {exc}") from exc
-            print_warning(f"WARNING: Cached Debian package index is corrupt, re-downloading: {exc}")
+                raise RuntimeError(f"Failed to unpack cached Devuan package index: {exc}") from exc
+            print_warning(f"WARNING: Cached Devuan package index is corrupt, re-downloading: {exc}")
             for stale_path in (packages_gz, packages_gz + ".part", packages_txt):
                 if os.path.exists(stale_path):
                     os.remove(stale_path)
@@ -969,7 +969,7 @@ def clear_cached_debian_package_index():
             os.remove(stale_path)
 
 class StaleDebianPackageIndexError(RuntimeError):
-    """Raised when cached Debian metadata points at a package archive that no longer exists."""
+    """Raised when cached Devuan metadata points at a package archive that no longer exists."""
 
 def normalize_dependency_name(token):
     """Extract the package name from a Debian dependency token."""
@@ -999,7 +999,7 @@ def split_dependency_alternatives(raw_value):
     return groups
 
 def is_bootstrap_excluded_package(package_name):
-    """Return whether a Debian bootstrap package is intentionally excluded."""
+    """Return whether an archive bootstrap package is intentionally excluded."""
     return any(fnmatch.fnmatch(package_name, pattern) for pattern in BOOTSTRAP_EXCLUDED_PACKAGE_PATTERNS)
 
 def is_forbidden_systemd_package(package_name):
@@ -1088,7 +1088,7 @@ def resolve_bootstrap_requested_packages(index, requested_patterns):
             resolved.update(name for name in matches if not is_bootstrap_excluded_package(name))
         else:
             if pattern not in index:
-                raise RuntimeError(f"Bootstrap manifest package not found in Debian metadata: {pattern}")
+                raise RuntimeError(f"Bootstrap manifest package not found in Devuan metadata: {pattern}")
             if not is_bootstrap_excluded_package(pattern):
                 resolved.add(pattern)
     return sorted(resolved)
@@ -1286,7 +1286,7 @@ def build_bootstrap_plan(package_names, package_index):
     for package_name in package_names:
         entry = package_index.get(package_name)
         if not entry:
-            raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Debian metadata")
+            raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Devuan metadata")
         filename = entry.get("Filename")
         if not filename:
             raise RuntimeError(f"Bootstrap package '{package_name}' is missing a Filename entry")
@@ -1446,7 +1446,7 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
     for index, package_name in enumerate(package_names, 1):
         entry = package_index.get(package_name)
         if not entry:
-            raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Debian metadata")
+            raise RuntimeError(f"Bootstrap package '{package_name}' is missing from Devuan metadata")
         filename = entry.get("Filename")
         if not filename:
             raise RuntimeError(f"Bootstrap package '{package_name}' is missing a Filename entry")
@@ -1461,7 +1461,7 @@ def bootstrap_debian_stage(stage_dir, package_names, package_index, base_url):
         except RuntimeError as exc:
             if "404" in str(exc):
                 raise StaleDebianPackageIndexError(
-                    f"cached Debian metadata for {package_name} points at an unavailable archive ({filename})"
+                    f"cached Devuan metadata for {package_name} points at an unavailable archive ({filename})"
                 ) from exc
             raise
         if package_name in completed:
@@ -1500,12 +1500,12 @@ def ensure_debian_bootstrap(allow_index_refresh=True):
     except StaleDebianPackageIndexError as exc:
         if not allow_index_refresh:
             raise
-        print_warning(f"WARNING: Debian package index is stale ({exc}); refreshing and retrying bootstrap...")
+        print_warning(f"WARNING: Devuan package index is stale ({exc}); refreshing and retrying bootstrap...")
         clear_cached_debian_package_index()
         _ensure_debian_bootstrap_impl()
 
 def _ensure_debian_bootstrap_impl():
-    """Implementation of Debian bootstrap seeding."""
+    """Implementation of Devuan bootstrap seeding."""
     runtime_stamp = os.path.join(BOOTSTRAP_ROOTFS_DIR, ".bootstrap-complete")
     sysroot_stamp = os.path.join(BUILD_SYSROOT_DIR, ".bootstrap-complete")
 
@@ -1598,7 +1598,7 @@ def _ensure_debian_bootstrap_impl():
         populate_dpkg_status(BUILD_SYSROOT_DIR, build_sysroot_packages, package_index)
         return
 
-    print_section("\n=== Bootstrapping Debian Base Stages ===")
+    print_section("\n=== Bootstrapping Devuan Base Stages ===")
 
     if runtime_stage_ready:
         print_success(f"  ✓ bootstrap_rootfs already matches {len(runtime_packages)} Debian packages.")
@@ -1989,7 +1989,7 @@ def write_gpkg_runtime_config(root_dir=None):
     return etc_gpkg_dir
 
 def get_bootstrap_package_sets(package_index):
-    """Return the exact Debian package sets that seed the runtime and sysroot stages."""
+    """Return the exact Devuan package sets that seed the runtime and sysroot stages."""
     runtime_requests = read_manifest_lines(BOOTSTRAP_RUNTIME_MANIFEST)
     toolchain_requests = read_manifest_lines(BOOTSTRAP_TOOLCHAIN_MANIFEST)
 
@@ -2297,8 +2297,8 @@ def build_base_debian_registry_entries(root_dir=None):
             "package": package_name,
             "version": version,
             "architecture": record.get("Architecture", "amd64").strip() or "amd64",
-            "source_kind": "debian-bootstrap",
-            "installed_from": "Debian bootstrap base image",
+            "source_kind": "devuan-bootstrap",
+            "installed_from": "Devuan bootstrap base image",
             "files": sorted(set(files)),
         })
 
@@ -2409,7 +2409,7 @@ def build_seeded_dpkg_entries(root_dir=None):
     return sorted(entries, key=lambda entry: entry["package"])
 
 def seed_dpkg_database(root_dir=None, report=False):
-    """Seed dpkg status/info metadata for Debian bootstrap and apt runtime packages."""
+    """Seed dpkg status/info metadata for Devuan bootstrap and apt runtime packages."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
     dpkg_dir = os.path.join(root_dir, "var", "lib", "dpkg")
     info_dir = os.path.join(dpkg_dir, "info")
@@ -2581,7 +2581,7 @@ def load_base_debian_runtime_provider_map(root_dir=None):
     return provider_map
 
 def reconcile_base_debian_runtime_providers(root_dir=None, report=False):
-    """Prefer shipped Debian runtime providers over stale source-built siblings."""
+    """Prefer shipped Devuan runtime providers over stale source-built siblings."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
     canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
     if not os.path.isdir(canonical_dir):
@@ -2633,10 +2633,10 @@ def reconcile_base_debian_runtime_providers(root_dir=None, report=False):
             changed_entries.append(("removed-stale", stale_path, preferred_full_path))
 
     if report and changed_entries:
-        print_info("[*] Reconciling staged runtime providers with Debian bootstrap ownership...")
+        print_info("[*] Reconciling staged runtime providers with Devuan bootstrap ownership...")
         for action, path, preferred in changed_entries[:20]:
             if action == "removed-stale":
-                print_info(f"  Removed stale runtime provider {path}; Debian base image owns {preferred}")
+                print_info(f"  Removed stale runtime provider {path}; Devuan base image owns {preferred}")
             else:
                 print_info(f"  Updated {path} -> {os.path.basename(preferred)}")
         if len(changed_entries) > 20:
@@ -2645,7 +2645,7 @@ def reconcile_base_debian_runtime_providers(root_dir=None, report=False):
     return changed_entries
 
 def reconcile_ncurses_runtime_fallbacks(root_dir=None, report=False):
-    """Restore compatible ncurses SONAME aliases when Debian runtime providers are unusable."""
+    """Restore compatible ncurses SONAME aliases when Devuan runtime providers are unusable."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
     canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
     if not os.path.isdir(canonical_dir):
@@ -5556,7 +5556,7 @@ def verify_rootfs_integrity():
         print_error(f"  [FAILED] {base_debian_runtime_provider_issues[0]}")
         print_error("           The final image still prefers stale source-built runtime providers over Debian base packages.")
         return False
-    print_success("  [OK] Debian runtime provider ownership")
+    print_success("  [OK] Devuan runtime provider ownership")
 
     python_runtime_issues = get_python_runtime_issues(root_dir=FINAL_ROOTFS_DIR)
     if python_runtime_issues:
