@@ -210,36 +210,33 @@ Important:
 - The staged image currently expects Debian testing to be the primary package source.
 - `apt-src` is the integration point that populates the runtime apt layout in the image.
 - The build no longer stages `/etc/gpkg`, `/usr/share/gpkg`, or `/var/lib/gpkg` into the final rootfs.
-- The `gpkg/` tree still exists in the repo for development, but it is not the package manager shipped in the current image.
+- The `gpkg-v2/` tree still exists in the repo for development, but it is not the package manager shipped in the current image.
 
 GeminiOS also ships a system-wide `fastfetch` default at `/etc/xdg/fastfetch/config.jsonc`, with GeminiOS logo assets under `/usr/share/fastfetch/logos/`. Users can still override that per-account with `~/.config/fastfetch/config.jsonc`.
 
 ## Ginit (Init System)
 
-Ginit is modularized for easier development. It provides `ginit`, `login`, and `getty`, while `/sbin/init` remains only as the boot entrypoint.
+Ginit is modularized for easier development. It provides `ginit`, while `/sbin/init` remains only as the boot entrypoint.
 To build it manually:
 ```bash
 cd ginit && make
 ```
 For more information, see [ginit/README.md](https://github.com/CreitinGameplays/ginit/blob/master/README.md).
 
-## Legacy GPKG
+## GPKG
 
-The top-level `gpkg/` tree is now a standalone or experimental package-manager source tree, not the package manager staged into the default GeminiOS image.
-
+The top-level `gpkg-v2/` tree is a custom package manager for GeminiOS operating system.
 If you want to build it manually for local experimentation:
 
 ```bash
-cd gpkg && make
+cd gpkg-v2 && make
 ```
 
 To install it into a separate rootfs manually:
 
 ```bash
-cd gpkg && make install DESTDIR=/path/to/rootfs
+cd gpkg-v2 && make install DESTDIR=/path/to/rootfs
 ```
-
-The current builder no longer stages `gpkg`, `/etc/gpkg`, `/usr/share/gpkg`, or `/var/lib/gpkg` into the final image by default.
 
 ## Build System Architecture
 
