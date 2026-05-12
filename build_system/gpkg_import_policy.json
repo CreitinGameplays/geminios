@@ -17,8 +17,6 @@
     "dbus-system-bus-common",
     "default-dbus-session-bus",
     "default-dbus-system-bus",
-    "default-logind",
-    "logind",
     "systemd-sysusers",
     "systemd-standalone-sysusers",
     "ncurses-base",
@@ -134,6 +132,7 @@
       "libdconf1"
     ],
     "elogind": [
+      "elogind",
       "libelogind0"
     ],
     "expat": [
@@ -324,6 +323,7 @@
     "lxqt-core::pavucontrol-qt | pavucontrol": "pavucontrol-qt",
     "lxqt-core::qlipper | clipit | xfce4-clipman": "qlipper",
     "lxqt-core::lxqt-archiver | xarchiver | engrampa": "lxqt-archiver",
+    "default-logind | logind": "logind",
     "libpam-systemd | logind": "logind",
     "policykit-1-gnome | polkit-1-auth-agent": "polkit-1-auth-agent"
   },
@@ -333,7 +333,8 @@
     "systemd": "elogind"
   },
   "provider_choices": {
-    "logind": "libpam-elogind",
+    "default-logind": "elogind",
+    "logind": "elogind",
     "polkit-1-auth-agent": "mate-polkit"
   },
   "package_overrides": {

@@ -2655,7 +2655,6 @@ def reconcile_ncurses_runtime_fallbacks(root_dir=None, report=False):
         "libmenu": "libmenuw",
         "libncurses": "libncursesw",
         "libpanel": "libpanelw",
-        "libtinfo": "libtinfow",
     }
 
     changed_entries = []
@@ -4127,6 +4126,18 @@ def get_perl_runtime_issues(root_dir=None):
     detail = stderr[-1] if stderr else (stdout[-1] if stdout else f"exit code {result.returncode}")
     return [f"staged perl self-test failed: {detail}"]
 
+def get_nano_runtime_issues(root_dir=None):
+    """Return staged Nano runtime issues that break the editor startup path."""
+    root_dir = root_dir or ROOTFS_DIR
+    nano_path = os.path.join(root_dir, "usr", "bin", "nano")
+    if not os.path.exists(nano_path):
+        return []
+
+    ok, detail = run_staged_binary_smoke_test(root_dir, "usr/bin/nano", ["--version"])
+    if ok:
+        return []
+    return [f"staged nano self-test failed: {detail}"]
+
 def get_dbus_helper_permission_issues(root_dir=None):
     """Return staged D-Bus helper permission issues."""
     root_dir = root_dir or ROOTFS_DIR
@@ -4285,6 +4296,8 @@ def get_package_verification_issues(pkg_name, root_dir=None):
         issues.extend(get_python_runtime_issues(root_dir=root_dir))
     elif pkg_name == "perl":
         issues.extend(get_perl_runtime_issues(root_dir=root_dir))
+    elif pkg_name == "nano":
+        issues.extend(get_nano_runtime_issues(root_dir=root_dir))
     elif pkg_name == "openssl":
         issues.extend(get_openssl_runtime_issues(root_dir=root_dir))
     elif pkg_name == "dbus":

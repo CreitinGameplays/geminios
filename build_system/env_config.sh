@@ -137,7 +137,7 @@ normalize_ncurses_runtime_aliases() {
     [ -d "$canonical_dir" ] || return 0
 
     local lib
-    for lib in ncurses form panel menu tinfo; do
+    for lib in ncurses form panel menu; do
         local fallback_name="lib${lib}w.so.6"
         local fallback_path="$canonical_dir/$fallback_name"
         [ -e "$fallback_path" ] || continue
