@@ -2781,8 +2781,11 @@ def normalize_util_linux_runtime_layout(root_dir=None, report=False):
 
     stale_paths = [
         os.path.join(root_dir, "usr", "bin", "chrt"),
+        os.path.join(root_dir, "usr", "bin", "uclampset"),
         os.path.join(root_dir, "bin", "chrt"),
         os.path.join(root_dir, "usr", "share", "bash-completion", "completions", "chrt"),
+        os.path.join(root_dir, "usr", "share", "bash-completion", "completions", "uclampset"),
+        os.path.join(root_dir, "usr", "share", "man", "man1", "uclampset.1.gz"),
     ]
 
     for stale_path in stale_paths:
@@ -4813,6 +4816,7 @@ def normalize_rootfs_multiarch_layout(root_dir=None, report=False):
     normalize_pkgconfig_metadata(root_dir=root_dir, report=report)
     normalize_libtool_archive_metadata(root_dir=root_dir, report=report)
     normalize_linker_script_metadata(root_dir=root_dir, report=report)
+    normalize_elf_runpaths(root_dir=root_dir, report=report)
     ensure_multiarch_dev_compat(root_dir=root_dir, report=report)
     return migrated_entries
 
@@ -6127,6 +6131,121 @@ def get_elf_rpaths(binary_path):
         if start != -1 and end != -1:
             entries.extend([entry for entry in line[start + 1:end].split(":") if entry])
     return entries
+
+def normalize_embedded_rootfs_path(path_text, root_dir=None):
+    """Collapse staged absolute paths back into rootfs-internal absolute paths."""
+    if not path_text or not path_text.startswith("/"):
+        return path_text
+
+    root_dir = os.path.realpath(root_dir or ROOTFS_DIR)
+    stage_roots = []
+    for stage_root in (
+        root_dir,
+        ROOTFS_DIR,
+        FINAL_ROOTFS_DIR,
+        BUILD_SYSROOT_DIR,
+        BOOTSTRAP_ROOTFS_DIR,
+        *PKGCONFIG_STAGE_ROOTS,
+    ):
+        if not stage_root:
+            continue
+        normalized = os.path.realpath(stage_root).rstrip("/")
+        if normalized and normalized not in stage_roots:
+            stage_roots.append(normalized)
+
+    for stage_root in sorted(stage_roots, key=len, reverse=True):
+        prefix = stage_root + "/"
+        if path_text.startswith(prefix):
+            rel_path = os.path.relpath(path_text, stage_root).replace(os.sep, "/")
+            return "/" + rel_path.lstrip("/")
+
+    return path_text
+
+def normalize_elf_runpaths(root_dir=None, report=False):
+    """Rewrite staged absolute RPATH/RUNPATH entries back into target paths."""
+    root_dir = root_dir or ROOTFS_DIR
+    rewritten_paths = []
+    patchelf_bin = shutil.which("patchelf")
+    chrpath_bin = shutil.which("chrpath")
+
+    for path in iter_rootfs_elf_files(root_dir, full_scan=True):
+        current_entries = get_elf_rpaths(path)
+        if not current_entries:
+            continue
+
+        normalized_entries = []
+        seen_entries = set()
+        changed = False
+        for entry in current_entries:
+            normalized = normalize_embedded_rootfs_path(entry, root_dir=root_dir)
+            if normalized != entry:
+                changed = True
+            if normalized in seen_entries:
+                continue
+            seen_entries.add(normalized)
+            normalized_entries.append(normalized)
+
+        if not changed:
+            continue
+
+        current_blob = ":".join(current_entries)
+        normalized_blob = ":".join(normalized_entries)
+        updated = False
+        if patchelf_bin:
+            result = subprocess.run(
+                [patchelf_bin, "--set-rpath", normalized_blob, path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            updated = result.returncode == 0
+        elif chrpath_bin and len(normalized_blob) <= len(current_blob):
+            result = subprocess.run(
+                [chrpath_bin, "-r", normalized_blob, path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            updated = result.returncode == 0
+
+        if not updated:
+            if len(normalized_blob) > len(current_blob):
+                continue
+
+            current_blob_bytes = current_blob.encode("utf-8")
+            normalized_blob_bytes = normalized_blob.encode("utf-8")
+
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+            except OSError:
+                continue
+
+            if current_blob_bytes not in data:
+                continue
+
+            replacement = normalized_blob_bytes + (b"\0" * (len(current_blob_bytes) - len(normalized_blob_bytes)))
+            updated_bytes = data.replace(current_blob_bytes, replacement)
+            if updated_bytes == data:
+                continue
+
+            with open(path, "wb") as f:
+                f.write(updated_bytes)
+            updated = True
+
+        if not updated or get_elf_rpaths(path) == current_entries:
+            continue
+        rewritten_paths.append((path, current_entries, normalized_entries))
+
+    if report and rewritten_paths:
+        print_info("[*] Normalizing staged ELF RPATH/RUNPATH entries...")
+        for path, old_entries, new_entries in rewritten_paths[:20]:
+            rel_path = os.path.relpath(path, root_dir).replace(os.sep, "/")
+            print_info(f"  Rewrote /{rel_path}: {':'.join(old_entries)} -> {':'.join(new_entries)}")
+        if len(rewritten_paths) > 20:
+            print_info(f"  Rewrote {len(rewritten_paths) - 20} additional ELF RPATH/RUNPATH entries.")
+
+    return rewritten_paths
 
 def is_core_multiarch_runtime_library(lib_filename):
     """Return True for libraries that legitimately live in /lib on Debian-style systems."""
