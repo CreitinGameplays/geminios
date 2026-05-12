@@ -2644,46 +2644,159 @@ def reconcile_base_debian_runtime_providers(root_dir=None, report=False):
     return changed_entries
 
 def reconcile_ncurses_runtime_fallbacks(root_dir=None, report=False):
-    """Restore compatible ncurses SONAME aliases when Devuan runtime providers are unusable."""
+    """Restore compatible ncurses aliases and prune stale runtime siblings."""
     root_dir = root_dir or FINAL_ROOTFS_DIR
     canonical_dir = os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu")
     if not os.path.isdir(canonical_dir):
         return []
 
     fallback_aliases = {
-        "libform.so.6": "libformw.so.6",
-        "libmenu.so.6": "libmenuw.so.6",
-        "libncurses.so.6": "libncursesw.so.6",
-        "libpanel.so.6": "libpanelw.so.6",
-        "libtinfo.so.6": "libtinfow.so.6",
+        "libform": "libformw",
+        "libmenu": "libmenuw",
+        "libncurses": "libncursesw",
+        "libpanel": "libpanelw",
+        "libtinfo": "libtinfow",
     }
 
     changed_entries = []
-    for family, fallback_name in sorted(fallback_aliases.items()):
+    managed_families = set()
+    canonical_entries = sorted(os.listdir(canonical_dir))
+
+    def rootfs_relpath(path):
+        return "/" + os.path.relpath(path, root_dir).replace(os.sep, "/")
+
+    def resolve_usable_target(path):
+        real_path = resolve_rootfs_path(root_dir, rootfs_relpath(path))
+        if not os.path.exists(real_path):
+            return None
+        if elf_requires_unavailable_staged_glibc(real_path, root_dir=root_dir):
+            return None
+        return real_path
+
+    for family_stem, fallback_stem in sorted(fallback_aliases.items()):
+        family = f"{family_stem}.so.6"
+        fallback_name = f"{fallback_stem}.so.6"
         fallback_path = os.path.join(canonical_dir, fallback_name)
         if not os.path.exists(fallback_path):
             continue
 
-        fallback_real = resolve_rootfs_path(root_dir, "/" + os.path.relpath(fallback_path, root_dir).replace(os.sep, "/"))
-        if elf_requires_unavailable_staged_glibc(fallback_real, root_dir=root_dir):
+        fallback_real = resolve_usable_target(fallback_path)
+        if not fallback_real:
             continue
 
-        family_path = os.path.join(canonical_dir, family)
-        if os.path.lexists(family_path):
-            family_real = resolve_rootfs_path(root_dir, "/" + os.path.relpath(family_path, root_dir).replace(os.sep, "/"))
-            if os.path.exists(family_real) and not elf_requires_unavailable_staged_glibc(family_real, root_dir=root_dir):
-                continue
-            remove_path(family_path)
+        managed_families.add(family)
+        managed_families.add(fallback_name)
 
-        os.symlink(fallback_name, family_path)
-        changed_entries.append(("fallback-runtime", family_path, fallback_path))
+        for alias_name, alias_target in (
+            (family, fallback_name),
+            (f"{family_stem}.so", fallback_name),
+        ):
+            alias_path = os.path.join(canonical_dir, alias_name)
+            alias_real = resolve_usable_target(alias_path) if os.path.lexists(alias_path) else None
+            if os.path.islink(alias_path) and os.readlink(alias_path) == alias_target and alias_real == fallback_real:
+                continue
+            if os.path.lexists(alias_path):
+                remove_path(alias_path)
+            os.symlink(alias_target, alias_path)
+            changed_entries.append(("fallback-runtime", alias_path, fallback_path))
+
+    for family in sorted(managed_families):
+        family_path = os.path.join(canonical_dir, family)
+        preferred_real = resolve_usable_target(family_path) if os.path.lexists(family_path) else None
+        if not preferred_real:
+            continue
+
+        preferred_basename = os.path.basename(preferred_real)
+        for entry in canonical_entries:
+            if entry == preferred_basename:
+                continue
+            stale_path = os.path.join(canonical_dir, entry)
+            if os.path.islink(stale_path):
+                continue
+            if shared_object_exact_version_family(entry, full_path=stale_path) != family:
+                continue
+            remove_path(stale_path)
+            changed_entries.append(("removed-stale", stale_path, preferred_real))
 
     if report and changed_entries:
         print_info("[*] Restoring compatible ncurses runtime aliases for the staged libc...")
-        for _, path, fallback in changed_entries:
-            print_info(f"  Updated {path} -> {os.path.basename(fallback)}")
+        for action, path, fallback in changed_entries:
+            if action == "removed-stale":
+                print_info(f"  Removed stale runtime provider {path}; active provider is {os.path.basename(fallback)}")
+            else:
+                print_info(f"  Updated {path} -> {os.path.basename(fallback)}")
 
     return changed_entries
+
+def normalize_perl_runtime_layout(root_dir=None, report=False):
+    """Remove stale bootstrap Perl payloads when a source-built Perl is staged."""
+    root_dir = root_dir or ROOTFS_DIR
+    perl5_root = os.path.join(root_dir, "usr", "lib", "perl5")
+    if not os.path.isdir(perl5_root):
+        return []
+
+    version_dirs = []
+    for entry in sorted(os.listdir(perl5_root)):
+        version_path = os.path.join(perl5_root, entry)
+        if os.path.isdir(version_path) and re.fullmatch(r"\d+(?:\.\d+)+", entry):
+            version_dirs.append(entry)
+    if not version_dirs:
+        return []
+
+    current_version = version_dirs[-1]
+    removed_entries = []
+
+    stale_paths = [
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "perl-base"),
+        os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "perl"),
+    ]
+    stale_paths.extend(
+        glob.glob(os.path.join(root_dir, "usr", "lib", "x86_64-linux-gnu", "libperl.so.*"))
+    )
+    stale_paths.extend(
+        path
+        for path in glob.glob(os.path.join(root_dir, "usr", "bin", "perl5*"))
+        if os.path.basename(path) != f"perl{current_version}"
+    )
+
+    for stale_path in sorted(set(stale_paths)):
+        if not os.path.lexists(stale_path):
+            continue
+        remove_path(stale_path)
+        removed_entries.append(stale_path)
+
+    if report and removed_entries:
+        print_info("[*] Removing stale bootstrap Perl runtime payloads...")
+        for path in removed_entries[:20]:
+            print_info(f"  Removed {path}")
+        if len(removed_entries) > 20:
+            print_info(f"  Removed {len(removed_entries) - 20} additional stale Perl runtime entries.")
+
+    return removed_entries
+
+def normalize_util_linux_runtime_layout(root_dir=None, report=False):
+    """Remove bootstrap util-linux tools that GeminiOS intentionally does not build."""
+    root_dir = root_dir or ROOTFS_DIR
+    removed_entries = []
+
+    stale_paths = [
+        os.path.join(root_dir, "usr", "bin", "chrt"),
+        os.path.join(root_dir, "bin", "chrt"),
+        os.path.join(root_dir, "usr", "share", "bash-completion", "completions", "chrt"),
+    ]
+
+    for stale_path in stale_paths:
+        if not os.path.lexists(stale_path):
+            continue
+        remove_path(stale_path)
+        removed_entries.append(stale_path)
+
+    if report and removed_entries:
+        print_info("[*] Removing unsupported bootstrap util-linux payloads...")
+        for path in removed_entries:
+            print_info(f"  Removed {path}")
+
+    return removed_entries
 
 def normalize_dbus_runtime_layout(root_dir=None):
     """Ensure the final image contains only the canonical D-Bus helper path."""
@@ -3962,6 +4075,55 @@ def get_python_runtime_issues(root_dir=None):
 
     return issues
 
+def get_perl_runtime_issues(root_dir=None):
+    """Return staged Perl runtime issues that break loading core XS modules."""
+    root_dir = root_dir or ROOTFS_DIR
+    perl_path = os.path.join(root_dir, "usr", "bin", "perl")
+    perl5_root = os.path.join(root_dir, "usr", "lib", "perl5")
+    if not os.path.exists(perl_path) or not os.path.isdir(perl5_root):
+        return []
+
+    perl5lib_entries = []
+    for entry in sorted(os.listdir(perl5_root)):
+        version_path = os.path.join(perl5_root, entry)
+        if not os.path.isdir(version_path):
+            continue
+        arch_path = os.path.join(version_path, "x86_64-linux")
+        site_arch_path = os.path.join(perl5_root, "site_perl", entry, "x86_64-linux")
+        site_path = os.path.join(perl5_root, "site_perl", entry)
+        for candidate in (site_arch_path, site_path, arch_path, version_path):
+            if os.path.isdir(candidate):
+                perl5lib_entries.append(candidate)
+
+    if not perl5lib_entries:
+        return ["staged perl is missing versioned library directories under usr/lib/perl5"]
+
+    env = os.environ.copy()
+    env["PERL5LIB"] = ":".join(perl5lib_entries)
+
+    try:
+        result = run_staged_binary_command(
+            root_dir,
+            os.path.relpath(perl_path, root_dir).replace(os.sep, "/"),
+            ["-MPOSIX", "-e", 'print "perl-ok\\n"'],
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        return [f"staged perl self-test failed: {exc}"]
+
+    if result.returncode == 0:
+        stderr_text = result.stderr or ""
+        if "no version information available" in stderr_text:
+            detail_lines = stderr_text.strip().splitlines()
+            detail = detail_lines[-1] if detail_lines else "runtime emitted symbol-version warning"
+            return [f"staged perl self-test failed: {detail}"]
+        return []
+
+    stderr = (result.stderr or "").strip().splitlines()
+    stdout = (result.stdout or "").strip().splitlines()
+    detail = stderr[-1] if stderr else (stdout[-1] if stdout else f"exit code {result.returncode}")
+    return [f"staged perl self-test failed: {detail}"]
+
 def get_dbus_helper_permission_issues(root_dir=None):
     """Return staged D-Bus helper permission issues."""
     root_dir = root_dir or ROOTFS_DIR
@@ -4118,6 +4280,8 @@ def get_package_verification_issues(pkg_name, root_dir=None):
         issues.extend(get_glibc_runtime_issues(root_dir=root_dir))
     elif pkg_name == "python":
         issues.extend(get_python_runtime_issues(root_dir=root_dir))
+    elif pkg_name == "perl":
+        issues.extend(get_perl_runtime_issues(root_dir=root_dir))
     elif pkg_name == "openssl":
         issues.extend(get_openssl_runtime_issues(root_dir=root_dir))
     elif pkg_name == "dbus":
@@ -5042,6 +5206,9 @@ def build_package(pkg_name, index, total, force=False, debug=False):
     if ret == 0:
         normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=debug)
         remove_staged_gpkg_paths(root_dir=ROOTFS_DIR, report=debug)
+        reconcile_ncurses_runtime_fallbacks(root_dir=ROOTFS_DIR, report=debug)
+        normalize_perl_runtime_layout(root_dir=ROOTFS_DIR, report=debug)
+        normalize_util_linux_runtime_layout(root_dir=ROOTFS_DIR, report=debug)
         # Post-build Verification
         verification_issues = get_package_verification_issues(pkg_name, root_dir=ROOTFS_DIR)
         closure_report = os.path.join(LOG_DIR, f"{pkg_name}-runtime-closure.json")
@@ -5332,6 +5499,8 @@ def prepare_rootfs():
     seed_apt_no_systemd_preferences(ROOTFS_DIR, report=True)
     normalize_rootfs_multiarch_layout(root_dir=ROOTFS_DIR, report=True)
     reconcile_ncurses_runtime_fallbacks(root_dir=ROOTFS_DIR, report=True)
+    normalize_perl_runtime_layout(root_dir=ROOTFS_DIR, report=True)
+    normalize_util_linux_runtime_layout(root_dir=ROOTFS_DIR, report=True)
     subprocess.run(f"find {ROOTFS_DIR} -name '*.la' -delete", shell=True, executable="/usr/bin/bash")
 
 def verify_rootfs_integrity():
@@ -5587,6 +5756,8 @@ def finalize_rootfs():
     reconciled_runtime_entries.extend(
         reconcile_ncurses_runtime_fallbacks(root_dir=FINAL_ROOTFS_DIR, report=True)
     )
+    normalize_perl_runtime_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
+    normalize_util_linux_runtime_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
     if reconciled_runtime_entries:
         normalize_rootfs_multiarch_layout(root_dir=FINAL_ROOTFS_DIR, report=True)
 
