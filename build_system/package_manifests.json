@@ -837,7 +837,6 @@
         "usr/lib/apt/methods/mirror+file",
         "usr/lib/apt/methods/mirror+copy",
         "usr/lib/apt/methods/rred",
-        "usr/lib/apt/methods/sqv",
         "usr/lib/x86_64-linux-gnu/libgcrypt.so.20*",
         "usr/lib/x86_64-linux-gnu/libgpg-error.so.0*",
         "usr/lib/x86_64-linux-gnu/libseccomp.so.2*",
